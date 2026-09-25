@@ -70,7 +70,7 @@
 ## 4. 数据结构
 
 ```gdscript
-# res://data/defs/module_cost.gd（v0.9 新增）
+# res://src/pool/defs/module_cost.gd（v0.9 新增）
 class_name ModuleCost
 extends Resource
 
@@ -84,7 +84,7 @@ extends Resource
 ```
 
 ```gdscript
-# res://data/defs/module_def.gd
+# res://src/pool/defs/module_def.gd
 class_name ModuleDef
 extends Resource
 
@@ -108,7 +108,7 @@ enum OpType { BAN, BOOST, RECOVER }
 > - **溢出处理按操作性质分叉（裁决 17）**：**被动产出（开盒）**放不下 → 进邮件（归 01 / 02）；**主动操作（转化 / 拆卸返还）**放不下 → **拒绝整个操作**。理由：主动操作会销毁源实例腾出空间，产出的新实例却进邮件，就是**净损失可用持有**，与"转化是燃料路径的预处理"直接冲突。**因此 05 对拆卸返还必须做空间预检**（见 §5.6）——这条不是"05 不判定"，而是"05 先查再动"。
 
 ```gdscript
-# res://autoload/pool_service.gd
+# res://src/pool/pool_service.gd
 class_name PoolService
 
 class PoolState:

@@ -78,7 +78,7 @@
 
 ## 4. 数据结构（GDScript Resource 字段定义）
 
-### 4.1 `ItemDef`（`res://data/defs/item_def.gd`；01 的 `SeriesDef` 只引用它）
+### 4.1 `ItemDef`（`res://src/items/defs/item_def.gd`；01 的 `SeriesDef` 只引用它）
 
 ```gdscript
 @tool
@@ -101,7 +101,7 @@ extends Resource
 > `[补充]` **`ItemCatalog`（`item_id → ItemDef` 只读注册表；`ItemCategoryDef` 为类别注册表）**：`grant` 只接收 `item_id`，而派生索引的键是 `(category, quality)`——没有注册表就必须把 `category` / `quality` **冗余进每个实例**（每实例多约 30 B，且引入"实例属性与定义不一致"的风险）。类别用 `StringName` 引用注册表而非 `enum`，才能让"新物品类别"纯配置产出（核心 §14.3 / R11）。**v0.9 起注册表还必须提供反查 `resolve_item_id(category, quality) -> StringName`，并在加载时强制 `(category, quality)` 唯一**（§5.12）——否则 04/05/06 会各自拼 `item_id` 字符串，拼错只能等到运行时才暴露。
 > `[补充]` **`star` 字段已删除**：演出分级改用 `quality >= 阈值`（见 09）。二者本就同源同值，保留两个名字等于两套并行等级，直接加重 R5。
 
-### 4.2 `ItemInstance`（`res://data/defs/item_instance.gd`，v0.8 新增）
+### 4.2 `ItemInstance`（`res://src/items/defs/item_instance.gd`，v0.8 新增）
 
 ```gdscript
 class_name ItemInstance
@@ -130,7 +130,7 @@ static func from_dict(d: Dictionary) -> ItemInstance: ...
 > `[补充]` **`source` 是开放字典，不是固定四键结构；且 `kind` 与 `location` 是两件事**：`kind` 必填，其余键**按来源类型附加**（`gacha` 附三键，`convert` 附源类别 / 损耗率等由 06 定义，`mail` / `migrate` 只需 `kind`）——**读取方必须先判 `kind` 再取键**，不得假设四键齐全（不齐时给 `&"" / 0 / -1` 等中性默认值，见上表"出现条件"列），这条也让"以后给某类来源加一个键"不必改存档 schema。`kind` 是**历史事实**（来源），`location` 是**当前状态**（位置）：**产出溢出只写 `location = mail`，绝不改写 `kind`**（§5.8 / §5.10），之后的领取同样只改 `location`。
 > `[补充]` **`acquired_at` 是秒级整数**（照核心 §4.2.1），一次批量兑现会产出同一秒的多个实例——先后由 §5.5 的第二打破键决定。**`instance_id` 由 `grant` 生成，不由调用方传入**；仅在**重放**（存档重放 / 日志补发）时经可选第三参传入同一个 id 以命中幂等（§4.3）。**幂等键不写进 `source`**——它是身份不是溯源，塞进去会让存档里出现两份 id（+38 B/实例）。
 
-### 4.3 `ItemService`（`res://autoload/item_service.gd`，唯一写入方）
+### 4.3 `ItemService`（`res://src/items/item_service.gd`，唯一写入方）
 
 ```gdscript
 extends Node
@@ -185,7 +185,7 @@ count_index / warehouse_used : int   # 两个派生缓存（可由实例列表�
 ### 4.5 UUIDv4 生成器（Godot 无内置 UUID，必须自己实现）
 
 ```gdscript
-# res://data/defs/uuid.gd —— 静态工具，不依赖节点，可在无头模式跑单测
+# res://src/core/uuid.gd —— 静态工具，不依赖节点，可在无头模式跑单测
 class_name Uuid
 extends RefCounted
 static var _crypto := Crypto.new()               # Crypto 是 RefCounted，持有一个静态实例即可

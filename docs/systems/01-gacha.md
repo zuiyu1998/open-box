@@ -82,7 +82,7 @@
 
 ## 4. 数据结构（GDScript Resource 字段定义）
 
-### 4.1 `SeriesDef`（01 拥有，`res://data/defs/series_def.gd`）
+### 4.1 `SeriesDef`（01 拥有，`res://src/gacha/defs/series_def.gd`）
 
 ```gdscript
 class_name SeriesDef extends Resource
@@ -107,7 +107,7 @@ const HIDDEN_COUNT: int = 1
 
 `[补充]` **配置校验（`SeriesDef` 加载时）**：①`regular_items.size() == regular_count`；②`regular_count` / `socket_count` / `device_slot_count` 必须与核心 §4.1.1 的套系品质表一致，且 `socket_count / regular_count` 落在约 25%–40%。理由：三者由同一品质共同决定，若允许单独配置就会产生"位子多于池子所能承受"的非法组合，C6 的 ≥3 个物品断言将无从保证（P7 明确否决"只加位子、不同时扩大池子"的配置）。
 
-### 4.2 `ItemDef`（**字段定义归 02**；01 只**引用**，`res://data/defs/item_def.gd`）
+### 4.2 `ItemDef`（**字段定义归 02**；01 只**引用**，`res://src/items/defs/item_def.gd`）
 
 **`ItemDef` 的权威定义在 `02-item.md`**（README §2.1 裁决：`ItemDef` 归 02）。本文**不复述它的字段定义、不实现它**，只声明引用关系：§4.1 的 `SeriesDef.regular_items: Array[ItemDef]` 与 `SeriesDef.hidden_item: ItemDef` 引用的就是 02 定义的 `ItemDef`。
 

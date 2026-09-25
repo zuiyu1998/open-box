@@ -84,7 +84,7 @@
 
 ```gdscript
 # 下列各段各自落在其注释标注的文件中
-# res://data/defs/unlock_payload.gd —— 内容释放的一项
+# res://src/progression/defs/unlock_payload.gd —— 内容释放的一项
 class_name UnlockPayload
 extends Resource
 enum Kind { SERIES, ITEM_CATEGORY, MODULE_QUALITY, SERIES_QUALITY_UNLOCK, WAREHOUSE_CAPACITY }
@@ -95,7 +95,7 @@ enum Kind { SERIES, ITEM_CATEGORY, MODULE_QUALITY, SERIES_QUALITY_UNLOCK, WAREHO
 @export var target_id: StringName          # series_id / category；MODULE_QUALITY 与 WAREHOUSE_CAPACITY 时留空
 @export var magnitude: int = 1             # MODULE_QUALITY：提升到第几档模块品质；SERIES_QUALITY_UNLOCK：该套系的 series_quality（1–4）；WAREHOUSE_CAPACITY：**新增的容量单位数（加到 `warehouse_capacity` 上，不是目标值）**
 
-# res://data/defs/milestone_def.gd —— 里程碑任务链的节点
+# res://src/progression/defs/milestone_def.gd —— 里程碑任务链的节点
 class_name MilestoneDef
 extends Resource
 @export var id: StringName
@@ -106,12 +106,12 @@ extends Resource
 @export var unlocks: Array[UnlockPayload] = []    # 内容释放载荷，归本系统发放
 @export_multiline var teaser: String = ""         # 未达成时的预告（R11 可感知性，§9）
 
-# res://data/defs/milestone_chain_def.gd
+# res://src/progression/defs/milestone_chain_def.gd
 class_name MilestoneChainDef
 extends Resource
 @export var nodes: Array[MilestoneDef] = []
 
-# res://data/progression/progression_phase_def.gd —— 核心 §10.2 五阶段的数据化
+# res://src/progression/defs/progression_phase_def.gd —— 核心 §10.2 五阶段的数据化
 class_name ProgressionPhaseDef
 extends Resource
 @export var phase_id: StringName            # opening / breakthrough / takeoff / engineering / endgame
@@ -123,7 +123,7 @@ extends Resource
 @export var expect_unlock_kinds: Array[StringName] = []   # 本阶段预期释放的内容类型（节奏校验用）
 @export var expect_max_series_quality: int = 1            # v0.6：本阶段玩家最高可施工到的套系品质，决定 ρ 上限；只作节奏校验与验收对照，不参与计算
 
-# res://data/defs/item_instance.gd —— 物品实例（**所有权属 02**，核心 §4.2.1 / §14.1；此处只列持久化字段）
+# res://src/items/defs/item_instance.gd —— 物品实例（**所有权属 02**，核心 §4.2.1 / §14.1；此处只列持久化字段）
 class_name ItemInstance
 extends Resource
 @export var instance_id: String = ""       # UUIDv4，全局唯一，兼作幂等键（Godot 无内置 UUID，需自实现）

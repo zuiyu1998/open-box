@@ -72,7 +72,7 @@
 > `[补充]` 新增 `PresentationDef` 与 `PresentationJob`：核心 §14.1 的 `data/defs` 未列演出参数 Resource，但跨系统铁律 6（数据驱动）要求演出时长与分级语言可纯配置产出，故补一个 Resource；**不新增任何玩法机制**。
 
 ```gdscript
-# res://data/defs/presentation_def.gd
+# res://src/presentation/defs/presentation_def.gd
 class_name PresentationDef
 extends Resource
 
@@ -97,7 +97,7 @@ extends Resource
 ```
 
 ```gdscript
-# res://scenes/gacha/presentation_job.gd
+# res://src/presentation/scenes/gacha/presentation_job.gd
 class_name PresentationJob
 extends RefCounted
 
@@ -373,7 +373,7 @@ play_s(tier)       = min(total_play_s(tier), hard_cap_s)     # hard_cap_s = 15.0
 
 ## 9. UI 需求
 
-1. **演出容器**位于 `res://scenes/gacha/`（核心 §14.1），**独立可测**，可在无头模式驱动状态机。
+1. **演出容器**位于 `res://src/presentation/scenes/gacha/`（路径约定见 `README.md` §4.2），**独立可测**，可在无头模式驱动状态机。
 2. **画面元素**：盒子本体（含被提升物品的份量差异）／档位色与档位图标／揭晓物品形象与名称／**新实例的收藏编号（"这是你的第 187 个星尘"，v0.8 取代"数量 +N"）**／重复物品进展条（§5.5）／ρ 影响提示条（§5.6）／**`void` 的空格位表现与补偿清单**（§5.8 V3/V5）。
 3. **留白纪律**：`HOLD` 段画面**不得**出现任何物品、名称、数量、概率、进度数字；只允许档位色呼吸、频段余韵与隐藏档边缘微光。
 4. **不泄露**：演出期间 `08-ui-panels.md` 的默认层/展开层/图鉴**不得**提前更新（§5.3 信息封锁）。

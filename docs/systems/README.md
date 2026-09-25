@@ -179,6 +179,56 @@
 若为了落地必须补充实现细节（如具体字段名、边界条件、错误处理），**在文中用 `[补充]` 标记并一句话说明理由**。
 系统文档的职责是**细化**既有设计，不是**扩张**设计。如果认为核心设计缺了什么，写进 §11 待定项，不要直接实现。
 
+### 4.2 代码目录约定（v0.9.1）
+
+**每个系统一个文件夹**，与本文档的编号一一对应。路径一律形如 `res://src/<system>/...`。
+
+| 文档 | 代码目录 | 文档 | 代码目录 |
+|---|---|---|---|
+| `01-gacha.md` | `src/gacha/` | `06-conversion.md` | `src/conversion/` |
+| `02-item.md` | `src/items/` | `07-economy-rho.md` | `src/economy/` |
+| `03-task.md` | `src/tasks/` | `08-ui-panels.md` | `src/ui/` |
+| `04-device.md` | `src/devices/` | `09-presentation.md` | `src/presentation/` |
+| `05-module-pool.md` | `src/pool/` | `10-progression.md` | `src/progression/` |
+| （跨系统通用） | `src/core/` | | |
+
+系统文件夹的内部结构：
+
+```
+src/<system>/
+  <system>_service.gd      # autoload 单例（若有）
+  <system>_catalog.gd      # 注册表 / 只读索引（若有）
+  <system>_constants.gd    # 本系统的字符串常量与取值域（若有）
+  defs/                    # 数据结构定义（Resource / RefCounted）
+  tests/                   # 本系统的验收测试（场景 + 脚本）
+src/core/                  # 跨系统通用工具（uuid 等）
+src/tests/run_tests.ps1    # 项目级测试入口，逐行登记各系统的测试场景
+```
+
+- **已实现**：`src/items/`（02）、`src/core/uuid.gd`、`src/tests/run_tests.ps1`。
+- **未实现**：其余九个系统的目录尚未创建——写代码时按上表建，**不要另立约定**。
+- autoload 一律以 `*res://src/<system>/<name>.gd` 形式注册在 `project.godot`，**顺序按依赖关系排列**（被依赖者在前）。
+
+**场景也按系统归属**（v0.9.1 补充）：核心 §14.1 早期列过一套顶层 `scenes/`（`panels/` / `loadout/` / `workbench/` / `gacha/` / `collection/`），那是**按功能**分的，与"按系统"的约定不一致。统一规则：
+
+| 场景 | 归属 | 新路径示例 |
+|---|---|---|
+| 兑现演出 | 09 | `src/presentation/scenes/gacha/` |
+| 转化工作台 | 06 | `src/conversion/scenes/workbench/` |
+| 图鉴 / 套系进度 | 10 | `src/progression/scenes/collection/` |
+| 装置装配 + 模块镶嵌工作台 | 04 / 05（共用） | `src/devices/scenes/loadout/`（05 的镶嵌面板由 05 提供，挂载在此） |
+| 六个面板 | **08** | `src/ui/scenes/panels/` |
+| 测试场景 | 各系统 | `src/<system>/tests/` |
+
+**判据**：一个场景读谁的服务、改谁的状态，就归谁。`panels/` 归 08 是因为它承载的是**呈现层**（面板读各系统的只读接口，自己不拥有数据），这正是 08 的职责边界。
+**注意**：`res://scenes/` 这个顶层目录**不再使用**。文档里原有的 `res://scenes/...` 已按上表全部迁移到 `src/<system>/scenes/`（08 / 09 各两处）。
+
+> **为什么推翻 v0.9 的分层组织（`res://data/defs/` + `res://autoload/`）**：
+> 本作有**十个**系统，每个系统内部自洽，跨系统共享的只有 `uuid` 一个。
+> 分层组织会让"改一个系统要动三个目录"，而且十个系统的 `defs` 混在同一个文件夹里，
+> 从路径上看不出任何归属信息——与本文档"每个系统只拥有自己的数据"的边界契约正好相反。
+> **按系统组织让路径本身承载所有权信息**：看到 `src/items/` 就知道这一坨全归 02。
+
 ---
 
 ## 5. 术语表

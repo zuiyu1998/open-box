@@ -11,5 +11,11 @@ config_version=5
 [application]
 
 config/name="open-box"
+run/main_scene="uid://cob0testitem1"
 config/features=PackedStringArray("4.5", "Forward Plus")
 config/icon="res://icon.svg"
+
+[autoload]
+
+ItemCatalog="*res://src/items/item_catalog.gd"
+ItemService="*res://src/items/item_service.gd"

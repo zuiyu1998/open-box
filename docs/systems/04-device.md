@@ -75,7 +75,7 @@
 ## 4. 数据结构（GDScript Resource 字段定义）
 
 ```gdscript
-# res://data/defs/device_effect.gd
+# res://src/devices/defs/device_effect.gd
 class_name DeviceEffect
 extends Resource
 
@@ -99,7 +99,7 @@ enum TargetScope { GLOBAL, CATEGORY }
 ```
 
 ```gdscript
-# res://data/defs/device_cost.gd
+# res://src/devices/defs/device_cost.gd
 class_name DeviceCost
 extends Resource
 
@@ -115,7 +115,7 @@ extends Resource
 ```
 
 ```gdscript
-# res://data/defs/device_condition.gd
+# res://src/devices/defs/device_condition.gd
 class_name DeviceCondition
 extends Resource
 
@@ -126,7 +126,7 @@ extends Resource
 ```
 
 ```gdscript
-# res://data/defs/cross_end_condition.gd
+# res://src/devices/defs/cross_end_condition.gd
 class_name CrossEndCondition
 extends Resource
 
@@ -139,7 +139,7 @@ extends Resource
 ```
 
 ```gdscript
-# res://data/defs/device_def.gd
+# res://src/devices/defs/device_def.gd
 class_name DeviceDef
 extends Resource
 
@@ -168,7 +168,7 @@ enum Quality { COMMON, RARE, EPIC, MYTHIC }
 ```
 
 ```gdscript
-# res://autoload/device_service.gd（状态部分）
+# res://src/devices/device_service.gd（状态部分）
 class_name DeviceLoadout
 extends Resource
 

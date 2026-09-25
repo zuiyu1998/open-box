@@ -79,7 +79,7 @@
 > `[补充]` Godot 4.5 中把嵌套 `Resource` 用作 `@export` 元素类型需要独立脚本文件与 `class_name`，故拆为 4 个文件（`task_requirement.gd` / `reward_entry.gd` / `task_widening_profile.gd` / `task_def.gd`），理由是不拆则 Inspector 无法展开编辑，违背 R11 的数据驱动目标。
 
 ```gdscript
-# res://data/defs/task_requirement.gd
+# res://src/tasks/defs/task_requirement.gd
 class_name TaskRequirement
 extends Resource
 ## 一条需求项：「类别 × 品质 × 数量」三元组。
@@ -89,7 +89,7 @@ extends Resource
 ```
 
 ```gdscript
-# res://data/defs/reward_entry.gd
+# res://src/tasks/defs/reward_entry.gd
 class_name RewardEntry
 extends Resource
 ## 奖励项。核心 §4.3 的三种奖励：盲盒 / 套系券 / 位次。
@@ -101,7 +101,7 @@ enum Kind { BOX, SERIES_TICKET, SLOT_UNLOCK }
 ```
 
 ```gdscript
-# res://data/defs/task_widening_profile.gd
+# res://src/tasks/defs/task_widening_profile.gd
 class_name TaskWideningProfile
 extends Resource
 ## 需求变宽曲线。全部字段均为 🔧 调参旋钮，见 §6。
@@ -116,7 +116,7 @@ extends Resource
 ```
 
 ```gdscript
-# res://data/defs/task_def.gd
+# res://src/tasks/defs/task_def.gd
 class_name TaskDef
 extends Resource
 enum TaskKind { REGULAR, MILESTONE }
@@ -131,7 +131,7 @@ enum TaskKind { REGULAR, MILESTONE }
 ```
 
 ```gdscript
-# res://data/runtime/task_instance.gd（运行时状态，进存档）
+# res://src/tasks/defs/task_instance.gd（运行时状态，进存档）
 class_name TaskInstance
 extends Resource
 @export var task_def_path: String = ""          ## TaskDef 的 res:// 路径

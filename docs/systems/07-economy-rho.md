@@ -122,7 +122,7 @@
 ## 4. 数据结构
 
 ```gdscript
-# res://autoload/eval_service.gd
+# res://src/economy/eval_service.gd
 class_name EvalService
 
 ## 单池求值结果——EvalService 与 GachaService 共用的唯一数据契约

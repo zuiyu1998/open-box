@@ -107,7 +107,7 @@
 ## 4. 数据结构（GDScript Resource 字段定义）
 
 ```gdscript
-# res://scenes/panels/panel_def.gd
+# res://src/ui/scenes/panels/panel_def.gd
 class_name PanelDef
 extends Resource
 
@@ -123,7 +123,7 @@ enum PanelId { HEADLINE, LOOP, POOL, ATTRIBUTION, SHELF, TASK }
 `[补充]` `PanelDef` 与 `eval_fields`：核心 §8.1 只规定面板内容，未规定配置形态。"字段白名单"是落地所需，同时是**单一数据源**的机械保证——面板读不到自己不该算的字段。
 
 ```gdscript
-# res://scenes/panels/panel_view_state.gd
+# res://src/ui/scenes/panels/panel_view_state.gd
 class_name PanelViewState
 extends Resource
 
