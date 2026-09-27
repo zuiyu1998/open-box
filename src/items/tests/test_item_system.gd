@@ -28,6 +28,9 @@ func _ready() -> void:
 	_test_uuid_not_from_seed()
 	_test_serial_semantics()
 
+	_section = "§4.1/§5.2 价值字段（每个物品一个固定 value）"
+	_test_value_is_fixed_per_item()
+
 	_section = "§10.2 count 派生一致性"
 	_test_count_matches_rebuild()
 	_test_count_immediate()
@@ -201,6 +204,54 @@ func _test_serial_semantics() -> void:
 
 	# 未注册 item_id
 	eq(ItemService.grant(&"nope", {"kind": &"gacha"}), null, "未注册 item_id → 返回 null")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  §4.1 / §5.2 价值字段
+# ══════════════════════════════════════════════════════════════════════════════
+
+## `value` 是**每个物品的固定字段**（`ItemDef` 级）：
+## 同种物品价值相同、不随实例变化、不从品质现算、不由类别影响（R5：3 个数字可心算）。
+func _test_value_is_fixed_per_item() -> void:
+	_reset()
+
+	# 字段本身存在且可读
+	eq(ItemCatalog.get_def(&"stardust_q2").value, 3, "value 是 ItemDef 上的固定字段")
+	eq(ItemCatalog.get_def(&"stardust_q1").value, 1, "值阶梯：品质 1 → 1")
+	eq(ItemCatalog.get_def(&"stardust_q3").value, 9, "值阶梯：品质 3 → 9（几何 ×3）")
+
+	# 类别不影响价值：同品质、不同类别的物品 value 相同
+	eq(
+		ItemCatalog.get_def(&"crystal_q2").value,
+		ItemCatalog.get_def(&"stardust_q2").value,
+		"同品质不同类别的 value 相同（类别不影响价值，R5）"
+	)
+
+	# 同种物品的不同实例读到同一个 value——实例不携带、也不影响 value
+	var a := ItemService.grant(&"stardust_q2", {"kind": &"gacha"})
+	var b := ItemService.grant(&"crystal_q2", {"kind": &"gacha"})
+	eq(
+		ItemCatalog.get_def(a.item_id).value, 3,
+		"实例 a 的价值 == 其定义的 value"
+	)
+	eq(
+		ItemCatalog.get_def(b.item_id).value,
+		ItemCatalog.get_def(&"crystal_q2").value,
+		"同种物品的不同实例 value 相同（价值不是实例级的）"
+	)
+
+	# 决定性证据：实例的序列化里**不该出现 value**——
+	# 它是定义级常量，随 ItemDef 走，不进存档（进存档等于把派生值变成第二个事实来源）
+	var d := a.to_dict()
+	ok(not d.has("value"), "实例序列化不含 value（定义级字段不进存档）")
+	ok(not d.has("size"), "实例序列化不含 size（同上，size 也是定义级的）")
+
+	# ItemDef 的固定性：两个独立查到的定义对象是同一个实例（注册表持有唯一权威）
+	var x := ItemCatalog.get_def(&"stardust_q2")
+	var y := ItemCatalog.get_def(&"stardust_q2")
+	ok(x == y, "同一 item_id 反复查到同一个 ItemDef（注册表是唯一权威，值不会漂移）")
+
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -631,6 +682,54 @@ func _test_config_validator() -> void:
 	bad.size = 0
 	ItemCatalog.register(bad)
 	ok(_errors_contain(ItemCatalog.validate()["errors"], "V2"), "V2：size == 0 → 校验失败")
+
+	# V3：value > 0 —— value 是每个物品的固定价值字段，为 0 时该物品"抽到也不算数"，
+	# 负值更会反过来拉低 M̄，而 07 无从察觉
+	ItemCatalog.clear()
+	_setup_catalog()
+	var bad_v := ItemDef.new()
+	bad_v.item_id = &"bad_value"
+	bad_v.category = &"stardust"
+	bad_v.quality = 5
+	bad_v.value = 0
+	bad_v.size = 1
+	ItemCatalog.register(bad_v)
+	ok(_errors_contain(ItemCatalog.validate()["errors"], "V3"), "V3：value == 0 → 校验失败")
+
+	ItemCatalog.clear()
+	_setup_catalog()
+	var neg_v := ItemDef.new()
+	neg_v.item_id = &"neg_value"
+	neg_v.category = &"stardust"
+	neg_v.quality = 5
+	neg_v.value = -3
+	neg_v.size = 1
+	ItemCatalog.register(neg_v)
+	ok(_errors_contain(ItemCatalog.validate()["errors"], "V3"), "V3：value < 0 → 校验失败")
+
+	# V4：同一 item_id 不得重复注册 —— 否则同类物品的价值会"取决于哪份配置最后加载"
+	ItemCatalog.clear()
+	_setup_catalog()
+	# 先造一个已持有实例的场景：实例只记 item_id，value 从定义查得
+	_reset()
+	var held := ItemService.grant(&"stardust_q2", {"kind": &"gacha"})
+	eq(ItemCatalog.get_def(held.item_id).value, 3, "前置：实例的价值来自定义（value=3）")
+
+	# 用不同 value 重复注册同一个 item_id
+	var redef := ItemDef.new()
+	redef.item_id = &"stardust_q2"      # 同一个 item_id
+	redef.category = &"stardust"
+	redef.quality = 2
+	redef.value = 999                    # 与首次不同
+	redef.size = 2
+	ItemCatalog.register(redef)
+
+	eq(ItemCatalog.validate()["ok"], false, "V4：item_id 重复注册 → 校验失败")
+	ok(_errors_contain(ItemCatalog.validate()["errors"], "V4"), "V4：错误信息点名重复注册")
+	ok(_errors_contain(ItemCatalog.validate()["errors"], "999"), "V4：错误信息报出两份定义的差异")
+	# 这正是 V4 要防的后果：现存实例的价值被静默改写
+	eq(ItemCatalog.get_def(held.item_id).value, 999,
+		"V4 拦下的场景确实是'现存实例价值被改写'（未拦下时它就是这个后果）")
 
 	# 容量 >= 1
 	_setup_catalog()

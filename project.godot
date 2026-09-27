@@ -19,3 +19,4 @@ config/icon="res://icon.svg"
 
 ItemCatalog="*res://src/items/item_catalog.gd"
 ItemService="*res://src/items/item_service.gd"
+GachaCatalog="*res://src/gacha/gacha_catalog.gd"

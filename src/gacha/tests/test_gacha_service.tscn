@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cob0testgacha1"]
+
+[ext_resource type="Script" path="res://src/gacha/tests/test_gacha_service.gd" id="1_gachasvc"]
+
+[node name="TestGachaService" type="Node"]
+script = ExtResource("1_gachasvc")

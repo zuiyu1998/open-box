@@ -1,480 +1,593 @@
-# 01 · 盲盒与概率系统
+# 01 · 盲盒与概率系统 ★（含模块与池子编辑）
 
-- 上游：`../core-design.md` **v0.9（仓库容量与邮件系统）** ／ `README.md`（系统索引与所有权边界）
-- 依赖系统：07 数值与期望（**共用同一套池子求值路径**）、05 模块与池子编辑（池子状态）、02 物品、**10 收集与进度（收藏口径 `collected`——×1.5 与 `is_new` 的唯一判定源，裁决 11）**
-- 被依赖：03 任务（盲盒奖励入账）、08 界面、09 演出、10 收集（全收集判定）
+- 上游：`../core-design.md` **v0.13（去除隐藏款）**；历史变更见核心 **§16.1–§16.8** ／ `README.md`（系统索引与所有权边界）
+- 依赖系统：`02-item.md`（物品定义 / 实例 / 模块素材）、`07-economy-rho.md`（**唯一求值路径**）、`10-progression.md`（收藏口径 `collected`、模块品质梯度）
+- 被依赖：`03-task.md`（发盒奖励）、`04-device.md`（转化端判定读池子状态）、`08-ui-panels.md`（面板）、`09-presentation.md`（演出）、`10-progression.md`（存档 / 全收集）
+- 定位：**本系统是全作风险最高的系统**——它同时承担玩家能动性的主载体、"盲盒期望可被施工"的实现、以及最大的平衡风险（R2）与最大的技术风险（R4）。**改动前请通读 §5 与 §10.1。**
+- **结构（v0.12）**：**模块与池子编辑是本系统下的子模块**（原 `05-module-pool.md` 已并入本文；代码在 `src/gacha/pool/`）。因此下文不写"两系统之间的契约"，只写**本文件内的两个角色**：`GachaService`（抽取）与 `PoolService`（池子两份数据的**唯一写入方**）。**`[补充]`** = 核心设计书未规定、为落地必须钉死的实现细节（一句话说明理由）。
 
-> 本文只负责**细化**：套系基础结构、基础权重表、未拥有物品 ×1.5（**收藏口径 `collected`**，v0.9）、保底、抽取判定 `roll()`、种子记录、盲盒囤积与兑现、分池独立；与 `../core-design.md` 冲突处以核心设计书为准。**`[补充]`** = 核心设计书未规定、为落地必须钉死的实现细节（一句话说明理由）。
-
-> **v0.7 术语合并（本文已同步）**：上游把**「物资」与「款」合并为「物品」**（代码 `Item`）——**池中的物品就是你得到的物品**。连带简化：①"一款产出一个物资"的两层结构删除；②`ItemDef` 吸收原 `MaterialDef` 的 `category` / `quality` / `value`；③`star` 删除，演出分级改用 `quality`；④`yield_material_id` / `yield_amount` 删除，**开出一个物品 = 该物品数量 +1**；⑤`MaterialDef` 删除、`MaterialCategoryDef` 改名 `ItemCategoryDef`；⑥文件 `02-material.md` 改名 `02-item.md`。**除上述合并外，抽取规则、权重、数值与全部红线一律不变。**（**注**：其中"开出一个物品 = 该物品数量 +1"的**计数模型已被 v0.8 实例化取代**——现在"开出一个物品 = 产生一个新实例"，见下方 v0.8 说明；本条保留为历史记录，不回改。）
-
-> **v0.8 物品实例化（本文已同步）**：上游把**持有模型从计数改为实例列表**——每个物品一个 `instance_id`（**UUIDv4，全局唯一**，兼作**幂等键**），`count` 变为**派生值**（核心 §4.2 / §4.2.1–4.2.3）。对本系统只有三处口径改动：
-> ① **`roll()` 只产出 `item_id`（及 `void` 判定），不创建实例**——**01 不碰持有模型**：不生成 UUID、不建实例、不维护持有量副本，实例一律由 02 的 `ItemService.grant()` 创建并返回（§5.6 / §8）；
-> ② `GachaResult` 显式暴露**溯源三元组** `{series_id, box_seed, draw_index}` 给 02，其中 **`draw_index` 改为全局单调递增**（不是"每批重置的批次内序号"，§4.4）；
-> ③ **`ItemDef` 的字段定义归属 02**，本文只**引用**（§4.2）。
-> **抽取规则、基础权重、未拥有 ×1.5、保底、`void`、全部数值与红线一律不变。**
-
-> **v0.9 仓库容量与邮件（本文已同步）——本系统只改四处口径，抽取规则一行不动。**
-> 上游给每条产出加了**落点**：仓库放得下就入库，放不下就进**邮件**（`location ∈ {warehouse, mail}`，核心 §4.7 / §14.2 铁律 9）。对本系统的四处改动：
-> ① **×1.5 改用收藏口径（裁决 11，本文最重要的一处）**：未拥有判定读 **`10-progression.md` 的 `collected`**（图鉴 / 收藏口径），**不再读 02 的"当前持有"**——理由见 §5.2。02 的对应接口已改名 **`find_unstocked_items()`**（**"当前仓库无持有"**），**与 `collected` 含义不同，01 不得用它做 ×1.5**。
-> ② **产出路径不变、落点归 02**：`roll()` 仍是**纯函数**、**只产出 `item_id`**；提交段仍调 `ItemService.grant(item_id, source)`，**由 02 在 `grant()` 内部判定"入库还是进邮件"**（§7）。**01 不感知 `location`**——不判断、不记录、不参与（§2 / §8）。
-> ③ **`source.kind` 取值域由 02 定义**：`gacha` / `convert` / `refund` / `mail` / `migrate` / `unlock`，**01 只负责 `gacha`**（并提供 `{series_id, box_seed, draw_index}` 三元组，§4.4）。
-> ④ **溢出规则不统一，别推广（裁决 17，v0.9 追加）**：
-> ```
-> 被动产出（开盒）        ──▶ 放不下 ──▶ 进邮件          ← 01 走这条，本文口径不变
-> 主动操作（转化 / 拆卸返还）──▶ 放不下 ──▶ 拒绝整个操作    ← 不走邮件
-> ```
-> 理由：主动操作若把产出送进邮件，就是"**销毁源腾出空间、产物却落进邮件**"——**净损失可用持有**，等于把转化变成自伤。**因此不要把"任何产出放不下都进邮件"当成统一规则**（核心 §4.7 的旧措辞仅适用于开盒这类被动产出）。主动侧的完整规则归 `06-conversion.md` / `02-item.md`；本文只声明这条区分，并只实现**开盒这一支**（§2 / §5.7 / §7）。
-> 另新增 **§5.7 开盒前预告**（R14 对策③）与 **§10.1 I4 溢出进邮件** 跨系统测试。
-> **保底、基础权重、`draw_index` 全局递增、`void` 规则与全部数值一律不变。**
+> **v0.13 现状要点（规范性，非历史）**
+> ① **全部物品按 `rarity` 加权、共分 100%**：`p_i = rarity_i / Σ rarity`（**分母是全部物品的 `rarity` 之和**；v0.13 起**不再留出隐藏款那 2%**）；`ItemDef.rarity` 是**权重**（**越大越常见**，"越稀有"就写得越小；**必须 ≥ 1**，`0` = 永不产出 = 配置错误，由 `ItemPool.validate()` 报 `bad_rarity`）。**基础权重表不再是独立配置**，由 `rarity` 归一化**派生**（消灭第二份事实来源）；全部 `rarity` 相等时**退化为 v0.11 的"均等"**。
+> ② **池子随盒子走**：`Box` 挂着**两个并列数据**——`item_pool`（该盒的池子，**生成数据的凭证**）+ `modules`（**定长**模块数组）；**池子的"当前状态"是二者的函数**（`PoolState`），**派生值、不入档**，载入时**逐盒重建**。`PoolState.socketed` 这种"模块在池子里"的形状**已被核心否决**。
+> ③ **无状态抽取（v0.11 删除保底）**：`roll(evaluation, seed)`——**公布的概率就是每抽概率**，不存在任何"必出"覆盖。
+> ④ **写入方 / 求值方分离**：`PoolService`（本文件）是池子两份数据的**唯一写入方**；`EvalService`（07）是**唯一求值方**。**本系统只写数据、不算数字**；**不变项**：C2（40% 损耗）、C4、C6、P1–P7、零和机制、`weights_bp` 的**整数万分比**（**`Σ weights_bp + void_mass_bp == 10000`**）、ρ 公式；**C1 只改百分比口径**（**物品概率之和 + `void_prob` 恒为 100%**，§5.1）；**C3 已随 v0.13 删除隐藏款而作废**（§5.4）。
 
 ## 1. 这个系统负责什么
 
-1. **`SeriesDef` 基础结构**：`regular_count` 常规物品 + 1 隐藏物品，含基础权重表、保底参数、`series_quality`（套系品质）与由它决定的 `socket_count` / `device_slot_count`（**每套系常量**，核心 §4.1.1）。
-2. **基础权重表**：常规物品均等（未编辑池合计 98%），隐藏物品固定 2%；**未拥有物品权重 ×1.5** 只改常规物品之间的**相对比例**；**"未拥有"一律取收藏口径 `collected`（裁决 11，§5.2）——不取"当前持有"，也不取 02 的 `find_unstocked_items()`**。
-3. **抽取判定 `GachaService.roll(...)`**：纯函数，消费 07 求出的 `PoolEvaluation`（`probs` + `void_prob`）与 `seed`，输出 `GachaResult`；**抽样必须覆盖空洞 `void`**。
-   **产出契约（v0.8，v0.9 补充落点）**：**只产出 `item_id`（及 `void` 判定）——"抽到了哪一件"，不产出"是哪一个个例"**：`roll()` **不创建实例、不生成 `instance_id`、不改任何持有量**（实例化归 02，见 §5.6 / §8）；**落点（仓库 / 邮件）同样归 02**——**`roll()` 不判定、不感知 `location`**（`GachaResult` 里没有、也不会有这个字段）。
-4. **保底**：连续 8 次未出新物品则下次必出，`pity_counter` 状态与 UI 可见性。
-5. **隐藏物品免疫规则**：**规则在此声明**、执行在 `05-module-pool.md`；**分池独立**：两池互不继承保底。
-6. **盲盒囤积清单与兑现时机**（核心 §4.6）；**种子记录与可复现**：给定 `(series, pool_state, collected, pity_counter, seed)` 输出完全确定（铁律 1）。**`collected` 是收藏口径**（归 10），**不是持有量**——持有形态与落点都不进入本系统的输入（裁决 11 / 核心 §16.4）。
+1. **基础池模板与盒子**：`SeriesDef`（套系：产出哪些物品、位数、装置槽位）；每个 `Box` 从它复制一份 **`item_pool`**，并持有**定长**的 **`modules`**。**这两份数据的唯一写入方是 `PoolService`**。
+2. **盒子的获得（`grant_box`）**：生成 `box_id`、复制基础池为 `item_pool`、把 `modules` 填成 `socket_count` 个空位。
+3. **抽取判定 `GachaService.roll(evaluation, seed)`**：纯函数，消费"该盒池子当前状态"经 07 求值出的 `PoolEvaluation`，输出 `GachaResult`；**抽样必须覆盖空洞 `void`**。
+4. **编辑操作**（全部作用于**某一个盒子**）：**排除 `ban`**（概率归零）、**提升 `boost`**（×N，增量从其他物品按比例扣除）、**损耗 `loss`**（被排除物品释放质量的 40% 落为 `void`）、**零和**（物品质量总量恒定）、**回收 `recover`**（挽回部分 `void`，第二切片、本版仅定义接口）。
+5. **镶嵌位管理**：数量由**该盒所属套系品质**决定（品质 1–4 → 2/3/4/5），**在同一池（即同一盒子）内恒定、运行时不可变**（C4）。
+6. **模块的镶嵌 / 替换 / 拆卸**：**镶嵌** = 写进该盒 `modules` 的第 `slot` 位并**锁定进该盒**（该盒施工台清空，**配置下一个盒子需要新模块**）；**拆卸** = **把该位置空**（**定长长度不变**）+ 返还 **50%** 材料，且**只能从盒子上拆**（盒子未兑现时；兑现后随盒子一同消耗）；**替换** = 位满时的唯一路径（**显式换下某一位，不做隐式覆盖**）。
+7. **池子当前状态的推导（`PoolService._rebuild`）**：由「该盒 `item_pool` + 该盒 `modules`」算出**整数万分比**权重（`weights_bp`）与 `void_mass_bp`（**`Σ weights_bp + void_mass_bp == 10000`**）；这份状态**不入档**。
+8. **盲盒囤积清单与兑现时机**（核心 §4.6：决策是"**给哪些盒子配置好了，就先开哪些**"）、**种子记录与可复现**、**开箱日志**、**开盒前预告的数据侧**（§5.7）。
 
 ## 2. 不负责什么（边界）
 
-| 不拥有的东西 | 归属 | 引用 |
-|---|---|---|
-| 编辑后的池子概率状态（ban / boost / 损耗 / 零和） | 05 | 见 `05-module-pool.md` |
-| **概率求值路径**（权重 → ×1.5 → 编辑 → 归一化的函数本体）＋ EV / ρ / σ / `headline` / 归因的计算口径 | 07 | 见 `07-economy-rho.md` |
-| 开箱演出时间轴与音画分级；默认层/展开层的渲染、展开入口、实时联动 | 09 / 08 | 见 `09-presentation.md` ／ `08-ui-panels.md` |
-| 开出物品的属性（`category` / `quality` / `value`）、**`ItemDef` 的定义** | 02 | 见 `02-item.md` |
-| **持有模型**：实例列表 `Array[ItemInstance]`、`instance_id`（UUID 生成）、`serial`、`source` 的落盘、**派生 `count`** | 02 | 见 `02-item.md`；**01 不碰持有模型**（v0.8） |
-| **仓库与邮件**：`warehouse_capacity`、`ItemDef.size`、实例落点 `location ∈ {warehouse, mail}`、**"入库还是进邮件"的溢出判定**、邮件条目与领取 | 02 | 见 `02-item.md`（核心 §4.7 / §14.2 铁律 9）；**01 不判断、不记录、不参与溢出**——判定**只在 02 的 `grant()` 内部发生**（v0.9，§5.7 / §7）。**且溢出规则按"主动 / 被动"分流（裁决 17）**：**被动产出（开盒）进邮件**、**主动操作（转化 / 拆卸返还）拒绝整个操作**——本行只覆盖**开盒**这一支，主动侧归 02 / `06-conversion.md` |
-| **守恒等式与跨系统事务**：`total_granted − total_consumed == Σ 全部实例`、`transact()` 的物品侧语义（裁决 12 / 13） | 02 / 03 | **01 不维护任何守恒计数、不实现任何事务**；`count()` 只是带 `location` 过滤的查询，**不是守恒量**（§2 裁决 ⑨⑩） |
-| 任务奖励结算（盲盒作为奖励被发放） | 03 | 见 `03-task.md` |
-| 图鉴、套系进度、全收集判定、**存档结构** | 10 | 见 `10-progression.md` |
+| 不负责 | 归属 |
+|---|---|
+| **概率求值**（把当前状态变成概率 / EV / ρ / `headline`） | `07-economy-rho.md`（**唯一求值方**） |
+| `ItemDef`（含 `rarity`）/ `ItemInstance` / 仓库与邮件 / 落点判定 / 派生 `count`；模块制造与拆卸所用物品的**销毁与返还实现** | `02-item.md`（`ItemService` 是实例列表唯一写入方；本系统只发起请求） |
+| 池子面板的渲染、**"哪个盒子被选中"（`selected_box`）** | `08-ui-panels.md` |
+| 演出中被排除物品过滤的**呈现** | `09-presentation.md` |
+| 任务需求匹配与奖励结算 ／ 转化端（装置）修正 ／ 图鉴·套系进度·全收集判定·存档布局 | `03` ／ `04` ／ `10` |
 
-**边界裁决（README §2.1，逐条编号）：** ①池子概率的**状态**归 05、**求值**归 07，01 只消费求值结果，**自己不算概率**；②"被排除的物品"由 09 依 05 的状态过滤，**`roll()` 只按池子状态抽样，不做展示判断**；③物品的价值 `v` 直接来自 `ItemDef.value`（**字段定义归 02**，见 `02-item.md`；本文 §4.2 只是引用性说明），07 只消费它做 EV / ρ 计算，**01 不参与任何数值计算**；**④（README §6.1 裁决）** 空洞 `void` 只负责"被抽到"，其**概率质量**由 05 产生、07 求值为 `void_prob`；C1 措辞相应为"常规物品概率和 **≤ 98%**，差额 = `void_prob`"；**⑤（v0.8）物品实例归 02**：`roll()` 只产出 `item_id`，实例由 `ItemService.grant(item_id, source)` 创建，**01 不生成 UUID、不持有实例副本、不维护持有量**（README §2.1 / §3 铁律 2）；**⑥（v0.9）溢出归 02**：**"仓库放不下就进邮件"的判定只在 02 的 `grant()` 内部发生**——01 **不读 `location`、不读仓库容量、不做溢出判定**，也不把落点写进 `GachaResult`（§5.7 / §7 / §8）；**⑦（v0.9 裁决 11）"未拥有"取收藏口径**：×1.5 与 `is_new` 的判定源是 **10 的 `collected`**，**不是** 02 的持有/仓库口径 `find_unstocked_items()`（§5.2）；**⑧（v0.9 裁决 17）溢出规则分流**：**被动产出（开盒）放不下 → 进邮件**（本文这一支不变）；**主动操作（转化 / 拆卸返还）放不下 → 拒绝整个操作，不走邮件**——**不要把它当成统一规则**，主动侧归 06 / 02（§5.7 / §7）；**⑨（v0.9 裁决 12）守恒等式按全部实例**：`total_granted − total_consumed == Σ 全部实例（含邮件）`，而 **`count()` 只是带 `location` 过滤的查询**——01 **不维护任何守恒计数**，也**不得**用 `count()` 做守恒校验（归 02）；**⑩（v0.9 裁决 13）不承诺跨系统原子性**：`transact()` 只覆盖物品侧，**01 的 `grant_box` 发放与任何解锁都不在物品事务内**，一致性靠**各自幂等键 + 重放**（01 侧的锚点是全局 `draw_index`，§4.4）。
+> **关键边界：本系统只写数据、不算数字。** 任何"当前概率是多少"的需求一律调 `EvalService`。
+> **三条不得越界**（v0.10 结构澄清直接推出）：① **模块不折进池子**——模块只存在于 `Box.modules`，**不得**在 `PoolState` 或 `item_pool` 里再放一份模块字段；② **派生状态不入档**——由 `item_pool` + `modules` **逐盒重建**，存档里**不存在"编辑后的权重"这第二个事实来源**；③ **不得持有全局单例**——**没有"当前套系的池子"**，**每次写入都必须显式指定 `box_id`**，也不得缓存"某个套系的一份池子"（两条都会让同套系的两个盒子被误合并成一份）。
 
 ## 3. 核心概念与术语
 
-严格使用 `README.md` §5 术语表的中文名 + 代码名，不自造同义词。
-
-| 中文名 | 代码名 | 在本文中的含义 |
+| 中文名 | 代码名 | 说明 |
 |---|---|---|
-| 盲盒 | `Box` | 可囤积、未兑现的抽取机会；**绑定一个套系** |
-| 套系 / 物品 | `Series` / `Item` / `ItemDef` | 一个独立概率池：`regular_count` 常规物品（品质 1–2 = 8，品质 3–4 = 12）+ 1 隐藏物品；**物品既是池中的一个可产出物，也是玩家积累的资源**。**`ItemDef` 的字段定义归 02**，本文只引用（见 §4.2） |
-| 物品实例 / 实例 id | `ItemInstance` / `instance_id` | 玩家实际持有的**一个**物品；`instance_id` 为 **UUIDv4、全局唯一、兼作幂等键**。**归属 02**——01 不生成、不创建、不持有（v0.8，README §5） |
-| 仓库 / 邮件 / 落点 | `warehouse` / `mail` / `location` | 实例的位置属性（核心 §4.7）：仓库放得下则 `location = warehouse`，放不下进 `mail`。**归属 02**；**01 不判断、不记录、不感知**——只在 §5.7 的**开盒前预告**里引用 02 的只读容量查询（v0.9） |
-| 常规物品 / 隐藏物品 | `regular` / `hidden` | `regular_count` 个常规物品均等合计 98%、可被池子编辑（**物品数随套系品质** `series_quality`，核心 §4.1.1）／ 1 个隐藏物品概率恒 2%、免疫一切池子编辑（C3） |
-| 池子 / 池子状态 / 空洞 | `Pool` / `PoolState` / `void` | 某套系当前的概率分布（**状态定义归 05**）；空洞 = 排除损耗产生的**零价值结果**，抽中时**不产出任何物品**但仍消耗一个盲盒（§5.6） |
-| 未拥有物品 | `unowned_item` | **不在收藏中的物品**——**判定源是 10 的 `collected`（收藏口径：开出过即算拥有，只增不减）**，与保底的 `is_new` 同源（裁决 11，§5.2）。**不是**"当前仓库没持有"（那是 02 的 `find_unstocked_items()`，含义不同）；重复开出只是**多产生一个实例**，不改收藏归属（`count` 为派生值，v0.8） |
-| 保底 | `pity` / `pity_counter` | 连续 8 次未出新物品则下次必出 |
-| 兑现 / 囤积 | `redeem` / `pending_boxes` | 消费一个盲盒结算一次抽取 ／ 已获得未兑现清单 |
-| 期望 / 默认层 | `ev` / `headline` | 单池数学期望（**算归 07**）；最好物品 + 其概率 + EV（**产出归 07**、渲染归 08） |
-
-> **术语纪律（v0.6）：「品质」有两个含义，必须区分。**
->
-> | 写法 | 代码名 | 含义 |
-> |---|---|---|
-> | **物品品质** | `quality` | 物品的等级维度，1–5 序数（`ItemDef.quality`，见 §4.2 与 `02-item.md`） |
-> | **套系品质** | `series_quality` | **套系（池子）的分级**，决定 `regular_count` / `socket_count` / `device_slot_count` / 物品品质区间（见核心 §4.1.1） |
->
-> **凡本文出现"品质"，必须能一眼分辨是哪一种**——一律写全"物品品质"或"套系品质"，**不得裸用"品质"**；涉及池子规模、镶嵌位数的必是**套系品质**。
+| 盲盒 / 盒子身份 | `Box` / `box_id` | 可囤积、未兑现的抽取机会。**字段集固定**：`box_id : String` / `series_id : StringName` / `item_pool : ItemPool` / `modules : Array[Module]`（核心 §4.1.2）。`box_id` 由 `Uuid.v4()` 生成（与 `instance_id` 同源同类型，**无转换**；**不用** `ResourceUID.create_id()`）；**是身份、不是输入**——不参与权重与抽样 |
+| 物品池 | `Box.item_pool` | **该盒的池子这份数据本身**（产出哪些物品、基础 `rarity`）——**生成数据的凭证**，`roll()` 消费它。**每个 `Box` 各一份** |
+| 模块列表 | `Box.modules` | **定长** `Array[Module]`（长度恒 == `item_pool.socket_count`，**空位为空项**）；与 `item_pool` **并列**（**不是折进池子里的**）；**模块的唯一作用方式就是更改 `item_pool` 的状态**。**槽位号 = 数组下标**（**不另设 `slot` 字段**）；落盘 = 由下标生成的**稀疏序列** `{index, module_id, quality, socketed_at}`（归 10） |
+| 池子状态 / 修订号 | `PoolState` / `revision` | **派生状态**：由「`item_pool` + `modules`」求值出的当前权重（`weights_bp` 与 `void_mass_bp`，**`Σ weights_bp + void_mass_bp == 10000`**）。**不是存储数据、不入档**（逐盒重建）；**不含模块列表**。`revision` 每次写入 +1，是缓存与失效的**唯一依据**（每盒一份；07 的缓存键 = `(box_id, revision)`） |
+| 基础池 / 套系 | `SeriesDef` / `Series` | **全部由常规物品构成**（`regular_count` 个，v0.13 起**无隐藏款**）的**模板**；`series_quality`（品质 1–4）决定物品数 / 镶嵌位数 / 装置槽位数 / 物品品质区间 |
+| 物品 / 物品定义 / 稀有度 | `Item` / `ItemDef` / `rarity` | **既是池中的一个可产出物，也是玩家积累的资源**；`ItemDef` 字段定义**归 02**，本文只引用。**`rarity` 是权重、越大越常见（≥1）**：**全部物品**按它归一化 `p_i = rarity_i / Σ rarity`（v0.13：**全部物品共分 100%**，不再有隐藏款的 2%） |
+| 物品实例 / 实例 id / 收藏编号 / 溯源 | `ItemInstance` / `instance_id` / `serial` / `source` | 玩家实际持有的**一个**物品；`instance_id` 是 **UUIDv4、全局唯一、兼作幂等键**；`serial` = 该玩家开出的第 N 个此物品（**非开盒来源一律 0**，**不是 `grant` 的参数**）；`source = { kind, series_id, box_seed, draw_index }`（`kind` 取值域归 02） |
+| 仓库 / 邮件 / 落点 | `warehouse` / `mail` / `location` | 实例的位置属性；**被动产出（开盒）放不下 → 进邮件**；**主动操作（转化 / 拆卸返还）放不下 → 拒绝整个操作**（裁决 17） |
+| 未拥有物品 | `unowned_item` | **不在收藏 `collected` 中**（收藏口径，只增不减）——×1.5 与 `is_new` 的**唯一判定源** |
+| 模块（实例）/ 模块定义 / 模块成本 | `Module` / `ModuleDef` / `ModuleCost` | `Module` = **一个已镶嵌模块的实例**（`module_id` / `quality` / `socketed_at`），挂在 `Box.modules` 上、**不在 `ItemPool` 里**、**不含 `slot`**、**是消耗品**（§5.8）；`ModuleDef` = 一条作用在**开盒端**的**编辑规则蓝图**；`ModuleCost`/`item_cost` = **需求向量**条目 `(category, quality, amount)`（与 04 的 `DeviceCost` 同结构） |
+| 镶嵌 / 镶嵌位 | `socket` / `socket_slot` | 把模块放进**某个盒子**的镶嵌位（= 进入该盒 `modules`）；位数落在该盒 `item_pool.socket_count` 上，**同一池（盒）内恒定**（C4） |
+| 排除 / 提升 | `ban` / `boost` | 概率归零 ／ 概率 ×N（增量从其他物品按比例扣除） |
+| 释放质量 / 回收率 / 空洞 | `freed_mass` / `recover_rate` / `void` | 排除某物品释放的质量 ／ 其中可重新分配的比例 **0.60** ／ 不可回收的那 **40%**，落为零价值结果（§5.2.2） |
+| 重分配模式 / 替换 | `redistribute_mode` / `replace` | `AUTO`（按基础 `rarity`）／ `TARGETED`（全给指定目标） ／ **镶嵌位满时的唯一操作——没有"再装一个"** |
+| 品质（两个含义） | `quality` / `series_quality` | **物品品质** `quality`（1–5，物品的等级维度）／**套系品质** `series_quality`（该套系的规模等级 1–4）。**凡文中出现"品质"必须能分辨是哪一种**；`ModuleDef.quality` 是**第三条独立轴**（模块品质梯度 D13），三者不得混用 |
+| 兑现 / 囤积 / 期望 | `redeem` / `pending_boxes` / `ev`·`headline` | 消费一个盲盒结算一次抽取 ／ 已获得未兑现清单 ／ **选中那个盒子**的池子的数学期望（算归 07；**本系统不产出 `headline`**） |
 
 ## 4. 数据结构（GDScript Resource 字段定义）
 
-### 4.1 `SeriesDef`（01 拥有，`res://src/gacha/defs/series_def.gd`）
+### 4.1 `SeriesDef`（基础池模板，`src/gacha/defs/series_def.gd`）
 
 ```gdscript
 class_name SeriesDef extends Resource
-
-const HIDDEN_COUNT: int = 1
 @export var series_id: StringName = &""
-@export var series_quality: int = 2              # 套系品质 1..4（核心 §4.1.1）；**不是**物品品质 `quality`
-@export var regular_count: int = 8               # 常规物品数：随套系品质取 8（品质 1–2）/ 12（品质 3–4）
-@export var regular_items: Array[ItemDef] = []   # **引用自 02 的 `ItemDef`**（见 §4.2）；长度必须 == regular_count（位子与池子必须同步长，核心 §4.1.1）
-@export var hidden_item: ItemDef                 # **引用自 02 的 `ItemDef`**；恰 1 个隐藏物品
-@export var socket_count: int = 3                # **该套系的常量**，随套系品质取值（品质 1–4 → 2/3/4/5）：只被 05 读取，不提供增加接口
-@export var device_slot_count: int = 4           # **该套系的常量**，随套系品质取值（核心 D4）：只被 04 读取
-@export_group("基础权重表")
-@export var regular_weight_total: float = 0.98   # C1 红线（修订后为 ≤ 0.98，差额 = void_prob）
-@export var hidden_weight: float = 0.02          # C3 红线：隐藏物品概率
-@export var unowned_weight_mult: float = 1.5     # 🔧 未拥有物品权重倍率（**"未拥有"取收藏口径 `collected`**，裁决 11；不是"当前持有"，§5.2）
-@export_group("保底")
-@export var pity_threshold: int = 8              # 🔧 连续 8 次未出新物品
-@export var pity_enabled: bool = true
-@export var pity_includes_hidden: bool = true    # [补充] 保底候选集含隐藏物品（核心 §5.4）
+@export var series_quality: int = 2              # 套系品质 1..4（核心 §4.1.1）；**不是**物品品质
+@export var regular_count: int = 8               # 物品数（**全部为常规物品**）：品质 1–2 → 8；品质 3–4 → 12
+@export var regular_items: Array[ItemDef] = []   # 引用 02 的 `ItemDef`（含 `rarity`）；长度必须 == regular_count
+@export var socket_count: int = 3                # **该套系的常量**：品质 1–4 → 2/3/4/5
+@export var device_slot_count: int = 4           # **该套系的常量**（核心 D4）：只被 04 读取
+@export var unowned_weight_mult: float = 1.5     # 🔧 未拥有物品权重倍率（判定源 = 收藏口径 `collected`）
+# v0.13：**`hidden_item` / `HIDDEN_COUNT` 已删除**——池子里**全部物品都是常规物品**（核心 §16.8），C3 随之作废（§5.4）。
+# v0.12：**不再有"基础权重表"字段**（物品权重由各 `ItemDef.rarity` 归一化派生）；**也不再有保底参数**（v0.11 删除）。
 ```
 
-`[补充]` **配置校验（`SeriesDef` 加载时）**：①`regular_items.size() == regular_count`；②`regular_count` / `socket_count` / `device_slot_count` 必须与核心 §4.1.1 的套系品质表一致，且 `socket_count / regular_count` 落在约 25%–40%。理由：三者由同一品质共同决定，若允许单独配置就会产生"位子多于池子所能承受"的非法组合，C6 的 ≥3 个物品断言将无从保证（P7 明确否决"只加位子、不同时扩大池子"的配置）。
+`[补充]` **配置校验（加载时）**：①`regular_items.size() == regular_count`；②每件物品 `rarity ≥ 1`（`0` = 永不产出 ⇒ `bad_rarity`）；③`socket_count` / `device_slot_count` / `regular_count` 与核心 §4.1.1 的套系品质表一致，且 `socket_count / regular_count` 落在 **25%–40%**。理由：三者由同一品质共同决定，单独配置会产生"位子多于池子所能承受"的非法组合，C6 的 ≥3 断言将无从保证（P7 明确否决"只加位子、不同时扩大池子"）。**★ 权威归属（裁决）：`rarity ≥ 1` 这条规则的权威在 `02-item.md`（§3 / §5.2 V5）**——本处只是**执行点**（加载时校验），报同一枚原因码 `bad_rarity`；规则本身不在本文档定义。
 
-### 4.2 `ItemDef`（**字段定义归 02**；01 只**引用**，`res://src/items/defs/item_def.gd`）
+### 4.2 `ItemDef`（**字段定义归 02**；本文只引用）
 
-**`ItemDef` 的权威定义在 `02-item.md`**（README §2.1 裁决：`ItemDef` 归 02）。本文**不复述它的字段定义、不实现它**，只声明引用关系：§4.1 的 `SeriesDef.regular_items: Array[ItemDef]` 与 `SeriesDef.hidden_item: ItemDef` 引用的就是 02 定义的 `ItemDef`。
+本文依赖的字段（**引用性说明，不是定义**）：`item_id`（`roll()` 产出的就是这个）／`display_name`／`category`（不参与抽取）／`quality`（1–5，演出分级）／`value`（`v`，EV / ρ 的输入，01 只传递）／**`rarity`（权重，≥1）**／`size`（仓库占用，本文不读）。**v0.13：`is_hidden` 已随隐藏款一并删除**（核心 §16.8）。`ItemDef` 是**静态定义、不含玩家状态**（`instance_id` / `acquired_at` / `source` / `serial` 全在 `ItemInstance`，`count` 是派生值）；**"开出一个物品" = 产生一个新实例**。`[补充]` `category` 用 `StringName` 引用 `ItemCategoryDef`、不用 `enum`（R11：新类别必须可纯配置产出）。
 
-为便于阅读，下面列出**本文依赖**的字段——**引用性说明，不是定义，实现一律以 `02-item.md` 为准**：
-
-| 字段 | 类型 | 本文对它的用法 | 依据 |
-|---|---|---|---|
-| `item_id` | `StringName` | 池中条目的身份；**`roll()` 产出的就是这个** | 本文 §4.4 |
-| `display_name` | `String` | 演出 / UI 显示（渲染归 08 / 09） | — |
-| `category` | `StringName` | **不参与抽取**；任务需求与派生计数按它分桶 `(category, quality)` | 见 `03-task.md` / `02-item.md` |
-| `quality` | `int`（1–5） | **物品品质**（≠ 套系品质 `series_quality`）；演出分级用它 | 核心 §14.2.7 |
-| `value` | `int` | 物品价值 `v`（TVU），**EV / ρ 的输入**；01 只传递、不计算 | 计算归 `07-economy-rho.md` §5.2 |
-| `is_hidden` | `bool` | 与 `SeriesDef.hidden_item` 对应；隐藏物品概率恒 2%（C3） | 核心 §5.4 |
-
-> **v0.8 归属改判：`ItemDef` 归 02。** v0.6 时它归 01，是因为那时它还叫"款"、属于池子概念；v0.7 术语合并后它承载 `category` / `quality` / `value`，**已经是物品定义**（README §2.1）。01 的 `SeriesDef` 只**引用** `ItemDef` 实例，**不定义它、不新增字段**，也不再有自己的 `item_def.gd` 事实来源。
-> **v0.7：`ItemDef` 不再有产出映射字段。** 原 `yield_material_id` / `yield_amount` 已随术语合并删除——**池中的物品就是入库的物品**，不需要任何间接层。
-> **v0.8：`ItemDef` 里也不放任何持有模型字段。** `ItemDef` 是**静态定义，不含玩家状态**：`instance_id` / `acquired_at` / `source` / `serial` 全在 `ItemInstance`（归 02），`count` 是**派生值**。**"开出一个物品"= 产生一个新实例**（不是"某个计数字段 +1"），见 §5.6。
-> `[补充]` **`category` 用 `StringName` 引用 `ItemCategoryDef`、不用 `enum`**：核心 §14.3 / R11 要求"新物品类别"可纯配置产出，用枚举则每加一类都要改代码（同 `02-item.md` §4.1）。
-
-### 4.3 囤积清单与保底状态（01 拥有；`GameState` 承载，存档格式归 10）
+### 4.3 `Box` / `ItemPool` / `Module` / `ModuleDef` / `ModuleCost` / `PoolState`
 
 ```gdscript
+# ── Box：盒子（含两个并列数据 + 身份）；GameState 另持 pending_boxes 与全局兑现计数器 draw_index
 class_name Box extends Resource
-
-@export var series_id: StringName = &""   # [补充] 盲盒必须绑定套系，否则分池与兑现无从判定
-@export var source: StringName = &""      # 来源任务 id，用于归因（见 03-task.md）
+@export var box_id: String = ""                  # Uuid.v4()；与 instance_id 同类型、无转换
+@export var series_id: StringName = &""
+@export var item_pool: ItemPool                  # 【生成数据的凭证】——roll() 消费它
+@export var modules: Array[Module] = []          # **定长**，长度恒 == item_pool.socket_count，空位为空项
+@export var source: StringName = &""             # 来源任务 id（归因，见 03）
 @export var acquired_tick: int = 0
-# autoload/game_state.gd 中由 01 拥有的状态
-@export var pending_boxes: Array[Box] = []
-@export var pity_counters: Dictionary[StringName, int] = {}  # series_id -> 0..pity_threshold
+# 【关键】模块**不折进池子**：两者并列，池子的当前状态 = f(item_pool, modules)（核心 §4.1.2）
+# v0.11：`pity_counters` 已删除——抽取无状态，计数器不存在、不入档。
+
+# ── ItemPool：该盒的物品池（事实来源之一，src/gacha/pool/defs/item_pool.gd）
+class_name ItemPool extends Resource
+@export var box_id: String = ""                  # 属于哪个盒子（与 Box.box_id 同一个值）
+@export var series_id: StringName = &""          # 基础池的来源：引用 SeriesDef
+@export var regular_count: int = 8               # ★ 冻结元数据：C6 的 ban_limit 由它派生
+@export var socket_count: int = 3                # ★ 冻结元数据：该盒的位数，运行时不可变（C4）
+@export var revision: int = 0                    # ★ 每次写入 +1
+@export var base_items: Array[StringName] = []   # [补充] 内存中的解析结果（series_id → SeriesDef；**不逐盒落盘**）
+@export var base_weights: Dictionary = {}        # [补充] 同上：由 `rarity` 归一化派生的基础权重（整数万分比）——**不逐盒落盘**
+# ★ 落盘子集 = box_id / series_id / regular_count / socket_count / revision；**不含 modules、不含"编辑后的权重"**
+# ★ v0.12：本类型提供 validate()（报 `bad_rarity`——`rarity == 0` = 永不产出 = **配置错误**）与 zero_bp_items()（查"取整成 0 bp"的物品）；**`rarity ≥ 1` 的规则权威在 02，本类型只执行、只引用**
+
+# ── Module：一个已镶嵌模块的实例（挂在 Box.modules 上，defs/module.gd）★ 不含 `slot`（槽位 = 数组下标）；
+#    模块是**消耗品**：拆卸 = 把该位置空 + 只返还 50% 材料；兑现 = 随盒消失；**不存在"模块库存"**。
+class_name Module extends Resource
+@export var module_id: StringName = &""   # 指向 ModuleDef（编辑规则蓝图）
+@export var quality: int = 1              # 模块品质梯度（D13；制造时从 ModuleDef 复制）
+@export var socketed_at: int = 0          # [补充] 镶嵌时刻（tick），供排序与回放；**不参与求值**
+
+# ── ModuleCost（需求向量条目，v0.9 与 04 的 DeviceCost 统一）／ModuleDef（蓝图）
+class_name ModuleCost extends Resource
+@export var category: StringName = &""
+@export var quality: int = 1
+@export_range(1, 99, 1) var amount: int = 1
+
+class_name ModuleDef extends Resource
+enum OpType { BAN, BOOST, RECOVER }
+@export var id: StringName
+@export var display_name: String
+@export var quality: int                       # 模块品质梯度（核心 D13）
+@export var op_type: OpType
+@export var targets: Array[StringName]         # 多目标；**必须指向池内物品**（v0.13：池中全部为常规物品，不再有"隐藏物品"这个非法目标）
+@export var magnitude: float = 1.0             # BOOST 的倍数；BAN / RECOVER 忽略
+@export var redistribute_mode: int = 0         # 0 = AUTO, 1 = TARGETED
+@export var redistribute_target: StringName    # TARGETED 时的目标物品
+@export var item_cost: Array[ModuleCost] = []  # 制造消耗（需求向量）
+@export var exclusive_tags: Array[StringName]  # 互斥标记
+
+# ── 派生状态（**不是第三个数据**）：由上面两者求值出的"池子的当前状态"。字段集**仅此**（+ box_id / 规模副本）；
+#    **不含 `socketed`**（"模块在池子里"的形状已被核心否决）。
+class PoolState:
+    var box_id: String              # 本状态属于哪一个盒子
+    var revision: int = 0           # 镜像 ItemPool.revision（07 的缓存键 = (box_id, revision)）
+    var socket_count: int = 3       # 从该盒 item_pool 冻结（C4）
+    var regular_count: int = 8      # 从该盒 item_pool 冻结（C6 的依据）
+    var weights_bp: Dictionary = {} # item_id -> **当前**权重（**整数万分比**；**`Σ weights_bp + void_mass_bp == 10000`**；v0.13：全部物品，不再有"隐藏恒 200 bp"）
+    var void_mass_bp: int = 0       # 当前不可回收质量（同单位同精度；**每个池子各自累积**）
 ```
 
-### 4.4 `GachaResult`（01 拥有）
+> **★ 裁决（v0.10）`base_items` / `base_weights` 不逐盒落盘**：基础池是**套系模板**的东西，盒子只持**引用**；逐盒落盘会把同一份模板复制 N 份，并与 `SeriesDef` 形成**第二份副本**。载入时从 `series_id` 解析。**代价（明确写出，不是免费的）**：内容配置调整 `rarity` / 基础权重时，**所有存量盒子的基础池会一起变**——这是同一笔交易的必然结果，**不是 bug**（T17）。
+> **★ 裁决（v0.10）`box_id` 是正式字段**（字段集见上）：生成方式 = `Uuid.v4()`（**`String`**，与 `instance_id` 同源同类型，**不得存在任何 `StringName(...)` 转换点**）。
+> **`item_cost` 的实例语义**：**制造（消耗）侧不需要反查**——需求是向量级，交 02 按 `(category, quality)` 挑实例并**原子销毁**；**拆卸（返还）侧需要反查**——一律调 `ItemService.resolve_item_id(category, quality)`，本系统**不得**自己构造 id 字符串（该映射的"唯一"由**配置校验器**强制）。理由：盲盒产出随机，`item_id` 级要求会让玩家卡在"我需要星尘但只开出晶核"。
+
+### 4.4 `GachaResult`（本系统拥有）
 
 ```gdscript
 class_name GachaResult extends Resource   # [补充] Resource 承载，便于按核心 §14.2.7 写入开箱日志
 @export var ok: bool = true
 @export var error: StringName = &""       # [补充] 纯函数不崩溃，用错误码返回
 @export var series_id: StringName = &""
-@export var item_id: StringName = &""     # [补充] 抽中 void 时为空串哨兵（不产出任何物品）
-@export var quality: int = 1              # 物品品质 1..5；void 时为 0（分级与演出见 09-presentation.md）
-@export var is_void: bool = false         # [补充] 本次抽中空洞：仍消耗一个 Box
-@export var is_new: bool = false          # 决定 pity_counter 走向；void 时恒为 false
-@export var pity_triggered: bool = false
+@export var box_id: String = ""           # 本次兑现的盒子身份（= Box.box_id，同类型、无转换）
+@export var item_id: StringName = &""     # 抽中 void 时为空串哨兵（不产出任何物品）
+@export var quality: int = 1              # 物品品质 1..5；void 时为 0
+@export var is_void: bool = false         # 本次抽中空洞：仍消耗一个 Box
+@export var is_new: bool = false          # 是否新物品（**收藏口径 `collected`**）；void 时恒 false；**不驱动任何计数器**
 @export var probability: float = 0.0      # 本次所用分布中该结果的概率（void 时为 void_prob）
-@export var seed: int = 0                 # 本次兑现的种子（§5.6）；即 `source.box_seed`
-@export var draw_index: int = 0           # **全局单调递增**的兑现序号（v0.8：不是"批次内序号"），见下方裁决
-
-# [补充] 交付给 02 的溯源三元组（核心 §4.2.1）：**01 只提供，不创建实例**
-func to_source() -> Dictionary:
+@export var seed: int = 0                 # 本次兑现的种子；即 source.box_seed
+@export var draw_index: int = 0           # **全局单调递增**的兑现序号（不是"批次内序号"）
+func to_source() -> Dictionary:           # [补充] 交付 02 的溯源三元组（核心 §4.2.1）：只提供，不创建实例
 	return {"series_id": series_id, "box_seed": seed, "draw_index": draw_index}
 ```
 
-> **v0.8 `source` 三元组 `{series_id, box_seed, draw_index}`——本文的产出契约。** 这三项**正好是 `roll()` 已有的**：`series_id` 是入参，`box_seed` 就是**本次兑现的 `seed`**（§5.6：`seed` 在兑现时刻生成并记录），`draw_index` 是兑现序号。（**注意区分**：§4.3 的 `Box.source` 是"盲盒来自哪个任务"的 `StringName`，与这里的**实例溯源字典**是两回事。）02 把它原样写进 `ItemInstance.source`；02 落盘时会补上它自己的 `kind` 键（`{kind = &"gacha", series_id, box_seed, draw_index}`，见 `02-item.md` §4 的 `[补充]`）——**`kind` 不是 `roll()` 的产出，01 不提供、不解释它**；**01 不生成 `instance_id`、不计算 `serial`**——**`serial` 只在开盒产出时由 02 分配**（转化 / 拆卸返还产生的新实例 `serial = 0`，归 `02-item.md`），01 只需给出 `source` 让 02 识别"这是一次开盒产出"。
-> **`kind` 的取值域（v0.9 裁决 4，由 02 定义）**：`gacha` / `convert` / `refund` / `mail` / `migrate` / `unlock`。**01 只负责 `gacha`，也只提供 `{series_id, box_seed, draw_index}` 三元组**；其余取值由 02 在各自的产出路径上补齐（转化 / 拆卸返还 / 邮件重发 / 迁移 / 解锁），**本文不产生、不判定、不校验它们**（完整取值域与语义见 `02-item.md`）。
-> **`[补充]` `draw_index` 的来源（裁决，v0.8 口径变更）**：取自 01 拥有的**全局兑现计数器**（`GameState` 中 01 的状态，与 `pity_counters` 同类），**每结算一次兑现 +1，跨批次、跨套系、跨存档载入均不重置**，随存档持久化（持久化格式归 10）。
-> **必须是全局递增，不能是"每批重置的批次内序号"**：若每批从 0 开始，两批不同盒子的实例会拿到相同的 `draw_index`，`source` 三元组就不再能唯一标识一次兑现（`box_seed` 通常不同，但**溯源与回放不允许依赖"通常"**），实例溯源会串。
-> **只改语义口径，不改抽样规则**：批量兑现**仍按清单顺序逐个独立结算**（§7），重放同一批 `seed` 仍得同批结果。
-> 开箱日志仍按核心 §14.2.7 记 `{seed, series_id, pool_snapshot, item_id, quality, is_void}`（**不加字段**）；实例级溯源与日志通过 `(series_id, seed)` 对账。
+> **`draw_index` 的来源**：取自本系统的**全局兑现计数器**（`GameState`，与 `pending_boxes` 同类），**每结算一次兑现 +1，跨批次 / 跨套系 / 跨存档载入均不重置**，随存档持久化（格式归 10）。**必须全局递增**：若每批从 0 开始，两批不同盒子的实例会拿到相同 `draw_index`，溯源与回放就会串。**它与已删除的保底计数器毫无关系**——它不是概率状态，只是**兑现序号 / 幂等锚点**。**开箱日志**记 `{box_id, seed, series_id, pool_snapshot, item_id, quality, is_void}`（核心 §14.2.7）；实例级溯源与日志通过 `(series_id, seed)` 对账，`box_id` 额外回答"这条日志来自哪个盒子"。**`ItemInstance.source` 不含 `box_id`**（归 02）——**两者不得互为主键**（触发条件见 §11 G11）。
 
-### 4.5 共享求值接口（**类型与实现归 07**，01 只调用）
+### 4.5 接口：`PoolService`（唯一写入）与 `EvalService`（唯一求值）
 
 ```gdscript
-# 函数本体只存在于 autoload/eval_service.gd（07 拥有），签名以 07 §4.1 为准
+# res://src/gacha/pool/pool_service.gd —— 本文件内唯一的池子写入方（**所有入口必须带 box_id**）
+class_name PoolService
+
+## 初始化：为新盒子产出 Box.item_pool（基础池副本），并把该盒 modules 填成**定长的空位数组**（发盒时由本系统调用；只取一份、**不构造内容**）。
+static func init_pool(state: GameState, box_id: String, series_id: StringName) -> ItemPool
+
+## 镶嵌：把 Module 写进该盒 modules 的**第 slot 位**（该位必须是空项）。玩家可指定**任意空位**；往**占用位**放必须**显式替换**，**不做隐式覆盖**。制造消耗 = ItemService.consume(...) 销毁实例，**原子**。
+static func socket(state: GameState, box_id: String, module_id: StringName, slot: int) -> Result
+
+## 拆卸：把该盒 modules 的第 slot 位**置空**（定长长度不变）+ 返还 grant(item_id, {kind = &"refund"}) **新建实例**（新 UUID；数量逐条 floor(cost × 0.5)）。
+## ⚠️ **serial 不是 grant 的参数**（第三位是幂等键）——把恒为 0 的 serial 写进去，会让所有返还共享同一个幂等键、第二次起被吞掉，**直接吃掉玩家资产**。
+## ★ 只能拆**未兑现盒子**的池子；兑现后盒子连同 modules 一同消耗，**不存在拆卸路径**。
+static func unsocket(state: GameState, box_id: String, slot: int) -> Result
+
+## 试算：算出"若把 module_id 放进该盒第 slot 位"的**候选派生状态**；**不写入任何状态、不推进 revision**，走与 _rebuild 相同的计算路径（P6 实时预览 / 沙盒）。09 的演出层不得调用它。
+static func preview_socket(state: GameState, box_id: String, slot: int, module_id: StringName) -> PoolState
+
+## 只读三入口（核心 §4.1.2：**模块列表可以独立于池子被查看 / 替换 / 拆卸**，故 get_modules 是独立入口，而非"池子里的字段"）：
+static func get_item_pool(state: GameState, box_id: String) -> ItemPool      # 取 Box.item_pool（凭证）
+static func get_modules(state: GameState, box_id: String) -> Array[Module]  # 取 Box.modules（定长，空位为空项）
+static func get_pool_state(state: GameState, box_id: String) -> PoolState   # 取当前状态（= f(item_pool, modules)，**不入档；不返回概率、不做算术**）
+## 内部：**逐盒**重建派生状态（不对外暴露）。**绝不复用**"按 series_id 缓存的某一份池子"。
+static func _rebuild(state: GameState, box_id: String) -> void
+
+# 07 拥有的求值入口（本文只调用，签名以 07 §4.1 为准）
 static func EvalService.evaluate_pool(pool_state: PoolState, series: SeriesDef) -> PoolEvaluation
-# PoolEvaluation = { probs: PackedFloat32Array, void_prob: float, is_normalized: bool, revision: int }
+static func EvalService.compute(state, box_id) -> {rho, m_bar, d_bar, b, sigma, pool_distribution, headline, attribution}
+
+# 变更信号：**必须携带 box_id** —— 订阅方按 box_id 失效与重取，**不得**做"套系级"失效（否则同套系另一个盒子的缓存会被误清或串味）。
+signal pool_changed(box_id: String, revision: int)
 ```
 
-`PoolEvaluation` 的类型与字段归 07（见 `07-economy-rho.md` §4）；本文只钉死"**`roll()` 必须消费它、不得重新计算权重**"（05 §8.1：**01 不得读 `PoolState` 原始结构**）。它不含保底覆盖，因此 C3 红线始终可测：隐藏物品恒 0.02；`void_prob` 是**抽样空间的一部分**，不是抽样之外的额外惩罚。
+> **`preview_socket()` 是只读的**：走与 `_rebuild()` **完全相同**的计算路径（避免两套实现），但不落盘、不推进 `revision`、不触发缓存失效。
+> **派生状态没有任何公开 setter**：只能由 `_rebuild()` 写入，而它的**唯一输入**是 `Box.item_pool` + `Box.modules`——这是 R4（头号 bug 源）的唯一防线。
+> **命名纪律**：07 有**两个入口、形参名不同**——`evaluate_pool(pool_state, series)`（**签名不变**，本系统用）与 `compute(state, box_id)`（08 / 09 用，**本系统不调用**）。两者第一个形参**指同一份东西**（该盒池子的当前状态），但**不得**说"`compute` 的第一个形参叫 `pool_state`"，也**不得**把 `pool_state` 当成 `Box` 的字段名（`Box` 侧一律写 `item_pool` / `modules`）。
+
+### 4.6 依赖方向铁律
+
+```
+本系统（写：PoolService）──▶ 07（算：EvalService）──▶ 抽取（roll）/ 展示（08）
+```
+
+**任何反向依赖都是缺陷。** 本系统**持有** `Box.item_pool` / `Box.modules`（数据归属），但**不得自行解读它们、更不得自行计算权重**——求值一律经 07。**写入方与求值方分离、二者不得混写**：`PoolService` 是**唯一写入方**（由两份数据推导当前权重），`EvalService` 是**唯一求值方**（权重 → 概率 / EV / ρ / `headline`）；`get_pool_state()` 只交出状态、不做任何算术。
 
 ## 5. 规则与公式
 
-### 5.1 基础权重表
+### 5.1 基础权重表与编辑规则（`rarity` 派生 + 零和）
 
 | 物品 | 数量 | 权重 | 依据 |
 |---|---|---|---|
-| 常规物品 | `regular_count`（品质 1–2 = 8，品质 3–4 = 12） | 每个物品 `0.98 / regular_count`（均等）；`regular_count == 8` → `0.1225`；`== 12` → `≈ 0.0817` | C1，核心 §4.1 / §4.1.1 |
-| 隐藏物品 | 1 个 | `0.02`（固定，不可编辑） | C3，核心 §5.4 |
-| 合计 | `regular_count + 1`（9 或 13） | `1.00` | 未编辑池：常规物品 98% + 隐藏物品 2%；编辑后：常规物品 + `void` 合计 98% |
+| **全部物品**（v0.13：池中**没有隐藏物品**，每一件都是常规物品） | `regular_count`（品质 1–2 = 8，品质 3–4 = 12） | **`p_i = rarity_i / Σ rarity`**（**分母是全部物品的 `rarity` 之和**；v0.13）；全部 `rarity` 相等时**退化为均等**（各 `1 / regular_count`） | C1，核心 §4.1 / §4.1.1 / §16.8 |
+| 合计 | `regular_count`（8 或 12） | `1.00` | **未编辑池：全部物品共分 100%（`void_prob == 0`）**；编辑后：**物品概率之和 + `void_prob` 恒为 100%**（C1 / 核心 §5.6） |
 
-### 5.2 权重路径（与 `EvalService` **共用同一份代码**）
+**编辑操作（全部作用于某一个盒子的池子）**：**排除 `ban`** → 该物品概率归零（其基础权重成为 `freed_mass`）；**提升 `boost`** → `w[target] *= magnitude`，**增量必须从其他物品按比例扣除**（不存在"凭空增加概率"的模块）；**损耗 `loss`** → `freed_mass` 的 **40%** 落为 `void`（`recover_rate = 0.60` 可回收）；**零和** → 物品概率质量总量恒定；**回收 `recover`** → 挽回部分 `void`（第二切片，本版仅定义接口）。
+
+| # | 硬约束 | 理由 / 落地 |
+|---|---|---|
+| **C1** | **零和**：**物品概率之和 + `void_prob` 恒为 100%**；整数口径 **`Σ weights_bp + void_mass_bp == 10000`** | 提升必须从别处抢，取舍才真实 |
+| ~~**C3**~~ | ~~**隐藏物品免疫**：不可排除、不可提升、不可被回收波及，概率恒 2%~~ | **【v0.13 作废】** 隐藏款设定整体删除，**保护对象不存在了**（核心 §5.4 / §16.8）。**行号保留、不重编号**，以免牵动全库对 C4 / C6 的引用 |
+| **C4** ★ | **镶嵌位数由该盒所属套系品质决定（2/3/4/5）；在同一池（即同一盒子）内恒定、运行时不可变** | 功率门控（P7）：**同一个池子内没有任何扩容路径**；跨池复制只能靠**新模块的新成本**（核心 §7） |
+| **C6** ★ | **排除物品数上限 = 常规物品数 − 3**（`ban_limit = regular_count − 3`；品质 2 即 5）；**任何池子至少保留 3 个可产出物品** | **防收敛下限**：位子再多（最高品质也只有 5 个），也**永远收敛不到单个物品** |
+
+**C1 管"质量守恒"，C4 管"位子有多少"，C6 管"能排除多少"**（**C3 已作废**，见上表）。代价是真实的：**你给某个物品加的概率，是从所有别的物品身上按比例抠出来的**，包括你正需要的那几个。**C1 的零和式（v0.13）**：**物品概率之和 + `void_prob` 恒为 100%**（核心 §5.4 / §5.6 给出 `void` 的正式定义；v0.13 隐藏款删除**前**，此式是"常规物品之和 + `void_prob` == 98%"，另有 2% 属于那件隐藏物品——那是历史，不是现行规则）。
+
+### 5.2 权重路径与重建流程（与 `EvalService` **共用同一份代码**）
 
 ```
-① 基础权重    w_i = regular_weight_total / regular_count
-              （regular_count == 8 → 0.1225；regular_count == 12 → 0.98 / 12 ≈ 0.0817）   （常规物品）
-② 未拥有 ×1.5  w_i *= 1.5（仅当 item_i ∉ collected，收藏口径，见下方裁决 11），随后把 regular_count 个常规物品按比例归一化回 0.98
-③ 模块编辑    ban → 0 ／ boost → ×N（增量从其他常规物品按比例扣除，零和）  ← 归 05
-④ 隐藏物品    全程 0.02，不参与 ② 的归一化、不受 ③ 影响               （C3）
-⑤ 空洞 void   排除释放质量的 40% 落为 void_prob（Σ常规 + void_prob == 0.98） ← 归 05
-──────────────────────────────────────────────────────────────
-→ PoolEvaluation（常规物品 + void_prob = 0.98，隐藏物品 0.02，Σ == 1.0）
+① 基础权重    w_i = rarity_i / Σ rarity（**全部物品**；v0.12 起由 `rarity` 派生、不是独立配置；v0.13 起**全部物品共分 100%**）
+② 未拥有 ×1.5  w_i *= 1.5（仅当 item_i ∉ collected，收藏口径，见 §5.2.1），随后把物品按比例归一化回原总质量
+③ 模块编辑    ban → 0 ／ boost → ×N（增量从其他物品按比例扣除，零和）      ← 本文件的 PoolService
+④ 空洞 void   被排除物品释放质量的 40% 落为 void_mass_bp（**物品质量总和 + void_mass_bp 恒定**）
+──────────────  全部以**整数万分比**运算：**`Σ weights_bp + void_mass_bp == 10000`**（最大余数法保证精确）
+→ PoolEvaluation（07 求值：**物品概率之和 + `void_prob` 恒为 100%**）
 ```
 
-**`[补充]` 权重路径的固定顺序（①→②→③→④→⑤）**：核心设计未规定顺序，而顺序会改变分布，必须钉死才能单测与复现；选此顺序是为了让"编辑 + 损耗"成为分布的最后一道工序，归因面板才能干净地说出"这 +0.42 来自模块、−0.08 来自损耗"（P2 / P6）。`void` 是这条路径的**产物**，不是抽样时的临时扣减。
+`PoolService._rebuild(state, box_id)` 与上面**严格对应**（v0.10：**逐盒**重建，只算这一个盒子）：
 
-×1.5 的效果是**相对比例，不是总量**（示例，其余物品均已拥有，`regular_count == 8`）：全部未拥有 → 各 12.25%；1 个物品未拥有 → 该物品 **17.29%**、其余各 11.53%；2 个物品未拥有 → 各 **16.33%**、其余各 10.89%。三例均取自未编辑池（`void_prob = 0`），故常规物品合计为 98%。
+```
+0. 取两个**并列**输入：Box.item_pool（基础数据）+ Box.modules（定长数组，空位为空项）
+1. revision += 1
+2. 校验 modules 非空项（已镶嵌模块）的合法性（§5.2.3）
+3. freed_mass = Σ 被排除物品的基础权重（取自 base_weights）
+4. void_mass_bp = freed_mass × (1 - recover_rate)                 # 40%
+5. 可回收部分按 redistribute_mode 分配：AUTO → 按基础权重给其余未排除物品；TARGETED → 全给 redistribute_target
+6. 提升：w[target] *= magnitude
+7. 断言（C4：**两件事都要断言到**）：a. 定长长度 modules.size() == item_pool.socket_count == SeriesDef(series_id).socket_count
+   b. **已占用位数（非空项数）<= modules.size()** ← **这才是真正的守护**（只断言长度恒真）
+8. 断言：可产出物品数 ≥ 3                                           # C6
+9. 产出派生状态 PoolState（**`Σ weights_bp + void_mass_bp == 10000`**）——**不落盘**
+```
 
-> **示例的前提（v0.6）：以上三个百分比均假设 `regular_count == 8`**（套系品质 1–2）。
-> `regular_count == 12`（套系品质 3–4）时基础权重降为 `0.98 / 12 ≈ 0.0817`，×1.5 的相对比例关系不变：
-> 1 个物品未拥有 → 该物品 `1.5 / 12.5 × 0.98 ≈ 11.76%`、其余各 `≈ 7.84%`；12 个物品全未拥有 → 各 `0.98 / 12 ≈ 8.17%`。（相对比例只由物品数决定，与基础权重无关。）
-> **v0.9 补充**：上例中的"未拥有"一律指**不在收藏 `collected` 中**；三个百分比与 v0.6 完全一致——**裁决 11 只换判定源，不换数值**（§5.2.1）。
+> `[补充]` **步骤顺序被固定**（①→②→③→④，与 07 §5.1 一致）：顺序影响结果，固定顺序是求值可复现与归因可对账的前提；选此顺序是为了让"编辑 + 损耗"成为分布的最后一道工序，归因面板才能干净地说出"这 +0.42 来自模块、−0.08 来自损耗"（P2 / P6）。`void` 是这条路径的**产物**，不是抽样时的临时扣减。
+> **v0.10**：`box_id`（**`String`**）必须是入参，**不得**由 `series_id` 推导；重建只作用在这一个盒子上，**绝不影响同套系的其他盒子**；**逐盒重建、绝不共用缓存**。
+> `[补充]` **规范表示是整数**：`weights_bp` / `void_mass_bp` 一律**整数万分比**（**只有整数才能让 C1 的零和等式被精确断言**，也让存档往返字节级稳定）；浮点 `probs` 只在 07 归一化时出现**一次**——不得在别处另算一份浮点权重。
+> **v0.12**：`M̄`（期望）随 `rarity` 配置变化——**同一份物品清单、不同稀有度就是不同的经济**；极端差距会把最小的一件取整成 **0 bp**（用 `ItemPool.zero_bp_items()` 可查）。见 §11 **M10**。
+> **v0.13**：隐藏款删除后那 2% 并入物品（**共分 100%**，不再是 98%），因此**同一份 `rarity` 配置下 `M̄` 随之上升**——标定 `rarity`（D19）时必须按新口径重测。
 
-**保证"同一份代码"的方式（README §2.2 铁律）：**
+### 5.2.1 裁决 11："未拥有"取收藏口径（×1.5 的判定源）
 
-1. **单一实现**：权重与归一化逻辑只存在于 `eval_service.gd`；`gacha_service.gd` 内不得出现概率公式与 `0.98` / `0.02` / `1.5` 字面量，CI 用静态检查（grep）守护。
-2. **契约测试**：同一 `(pool_state, series)` 下，`EvalService.compute(...)` 的 `distribution` / `void_prob` 与 `evaluate_pool(...)` 的 `probs` / `void_prob` 逐项相等；并用测试钩子取回 `roll` 实际使用的 `PoolEvaluation`，断言与之一致。
-3. **频率一致性**：固定 `seed` 抽 1e6 次，经验频率 vs 理论分布做卡方检验（常规物品相对误差 < 1%，隐藏物品 2% ± 0.1%，**`void` 频率 == `void_prob` ± 0.1%**）。
-4. **红线同夹具**：C1 / C3（含 `void` 守恒式）必须在 `EvalService` 与 `roll` **两侧同时**断言，任一侧偏离即失败（R4 头号 bug 源）。
-
-### 5.2.1 裁决 11："未拥有"取收藏口径（v0.9，本文最重要的一处改动）
-
-**判定源固定为 `10-progression.md` 的 `collected`（图鉴 / 收藏：开出来过就算拥有）。** 它与**保底的"出新物品"（`is_new`）必须是同一个口径**——否则系统会自相矛盾：
+**判定源固定为 `10-progression.md` 的 `collected`（图鉴 / 收藏：开出来过就算拥有）。** 它与 **`is_new` 必须是同一个口径**——否则系统会自相矛盾：
 
 | 若改用"当前持有"（或"当前仓库里有没有"） | 后果 |
 |---|---|
-| 玩家把某个**已经开出过**的缺口物品**交付掉**（`consume`）、转化掉，或产出溢出让同种实例落进**邮件** | 它从"持有 / 仓库"里消失 → ×1.5 重新把它加权；而**保底在它首次被开出时就已经认为它出过了**（收藏口径） |
-| 结果 | 同一个物品**同时**被当作"已出"（保底不再为它兜底）与"未拥有"（加权偏向它）→ **"保底认为已出、加权认为还没拥有"** 的自相矛盾；默认层的分布与保底提示**互相打脸**，玩家无法解释——**P1（一切可查可算）当场失效** |
-| 更糟的一层 | 分布会**随玩家每次交付 / 转化 / 领取而变化**——这等于"**按玩家操作暗改概率**"，P1 与铁律 7 明文否决 |
+| 玩家把某个**已经开出过**的缺口物品交付掉（`consume`）、转化掉，或产出溢出让同种实例落进**邮件** | 它从"持有 / 仓库"里消失 → ×1.5 重新把它加权；而**收藏口径在它首次被开出时就已经认为它出过了** |
+| 结果 | 同一个物品**同时**被当作"已出"（`collected` 里有它）与"未拥有"（加权偏向它）→ **"图鉴认为已出、加权认为还没拥有"** 的自相矛盾；默认层分布与图鉴进度**互相打脸**（P1 当场失效） |
+| 更糟的一层 | 分布会**随玩家每次交付 / 转化 / 领取而变化**——等于"**按玩家操作暗改概率**"（P1 / 铁律 7 明文否决） |
 
-> ⚠️ **02 有一个名字相近但含义不同的接口：`find_unstocked_items()`**（v0.9 由"当前持有"口径的接口改名而来）——它的含义是"**当前仓库里没有持有**的物品"。**它不是收藏口径，01 不得用它（或任何持有 / 仓库口径）做 ×1.5**，理由就是上表。
+> ⚠️ **02 有一个名字相近但含义不同的接口：`find_unstocked_items()`**（含义是"**当前仓库里没有持有**"）。**它不是收藏口径，本系统不得用它（或任何持有 / 仓库口径）做 ×1.5**，理由就是上表。
+> **第三条理由（最硬的一条）：堵住"把实例压在邮件里吃 ×1.5"**——若按仓库口径判"未拥有"，玩家只要**不领取邮件**，该物品就**长期吃 ×1.5 加成**，而它根本拿不出来用（邮件实例不可交付 / 装配 / 镶嵌 / 转化）。收藏口径下这条滥用根本不存在：`collected` 一旦记上就永久算拥有，**没有任何"把东西藏起来换加权"的操作空间**。**两个额外好处**：①`collected` **只增不减**，×1.5 只依赖"开出过哪些"，与持有多少、放在哪里完全无关；②它与"恒定 1.5"相容——按持有量调权会随玩家操作波动，那正是"按进度调权"的口子。
 
-**收藏口径的两个额外好处：** ①**`collected` 只增不减**（开出过即永久算拥有），所以 ×1.5 在任何时刻只依赖"开出过哪些"，**与持有多少、放在哪里完全无关**（在仓库、在邮件、已交付都一样）；②它与"恒定 1.5"（§11 G5）相容——按持有量调权会随玩家操作波动，那正是"按进度调权"的口子，收藏口径把这条口子关死。
-
-**第三个好处：堵住"把实例压在邮件里吃 ×1.5"这条滥用（03 / 06 复核发现，v0.9 追加）。**
-
-这是"必须用收藏口径"的**第三条、也是最硬的一条**理由——它不是理论洁癖，而是一个**可直接执行的漏洞**：
-
-| 步骤 | 若 ×1.5 采用"**仓库持有**"口径会发生什么 |
-|---|---|
-| 1 | 玩家开出某物后**不领取邮件**（或把该物品的实例整批留在邮件里），于是该物品在**仓库**里的持有 ≈ 0 |
-| 2 | ×1.5 判定"该物品未拥有" → **长期吃 ×1.5 权重加成** |
-| 3 | 而这些物品**根本拿不出来用**——邮件实例不可交付 / 装配 / 镶嵌 / 转化（核心 §4.7） |
-| **净结果** | **加成白拿**：分布被一个**零成本、可长期维持**的行为（"不领取"）持续扭曲，而玩家的实际能力毫无变化。这既违反 P1（分布不再是玩家可解释的"我拥有什么"的函数），也实质上是"**按玩家操作暗改概率**"（铁律 7 明文否决） |
-
-**收藏口径（读 10 的 `collected`）下这条滥用根本不存在**：**是否领取邮件、实例放在哪里，与"是否开出过"完全无关**——`collected` 一旦记上就永久算拥有，**没有任何"把东西藏起来换加权"的操作空间**。这也是 03 / 06 那组复核**坐实裁决 11 为必要**的原因（§5.2 的开头那句"必须用收藏口径"，现在有三条独立理由）。
-
-**保底同样只看收藏（v0.9 一致性地确认一遍）**：`is_new`、"是否有未拥有物品"与 `pity_counter` 的走向**一律不受持仓形态与落点影响**——邮件里堆着未领取的物品**不会**让保底以为已经出过，交付掉一件**也不会**让保底为它重新兜底（§5.3 / 核心 §4.7）。
-
-### 5.3 保底（pity）
-
-`pity_counter[series_id] ∈ [0, pity_threshold]`，**每个套系一个独立计数器**：
+### 5.2.2 空洞 `void`：40% 损耗的落地与自限机制（C2）
 
 ```
-本次兑现已结算
- ├─ is_new == true        → pity_counter[s] = 0
- ├─ 有未拥有物品 & 未出新物品（含 void）→ pity_counter[s] = min(pity_counter[s] + 1, 8)
- └─ 无未拥有物品（已全收集） → 不增长（不处于"连续未出新物品"语义中）
+freed_mass = Σ base_weight[banned]        void_mass = freed_mass × 0.4
 ```
 
-- **触发**：兑现前 `pity_counter[s] >= pity_threshold` 时本次**必出未拥有物品**，`pity_triggered = true`。
-- **`[补充]` `void` 与保底——裁决：计入。** `void` 结果 `is_new = false`，`pity_counter[s] + 1`。理由：①`void` 确实不是新物品，按"连续未出新物品"的字面语义即应计入；②否则排除操作会**双重惩罚**玩家（既拿不到物品、又拖慢保底），把 C2 的"损耗是重量"变成隐形惩罚；③`void` 是空手结果，与 P5（重复与过剩永远不是空手）存在张力，保底计入正是 P5 的补偿侧。
-- `[补充]` **触发时的抽样方式**：在**同一份 `PoolEvaluation` 的未拥有物品子集内按相对权重条件抽样**（不新建分布、不改权重、**排除 `void`**），避免出现第二条概率路径。
-- `[补充]` **候选集与边界**：候选集 = 未拥有且当前可产出的物品（**未拥有取收藏口径 `collected`**，§5.2.1），**含隐藏物品**（`pity_includes_hidden = true`，理由：核心 §5.4 的隐藏物品"独立保底"本切片以**单一保底机制**落地）；候选集为空（全收集）时保底不触发、计数封顶在阈值、不报错。
-- 保底**不改变池子分布本身**；保底是否计入默认层概率与 EV 的口径归 07。
-- **v0.9：保底与仓库 / 邮件无关。** `is_new`、"有未拥有物品"一律看**收藏 `collected`**——**邮件里的物品不算"已出"、交付掉一件也不算"重新未拥有"**（§5.2.1）；保底推进也**不因仓库满而改变**（仓库满只改落点，不改抽样与保底，§7 / §10.1 I4）。
+**C1 与 C2 曾互相矛盾**（C1 曾说"Σp 恒为 98%"，C2 说"40% 蒸发"）。解法：**蒸发的概率不消失，而是落为一个显式的零价值结果 `void`**——**物品概率之和 + `void_prob` 恒为 100%**（v0.13：不再有隐藏款的 0.02）。好处：损耗**可见**（直方图多一根柱子，"我把池子凿出了一个洞"）、**可计价**（`void` 的 `v = 0`，直接压低 `m_bar`，符合 P2）、**不失效**（归一化会把 40% 摊回其他物品，让 D6 这个主旋钮形同虚设）。**`void` 的工程表示 = `void_mass_bp`（整数万分比）。**
 
-### 5.4 隐藏物品免疫（**规则在此声明，执行在 05**）
+**v0.6 起位子随套系品质变多，因此抑制 R2（池子编辑过强）改由 C2 的 40% 损耗承担**：
 
-| 操作 | 对隐藏物品 |
+| 玩家若…… | 会发生什么 |
 |---|---|
-| 排除 `ban` / 提升 `boost` / 回收 `recover` | 不可用（`socket()` 拒绝）、不波及；概率恒 0.02 |
-| 未拥有 ×1.5 | **不适用**（`[补充]`：否则隐藏物品概率会偏离 2%，违反 C3 的"恒为 2%"） |
-| 保底条件覆盖 | 参与候选（§5.3），但**池子分布中的 2% 始终不变** |
-| 空洞 `void` | 与隐藏物品无关：`void` 只可能从**常规物品**释放的质量中产生，隐藏物品的 0.02 不参与损耗 |
+| 排除 1 个物品 | 该物品释放质量的 **40% 永久变成 `void`** |
+| 排除到只剩 3 个物品 | `void_mass` 已累积到可观比例，**`m_bar` 显著塌陷**，ρ 下降 |
+| 想把池子收敛到必出某个物品 | 做不到（C6 保证**至少保留 3 个可产出物品**），且代价是循环效率大幅下滑 |
 
-**执行点**：`PoolService.socket()` / `unsocket(slot)` 的白名单校验与错误返回，见 `05-module-pool.md`。**保底不是编辑**：它是对分布的**条件覆盖**（"必出"），故不违反 C3；C3 的测试对象是**分布**（隐藏物品 0.02），不是单次结果。
+**排除越多 → `void_mass` 累积越多 → `m_bar` 塌得越狠 → ρ 越低。过度排除是自我惩罚的。** 三条性质：**自限不是封顶**（`void` 不阻止排除，只让"排得越狠、循环越差"成为机制事实）；**随品质自动扩展**（位子多 ≠ 收敛容易，不需要为每档品质另设上限）；**不新增参数**（靠 C2 这条既有机制抑制 R2）。
 
-### 5.5 分池独立
+> **`void_mass` 是每个池子各自累积的**：在盒子 A 里凿出的洞**不会**带到盒子 B——**每个池子各自漏各自的**。因此 `void` **不构成跨池约束**（跨池由 **D17 的模块物品成本**约束），它约束的始终是"**这一个池子被排得有多狠**"。
+> **⚠️ `void` 与 P5 的关系（写清，否则会被误"修"）**：P5 说"重复与过剩永远不是空手"，而抽中 `void` **确实不产出任何物品**。**P5 满足的路径不是"产出物品"，而是"演出层的补偿呈现"**（`09-presentation.md` §5.8 V5 的**两项**：池子损耗来源提示 + 盒已消耗确认）；v0.10 及以前还有第二条（计入保底推进），**v0.11 删除保底后这条消失**，`void` 现在是一次**纯粹的、无补偿的**空手——**这是最需要正视的代价**（核心 R15；**v0.13 补充**：R15 因隐藏款删除而**大幅缓解**，但 `void` 的"无补偿"这件事本身没有变，§5.4）。**因此「`void` 不产出物品」不是 P5 的违反**：P5 管的是"**重复与过剩**不得空手"，而 `void` **既不是重复、也不是过剩，它是代价**（自限机制的度量）。后来者若看到"空手"就去"补一个产出"，会同时破坏自限机制与 C2——**正确反应是先测 R15（尾部是否出现死墙）**。
 
-每个套系一份 `SeriesDef`、一份基础权重、一个 `pity_counter`、一份 `PoolState`；**无跨池继承**：A 池攒到 7 次未出新物品，B 池仍从 0 开始；兑现只作用于盲盒绑定的套系。切片期只有 1 个套系（核心 §13.1），但结构、存档与 UI 一律按 **N 套系**设计。
+### 5.2.3 合法性与冲突规则
+
+> **编号不重排（v0.13）**：本表**保持 v0.12 的编号 V1–V7**；作废条目不删除、不重排，**以 tombstone 保留原编号**——理由与红线 C3 完全一致：**V 号被下游引用**（本文 §10.2 T7、旧 `05-module-pool.md` 的 T7），重编号会让下游**指错对象**。
+
+| # | 规则 | 违反时 |
+|---|---|---|
+| ~~**V1**~~ | ~~`targets` 不得包含隐藏物品~~ | **【v0.13 作废】**：隐藏款设定整体删除，"隐藏物品"这个非法目标随之不存在（核心 §16.8）。**编号保留、不重排**（下游 T7 按原号引用）；**不得**把它改写成别的断言再占用 V1 |
+| V2 | 同一物品不得同时被排除与提升 | 拒绝镶嵌，UI 明确提示冲突源 |
+| V3 | **已占用位数（= `modules` 非空项数）≤ `item_pool.socket_count`**（定长长度恒等，故要守的是"已镶嵌数 ≤ 位子数"）；`socket(box, module, slot)` 要求第 `slot` 位**为空项**，且玩家可指定**任意空位** | 拒绝：占用位需**显式替换**（先 `unsocket(box, slot)`），**不做隐式覆盖** |
+| V4 | `boost` 倍数不得超过 `boost_cap`（×3） | 配置期钳制并警告 |
+| V5 | 物品被排除总数 ≤ `ban_limit`（**派生自 C6**：`regular_count − 3`） | 拒绝，保证至少 3 个可产出物品 |
+| V6 | 互斥标记（`exclusive_tags`）冲突的模块不得共存 | 拒绝镶嵌 |
+| V7 | **数组形状**：`modules.size() == item_pool.socket_count`、空位为空项、**非空项良构**（是合法 `Module`，其 `module_id` 能在 `ModuleDef` 注册表查到）。**"同一盒内唯一"无需检查**——定长数组"一个下标一项"，唯一性**结构上自动成立** | 拒绝，保证"位子"与"定位"自洽 |
+
+> **所有非法操作必须"响亮地拒绝"，不做静默钳制。** 静默处理会让玩家以为自己成功了，从而对所有数字失去信任（P1）。
+
+### 5.3 无保底（v0.11：保底系统已删除）
+
+**本节记录"删掉了什么"与"删掉之后靠什么成立"。** 保底曾是本系统最复杂的一块（计数器、候选集、条件覆盖、"`void` 是否计入"），v0.11 **整体删除**（核心 §4.1 / §5.6 / §16.6）——**一次抽取的概率就是公布的那个分布，不存在任何"必出"覆盖**。
+
+| 项 | v0.10 及以前 | v0.11 |
+|---|---|---|
+| "连续 8 次未出新物品则硬保底" | 有 | **删除** |
+| `pity_counters` / `pity_counter` / `pity_threshold` / `pity_enabled` / `pity_includes_hidden` | 按套系一份、入档 | **全部删除**，不入档；抽取**无状态** |
+| `GachaResult.pity_triggered` | 有 | **删除**（§4.4） |
+| `roll()` 的签名 | `roll(series_id, evaluation, seed, pity_counter)` | **`roll(evaluation, seed)`** |
+| `void` 与计数 | **计入保底推进**（"不是白开一次"的凭据） | **不推进任何计数器** |
+| 抽样路径 | armed → 未拥有子集内条件抽样；否则全量 | **只有一条路径**：在 `PoolEvaluation.probs` + `void_prob` 上全量抽样 |
+
+**为什么删（正面理由）**：保底是**唯一**一处"公布的概率 ≠ 实际每抽概率"的地方（展开层写着 1.4%，玩家却在某次**必然**拿到）。删掉它之后 **P1 在每一次抽取上都严格成立**：**公布什么，每抽就是什么**；**池子编辑成为概率的唯一决定者**。
+**C3 已随之作废（v0.13）**：v0.10 里 C3 的论据是"**保底不是编辑**——它只是对分布的条件覆盖（'必出'），故不违反 C3"；**那条论据随保底删除而失效，而 C3 本身也在 v0.13 被删除**——隐藏款不存在，**池中不再有"免疫编辑"的物品**（§5.4）。删保底 + 删隐藏款之后，**池子编辑成为概率的唯一决定者**这条反而更干净。
+**代价（必须正视，不粉饰）**：①**全收集尾部无界**（保底原本是"必定推进缺口"的那只手；唯一残存的偏向是 §5.2 的 ×1.5——**那是权重，不是保证**）；②**`void` 成了纯粹的空手**（补偿只剩演出层，§5.2.2）；③~~隐藏物品失去兜底（恒 2%、期望 50 抽）~~ **【v0.13 已大幅缓解】**：隐藏款删除后**不再有"最难、又无法被编辑影响"的那一款**，每一款都能用"提升"加速；**残留风险变成"贵"，不是"不可能"**——C2 的 40% 损耗与 C6 的 ≥3 下限决定缺口能被抬多高（核心 §12 R15 / §16.8）。
+**处置纪律（红线）**：**不得以"隐式必出"的形式把保底加回来**（例如"很久没出新物品就偷偷抬权"）——那会重新破坏 P1 的严格性（核心 §16.6）。**先按"无保底"实测**，若确有死墙，机制必须**可公布、可查**（P1 / P6）；可动旋钮见 §11 **G12**。
+
+### 5.4 隐藏物品免疫（C3）——**【v0.13 作废】**
+
+> **【v0.13 作废】** 核心 v0.13 **删除了隐藏款设定**：每个套系不再有"1 个隐藏物品"，池子里的**全部物品都是常规物品**（核心 §5.4 / §16.8）。**C3 唯一的保护对象不存在了**，本节因此**不再是现行规则**，只留作废记录；**红线 C3 的行号保留、不重编号**（§5.1 的约束表已标作废），以免牵动全库对 C4 / C6 的引用。
+
+**原规则（已作废，仅供追溯）**：隐藏物品**不可排除 / 不可提升 / 不被回收波及**、概率恒 `0.02`，且**不参与** `rarity` 归一化；执行点是 `PoolService.socket()` / `unsocket(box, slot)` 的白名单校验与错误返回。原论证是"若隐藏物品可被编辑，玩家就能把池子收敛到必出它，'盲盒'的悬念当场死亡"。
+
+**为什么不再需要**：v0.13 之后**每一款都受编辑影响**，"免疫编辑的物品"这个概念本身消失。**配套删除项**（核心 §16.8）：`ItemDef.is_hidden`、`ItemPool.hidden_item` / `HIDDEN_TOTAL_BP`、`SeriesDef.hidden_item` / `HIDDEN_COUNT`、原 V1（`targets` 不得包含隐藏物品）、T1 断言——**全部删除**；`compute_probabilities()` 直接按 `rarity` 归一化**全部**物品。
+
+**代价（必须正视，不粉饰）**：
+- **R2（编辑太强 ⇒ 全收集失去挑战）的对策少了一条**：原 C3 是"防收敛到必出某一款"的兜底之一，现只剩 **C2 的 40% 损耗** 与 **C6 的 ≥3 下限** ⇒ **R2 风险上升**（核心 §12 R2 / §16.8）。
+- **R15（尾部风险）反而大幅缓解**：不再有"最难的、无法被编辑影响"的那一款；**残留风险 = "抬缺口很贵"**（C2 / C6 限制你把它抬多高），**不是"不可能"**。
+- **终局立意随之改变**：原来"最后一个隐藏物品保留不可预测性"，现在**每一款都能被编辑影响**——全收集是一件**纯工程**的事（核心 §5.4 / §10 / §16.8）。这也意味着**池子编辑成了唯一的终局手段**，R2 的分量因此变重。
+
+### 5.5 池子随盒子走（两个并列数据 · 派生状态 · 分池独立）
+
+**"盲盒存在一个生成的物品的池子"——池子是盒子的属性，不是套系的共享状态**（核心 §4.1.2）。
+
+| 层 | 归属 | 数量 / 形态 |
+|---|---|---|
+| **基础池模板**（产出哪些物品 / `rarity`；v0.13：**全部为常规物品，无隐藏款**） | `SeriesDef` | 每套系一份 |
+| **`Box.item_pool`（物品池）** | **每个 `Box` 各一份** | **生成数据的凭证**；获得时是基础池模板的一份副本 |
+| **`Box.modules`（模块列表）** | **每个 `Box` 各一份** | **定长数组**（长度 = `item_pool.socket_count`）；与 `item_pool` **并列**；**唯一作用方式是更改 `item_pool` 的状态** |
+| **池子的当前状态**（`probs` / `void_prob` / EV / ρ 的输入） | **派生值**：由 `PoolService` 求出、`EvalService` 求值 | **不入档**；载入时按盒子**逐盒重建** |
+| 抽取状态（保底计数器） | — | **v0.11 已删除**：抽取**无状态**，"跨池继承"这个问题本身消失（§5.3） |
+
+- **模块不是池子的一部分**：它是与 `item_pool` 并列的另一份数据——"换掉一个模块" = 换掉一项**作用于该池的编辑**，而**不是**"在池子里挖掉一块再补上"。**因此拆卸不会留下坑**：移除一项编辑，状态就是"少了那一项"的函数值；**全部移除时必然等于基础池**（`void_mass_bp == 0`）。
+- **盒子在获得时拿到"基础池 `item_pool` 的副本 + 一个所有位皆空的定长 `modules`"**；**"未配置" = 所有位皆空**。**编辑（镶嵌）是之后的独立动作**，且**模块镶嵌即锁定在该盒**。
+- **同套系的两个盒子可以有完全不同的池子**——这正是"分批"的来源：A 盒 `modules` 有非空项、B 盒所有位皆空 → **两者的当前状态、`probs` / `void_prob` / EV 各自独立、互不影响**（测试见 §10.2 T12 / T13）。
+- **兑现只读取"被兑现那个盒子"的池子当前状态**；`roll()` 与 07 的默认层求值必须用**同一个盒子**的那一份。**不存在"该套系的池子"这种读法。** 切片期只有 1 个套系，但结构、存档与 UI 一律按 **N 套系 × M 盒**设计。
 
 ### 5.6 随机与可复现
 
 ```gdscript
-# [补充] 在核心 §9 铁律 1 的 (series_id, pool_state, seed) 上显式追加 pity_counter：
-#        纯函数不得读全局状态；保底计数是其唯一额外输入，probs 与 ×1.5 一律来自 07 的 PoolEvaluation。
-static func roll(series_id: StringName, evaluation: PoolEvaluation, seed: int,
-        pity_counter: int) -> GachaResult
+# [补充] 与核心 §9 铁律 1 完全一致——v0.11：入参里**没有** pity_counter（保底已删除）：
+#   给定同一 evaluation 与 seed，输出永远相同，**不存在任何跨次累计的状态**。
+# v0.10：输入是"该盒自己的池子"——evaluation 由**被兑现那个盒子**的当前状态求值而来（本系统求状态 → 07 出概率）。
+static func roll(evaluation: PoolEvaluation, seed: int) -> GachaResult
 ```
 
-- 内部步骤只有 `校验 → evaluate_pool(...) → 判定 armed → 条件/全量抽样 → 返回 Result`，**无任何副作用**（演出只播报，不得重抽）；`[补充]` **抽样算法与顺序固定**：累计概率 + 线性/二分查找，物品序为 `regular_items` 的数组固定顺序、隐藏物品置于其后；禁用字典遍历顺序；`RandomNumberGenerator` 必须显式赋 `seed`，禁用 `randi()` / `randf()` 等全局随机函数。
-- **`void` 的抽样规格（README §6.1）**：抽样空间 = `evaluation.probs`（`regular_count` 个常规物品 + 1 个隐藏物品）**加上 `void_prob`**，总和恒为 1.0；`void` 段的区间位置固定（置于物品序末尾）。抽中 `void` → `is_void = true`、`item_id = &""`、`quality = 0`、`is_new = false`、**不产生任何物品、不产生实例**（不调用 02 的 `grant`），但**仍消耗一个 `Box`**。**v0.9：因此 `void` 也没有落点——它不会入库，也不会出现在邮件里**（仓库满时 `void` 依然什么都不产生，§10.1 I4）。
-- `[补充]` **`seed` 在兑现时刻生成并记录**（不预生成于盲盒获取时）：否则"把盒子攒到池子编好再开"（核心 §4.6）在数值上不成立。兑现日志 `{ seed, series_id, pool_snapshot, item_id, quality, is_void }`（核心 §14.2.7）：**`void` 结果以 `is_void = true` + 空 `item_id` 落盘**，使"抽到空洞"可复现、可对账；**持久化格式归 10**。
+- **`series_id` / `box_id` 都不是 `roll()` 的入参**（与核心 §9 铁律 1 一致）——它们只用于**日志与溯源**（`GachaResult.series_id` / `.box_id`，取自盒子本身），**不得**用来定位"该读哪份池子"。
+- 内部步骤只有 `校验 → 全量抽样（probs + void_prob）→ 返回 Result`，**无任何副作用**（演出只播报，不得重抽）。`[补充]` **抽样算法与顺序固定**：累计概率 + 线性/二分查找，**物品序 = 全部物品的固定数组顺序**（`SeriesDef.regular_items`；v0.13 起其后不再接隐藏物品）→ 再接 `void`；禁用字典遍历顺序；`RandomNumberGenerator` 必须显式赋 `seed`，禁用 `randi()` / `randf()`。
+- **`void` 的抽样规格**：抽样空间 = `evaluation.probs`（**全部物品**）**加上 `void_prob`**，总和恒为 1.0；`void` 段区间位置固定（置于物品序末尾）。抽中 `void` → `is_void = true`、`item_id = &""`、`quality = 0`、`is_new = false`、**不产生任何物品与实例**（不调用 02 的 `grant`），但**仍消耗一个 `Box`**，**也不推进任何计数器**。**因此 `void` 也没有落点**——它不会入库，也不会出现在邮件里。
+- `[补充]` **`seed` 在兑现时刻生成并记录**（不预生成于盒子获得时）：否则"盒子先拿到手、池子之后才配置"在数值上不成立——**未兑现盒子的 `modules` 仍可增删**，`seed` 必须与**兑现那一刻的池子快照**成对生成、成对入日志。兑现日志 `{box_id, seed, series_id, pool_snapshot, item_id, quality, is_void}`：**`void` 以 `is_void = true` + 空 `item_id` 落盘**，使"抽到空洞"可复现、可对账（持久化格式归 10）。
 
-### 5.7 开盒前预告（R14 对策③，v0.9）
+### 5.7 开盒前预告（R14 对策③）
 
-**核心要求**（核心 §12 R14 对策③）：**开盒前预告只给保守下界，绝不给件数预测**——
-`N = floor(可用空间 ÷ 池内最大 size)`，文案为"剩余空间**至少**还能放下 N 件"；`k > N` 时追加"**超出部分会进邮件，不会丢失**"。
-**核心已明文禁止"本次将有 N 件进邮件"式表述**（那是件数预测，会暴露"这次没抽到 `void`"、甚至反推大件，**违反 P4**）。
-
-**裁决：开盒前能给的是"基于当前剩余空间的保守提示"，不是精确件数。** 规格如下。
+**核心要求**：**只给保守下界，绝不给件数预测**——`N = floor(可用空间 ÷ 池内最大 size)`，文案"剩余空间**至少**还能放下 N 件"；`k > N` 时追加"**超出部分会进邮件，不会丢失**"。**核心已明文禁止"本次将有 N 件进邮件"式表述**（件数预测会暴露"这次没抽到 `void`"、甚至反推大件，**违反 P4**）。
 
 | 时点 | 能给什么 | 谁产出 |
 |---|---|---|
-| **开盒前**（玩家按下兑现之前） | ① **"本次将结算 k 盒"**（k = 本次批量兑现的盒数，**已知**，不是估计）；② **"仓库剩余空间至少还能放下 N 件本套系物品"**，其中 **N = floor(可用空间 ÷ 池内最大 `ItemDef.size`)**——**池内最大 `size` 取该套系全部可产出物品（含隐藏物品）**；③ 当 **k > N** 时追加一句中性提示：**"超出部分会进邮件，不会丢失"** | 容量只读查询（`warehouse_capacity` 与已用空间）归 **02**；渲染与文案归 **08**。**01 只提供 k 与 `SeriesDef` 引用，不参与计算**（§8） |
-| **开盒后**（产出已定，演出播报） | **精确件数** `M` = 本次 `location == mail` 的实例数 → 播报"**其中 M 件进了邮件**" | 由 **02** 依 `grant()` 的落点汇总；08 / 09 播报。**01 不参与**——01 不认识 `location` |
+| **开盒前** | ① **"本次将结算 k 盒"**（已知，不是估计）；② **"仓库剩余空间至少还能放下 N 件本批盒子的产出"**，`N = floor(可用空间 ÷ 池内最大 ItemDef.size)`——**池内最大 `size` 取"本次要结算的那些盒子的池子当前状态"里最大的一个**（**每个盒子的池子可以不同**，批量兑现必须取**各盒最大 `size` 的最大值**，否则下界保证不成立）；③ `k > N` 时追加"**超出部分会进邮件，不会丢失**" | 容量只读查询归 02；渲染与文案归 08。**本系统只提供 k 与 `SeriesDef` 引用，不参与计算** |
+| **开盒后** | **精确件数** `M` = 本次 `location == mail` 的实例数 → "**其中 M 件进了邮件**" | 由 02 依 `grant()` 的落点汇总；08 / 09 播报。**本系统不认识 `location`** |
 
-**为什么 `N` 是一个可兑现的保证（而不是估计）**：`N` 以池内**最大** `size` 为基准，因此 `k ≤ N` 时，**任何**产出组合的总 `size` 都 ≤ `可用空间`（`void` 只让件数更少）→ **必然全部入库，0 件进邮件**。这是**下界断言**：只在"**不会**溢出"的方向上给保证；反方向（`k > N`）只说"**可能**溢出"，**不说件数**。
-**边界退化**：可用空间不足一个最大件时 `N = 0`，提示退化为直白一句"**仓库已满，本次产出会进邮件（不会丢失）**"。
-**口径**：`可用空间 = warehouse_capacity − Σ(仓库内实例的 size)`（归 02）；`N` 只随**容量**变化，不因池子编辑（ban / boost）而变——编辑只改"开出什么"，不改"放不放得下"。
+**为什么 `N` 是可兑现的保证**：以池内**最大** `size` 为基准，`k ≤ N` 时**任何**产出组合的总 `size` 都 ≤ 可用空间（`void` 只让件数更少）→ **必然全部入库，0 件进邮件**。**边界退化**：可用空间不足一个最大件时 `N = 0`，退化为"**仓库已满，本次产出会进邮件（不会丢失）**"。
+**口径**：`可用空间 = warehouse_capacity − Σ(仓库内实例的 size)`（归 02）；`N` 只随**容量**与该盒池子的**可产出集合**变化——编辑改的是"开出什么"、**不改单件的 `size`**；但**把最大件排除掉会让 `N` 变大**。**v0.10 口径（已定）：单盒按"该盒自己的池子"算 `N`；批量 k 盒时按各盒分别算、取最保守的那个 —— `N = floor(可用空间 ÷ max(各盒池子的最大 size))`。** 绝不能沿用"套系池子"的那一个数。**本条是跨文档的上游口径**：`02-item.md` §9 / `08-ui-panels.md` R-20 / `07-economy-rho.md` §5.2 的 `size_max` / `n_cap` 均以本节为准。
 
-**为什么不能在开盒前给出精确件数（三条，缺一即不可实现）：**
+**为什么不能在开盒前给出精确件数（三条，缺一即不可实现）**：①**产出件数本身是随机的**（每盒 1 件还是 0 件取决于是否抽中 `void`，`void_prob` 可算而单次结果不可知，P4）；②**每件的 `size` 与落点顺序是随机的**（进不进邮件取决于这一件的 `size` 与**当时**的剩余空间，逐件判定只能边抽边定）；③**精确件数会泄露单次悬念**——"3 件进邮件"直接暴露"这次没抽到 `void`"，与 P4 直接冲突。因此预告**只允许**停留在"**容量**"这一个维度上。
 
-1. **产出件数本身是随机的**：每盒产出 1 件还是 0 件取决于是否抽中 `void`（`void_prob` **可算**，**单次结果不可知**，P4）。
-2. **每件的 `size` 与落点顺序是随机的**：进不进邮件取决于这一件的 `size` 与**当时**的剩余空间——而"是哪个物品"在开盒前不可知（P4）；批量兑现时前面几件的落点还会改变后面的剩余空间，**逐件判定只能边抽边定**（判定在 02 的 `grant()` 内，§7）。
-3. **精确件数会泄露单次悬念（设计层红线）**：若预告"本次将有 3 件进邮件"，玩家立刻知道**这次没有抽到 `void`**（甚至能从件数与剩余空间反推大件）。**提前知道件数 = 提前知道结果的一部分**，与 P4"单次悬念不可消除"直接冲突。因此预告**只允许**出现在"**容量**"这一个维度上，不得出现任何与"这次会抽出什么"相关的推断。
+### 5.8 替换：本作最锋利的一层决策（位次稀缺 + 模块是消耗品）
 
-**边界（与核心 §4.7 一致）**：预告是**只读提示**——**不预留空间、不阻止开盒、不改变落点判定、不改变抽取**（判定只在 02 的 `grant()` 内部发生）。**01 不做溢出判定、不读 `location`、不缓存仓库状态**（§2 / §8 / §10.1 I4）。
+**在同一个盒子的池子里**，镶嵌位恒定、不可扩容，所以**不存在"再装一个模块"这个选项**。玩家每一次镶嵌都在回答：**我要把这个盒子里的谁换下来？** —— 确切含义是"**换掉该盒 `modules` 里的一项编辑**"，而**不是**"在池子里挖掉一块再补上"。
 
-**本预告只适用于开盒（裁决 17）**：**开盒是被动产出**——玩家按下兑现后产出必然发生，"放不下"的处置只能是进邮件，所以这里才有"进邮件"预告。
-**主动操作（转化 / 拆卸返还）不适用本规格**：它们放不下时**拒绝整个操作**（不产出、不进邮件），因此**不存在"本次有多少件进邮件"这种提示**——主动操作的失败提示（为什么被拒、缺多少空间）归 06 / 08，**01 不产出也不渲染它**。
+> **在此之前还有一层前置决策：这个盒子值不值得配置？** 因为**模块镶嵌即锁定进这个盒子**（进入该盒 `modules`），而**拆卸只能从盒子上拆、且只返还 50%**：
+
+| 玩家的判断 | 后果 |
+|---|---|
+| **值得配置** | 花掉 N 个模块的**物品成本**，换**这个盒子**（且只是这个盒子）的高质量产出 |
+| **不值得配置** | 让它以**基础池**被兑现即可——**没有任何配置被浪费** |
+| **配置了却先去开别的盒子** | 模块**留在原盒**（已锁定），不会消失，但**也不会跟着别的盒子走**：那个盒子的池子**依然必须是它自己配置的** |
+
+> 这三行是"燃料还是引擎"那层替换决策在**盒子尺度**上的延伸，也是"分批"的真正来源：**配置好的盒子先开，没配置的盒子按基础池开**。这层取舍的代价由 **D17（单个模块的物品成本）** 标定——**它是 P7 的实际执行者**（§11 M9）。
+
+**配套硬要求**：
+
+- **镶嵌界面必须显示将被换下的模块**及其效果损失（R10）；**必须显示"正在配置的是哪个盒子"**，并写明"**模块将锁定进这个盒子、配置下一个盒子需要新的模块**"。
+- **拆卸**：把该盒 `modules` 的第 `slot` **置空**（**定长长度不变**），返还 **50%** 材料；**只返还新建实例**（新 UUID、`source = { kind = &"refund" }`；**`serial = 0` 由 02 内部置位，不是 `grant` 的参数**），**原实例在制造时已销毁、UUID 不可恢复**——"可逆"说的是**池子状态与物品数量**，不是**实例身份**（T6）。**盒子未兑现时才可拆**；**兑现后盒子连同它的 `modules` 一同消耗，没有拆卸路径、也没有返还**（T14）。
+- **★ 模块是消耗品——不存在"模块库存"。** 制造消耗物品（`item_cost`）；**拆卸只返还 50% 材料，模块本体不回到库存、也不可能被搬到别的盒子**（本系统**不提供**任何"模块仓库 / 回收再用"接口）。**为什么必须写死**：若本体可回收再用，同一个模块就能在多个盒子上**轮流使用**——**D17 会被直接归零**（"配置 N 个盒子需要 N × 位数个模块"不再成立），P7 唯一的跨池锚点随之消失。
+- **制造与拆卸必须在同一事务内完成**：任一 `item_cost` 条目实例不足即整体失败（原子，全有或全无）；**替换 = 一次 `ItemService.transact()`**，不是多次调用拼起来——一次替换叠加多次实例销毁与创建，失败面比计数模型更大，故任一失败必须**物品侧事务整体回滚**（含撤销本次已 `grant` 的返还新实例）。**不承诺跨系统原子性**：`transact()` **只覆盖物品侧**，本系统侧状态不在其中，其后失败由本系统自行回退或自愈。
+- **⚠️ 拆卸返还装不下 → 拒绝整个拆卸**（裁决 17）：`Σ(返还实例的 ItemDef.size) > 仓库剩余空间` ⇒ `unsocket` **返回失败**并给出可读错误（缺多少空间），**`PoolState` 与实例列表逐项不变**（该位仍含那一项、原实例不销毁、不创建返还实例）。**空间预检必须在事务之前**（先查再动），**禁止**"先拆卸 / 先 `grant`，发现装不下再靠回滚补救"。**制造侧不做空间预检**——它只消耗不产出，不因仓库满而失败。
+- **可消耗的只有仓库内实例**：制造只挑 `location == warehouse` 的实例，**邮件实例不可用于镶嵌**；`count()` 只统计仓库实例，本系统**不自行读 `location`、不自行统计**（否则会造出第二个事实来源）。**守恒口径以全部实例（含邮件）为准**——`count()` 只是带 `location` 过滤的查询，**不得**写进任何守恒等式。
+- **禁止提供任何增加镶嵌位的接口**，也**禁止任何"把已镶嵌模块移到别的盒子 / 复制到别的盒子"的接口**（P7 的代码层体现；v0.10 下这是 P7 被改写后仅存的否决项，见 T4 / T13）。
+
+### 5.9 位次语义与"一个盒子"的池子生命周期
+
+```
+[盒子创建：item_pool = 基础池副本；modules = 定长全空位]
+    ├── 镶嵌（写进第 slot 位）──▶ [已配置] ──继续镶嵌──▶ [已配置]
+    │                              └─── 拆卸（把该位置空）───▶ [未配置：所有位皆空]
+    └──────────────────────────────────────────────────────▶ [未配置：状态 = 基础池（void_mass_bp = 0）]
+[已配置] ──兑现──▶ [盒子连同 item_pool 与 modules 一同消耗]（终态：池子随盒消失，无返还）
+```
+
+**状态不是"存在池子里的东西"，而是 `item_pool` + `modules` 的函数**：全部拆卸后 `modules` **所有位皆空（已占用位数 = 0）**，状态**必然**回到基础池（`void_mass_bp = 0`）——**注意：定长数组的"空"不是 `[]`**（长度永远 == `socket_count`，"空" = **每个下标都是空项**）；因此不需要任何"补回来"的动作，也不会出现"不可逆的污染"（§5.8 的可逆承诺是**结构性**的）。**v0.10：这个状态机是"每个盒子一份"的**——状态迁移只发生在**一个盒子内部**，不跨盒、不共享；`item_pool.socket_count` 按该盒所属套系品质取值，`modules` 的**定长就是它**（C4）；**两个同套系的盒子位子数相同，池子内容却可以完全不同**。
 
 ## 6. 参数表（推荐值 + 调参旋钮标记）
 
-🔧 = 调参旋钮；标"红线"者不可调，改动即破坏 C1 / C3。
+🔧 = 调参旋钮；🔧🔧 = 主旋钮；标"红线"者不可调，改动即破坏 C1 / C2 / C4 / C6。**（v0.13：C3 已作废、不再是红线，见 §5.4。）**
 
 | 参数 | 字段 / 位置 | 推荐值 | 性质 | 说明 |
 |---|---|---|---|---|
-| 套系品质 | `SeriesDef.series_quality` | **1..4**（切片取 **2**） | 内容驱动（里程碑解锁） | 核心 §4.1.1：决定 `regular_count` / `socket_count` / `device_slot_count` / 物品品质区间；**不得靠消耗物品或重复开盒提升** |
-| 常规物品 / 隐藏物品数量 | `regular_count`（== `regular_items.size()`） / `hidden_item` | **8 / 1**（品质 1–2）、**12 / 1**（品质 3–4） | 随套系品质固定 | 核心 §4.1 / §4.1.1；同一套系内恒定、运行时不可变 |
-| 常规物品概率总和 / 单个物品基础权重 | `regular_weight_total` / 派生 `0.98 / regular_count` | **≤ 0.98** / **0.1225**（物品数 8）· **≈ 0.0817**（物品数 12） | **红线 C1** | 差额 = `void_prob`（README §6.1 修订）；`Σ常规 + void_prob + 0.02 == 1.0`；权重随物品数变化，见 §5.2 |
-| 隐藏物品权重 | `hidden_weight` | **0.02** | **红线 C3** | 恒 2%，不可编辑 |
-| 未拥有物品权重倍率 | `unowned_weight_mult` | **1.5** | 🔧 | 只改变常规物品内部相对比例；**"未拥有"取收藏口径 `collected`**（裁决 11，§5.2.1）——**01 不得用持有 / 仓库口径判定** |
-| 保底阈值 | `pity_threshold` | **8** | 🔧 | 核心 §4.1 写明"连续 8 次"，改动须回写核心文档 |
-| 保底参数组（启用 / 候选含隐藏物品 / 抽样方式 / 全收集后行为 / `void` 计入） | `pity_enabled` / `pity_includes_hidden` / 条件覆盖 / `min(+1, 阈值)` 封顶 | **true / true** / 子集内相对权重 | 🔧 / 固定 | `[补充]` 见 §5.3：`void` 计入保底推进；armed 时 `void` 不参与 |
-| RNG / 抽样顺序 | `RandomNumberGenerator` / `SeriesDef` 固定序 + `void` 段 | 显式 `seed` / 常规物品序 → 隐藏物品 → `void` | 固定 | `[补充]` 跨平台可复现 |
-| 镶嵌位数量 | `SeriesDef.socket_count` | 随套系品质：**2 / 3 / 4 / 5**（品质 1/2/3/4；切片取品质 2 = **3**） | **该套系的常量**（运行时不可变） | **C4**：由套系品质决定、同一套系内恒定；位子与池子必须同步长（核心 §4.1.1）；D3 曲线已不再是开工阻塞（§11）；行为归 05 |
-| 装置槽位数 | `SeriesDef.device_slot_count` | 随套系品质同步（核心 D4，推荐：是） | **该套系的常量**（运行时不可变） | P7 的另一半；只被 04 读取，行为见 `04-device.md` |
+| 套系品质 | `SeriesDef.series_quality` | **1..4**（切片取 **2**） | 内容驱动（里程碑解锁） | 决定 `regular_count` / `socket_count` / `device_slot_count` / 物品品质区间；**不得靠消耗物品或重复开盒提升** |
+| 物品数量 | `SeriesDef.regular_count` | **8**（品质 1–2）、**12**（品质 3–4） | 随套系品质固定 | 同一套系内恒定、运行时不可变；**v0.13：池中全部为常规物品，`hidden_item` / `HIDDEN_COUNT` 已删除** |
+| **稀有度** | **`ItemDef.rarity`** | **需切片实测标定**（核心 **D19**） | 🔧🔧 | **权重、越大越常见、必须 ≥ 1**；`p_i = rarity_i / Σ rarity`（**全部物品共分 100%**）。同一份清单、不同稀有度就是不同的经济（§11 M10） |
+| 物品概率总和 | 派生（**不再有独立权重表**） | **物品概率总和 + `void_prob` 恒为 100%** | **红线 C1** | **全部物品共分 100%**；整数口径 **`Σ weights_bp + void_mass_bp == 10000`** |
+| 未拥有物品权重倍率 | `SeriesDef.unowned_weight_mult` | **1.5** | 🔧 | 只改物品内部相对比例；判定源 = **收藏口径 `collected`** |
+| **镶嵌位数量** | `item_pool.socket_count` | 随该盒所属套系品质：**2 / 3 / 4 / 5**（切片品质 2 = **3**）；装置槽位数 `device_slot_count` 同步（核心 D4） | **该池（盒）的常量** | **C4**：同一池内恒定、运行时不可变；位子与池子必须同步长——`socket_count / regular_count` 落在 **25%–40%**，否则高品质套系会被收敛（R2 从后门回来） |
+| 排除损耗率 / 回收率 | `recover_rate` | **0.60**（即损耗 40%） | 🔧🔧（核心 D6） | `void_mass = freed_mass × 0.4`；ρ 与 R2 的主旋钮；`recover` 覆盖它 |
+| 提升倍数上限 / 排除数上限 | `boost_cap` / `ban_limit` | **×3**（D7） / **`regular_count − 3`**（品质 2 → 5） | 🔧 / **派生自 C6，不是旋钮** | 单物品提升上限 ／ 保证至少 3 个可产出物品 |
+| 拆卸返还率 | `unsocket` | **50%** | 🔧（核心 D8） | 返还 = **新建实例**（新 UUID、`kind = &"refund"`、`serial = 0`）；**返还装不下则拒绝整个拆卸** |
+| 重分配默认模式 / 切片模块数 | `redistribute_mode` / `ModuleDef` 内容量 | `AUTO` / **6–8 个** | 固定 / 内容 | 按基础权重分配 ／ 覆盖 BAN 与 BOOST，含 1 组多目标排除 |
+| **单个模块的物品成本** | `ModuleDef.item_cost` 合计 | **需切片实测标定**（核心 **D17**） | 🔧🔧 | ★ **v0.10 最关键的数字、P7 的实际执行者**：标定过低 ⇒ 配置被复制到大量盒子、**P7 实质回归**；过高 ⇒ 只配得起少数盒子、per-box 池子退化。见 §11 M9 |
+| RNG / 抽样顺序 | `RandomNumberGenerator` / 固定序 | 显式 `seed` / **物品序 → `void`** | 固定 | `[补充]` 跨平台可复现。**物品序 = 全部物品的固定数组顺序**（v0.13：无隐藏物品插在中间） |
+| 保底族参数（v0.11 已删除） | ~~`pity_*`~~ | — | **不存在** | 保底、计数器与"必出"覆盖一律不存在、不入档（§5.3） |
+
+**`item_pool.socket_count`、`recover_rate`、`ItemDef.rarity`、模块成本（D17）是四个最重要的数字**：它们共同决定 ρ 的上限、R2 的强度与 §5.8 替换决策的锋利度；**前两个管"单个池子"的强度上限（结构性、不可绕过），后两个管"池子长什么样、有多少个池子被配置过"（经济性）**——**四者都必须在切片阶段用真实手感测出来，不得拍脑袋写进配置。**
 
 ## 7. 流程 / 状态机
 
+**A. 镶嵌 / 替换 / 拆卸（本文件内的池子编辑）**
+
+选择**目标盒子** + 模块 + 槽位 → 合法性校验（§5.2.3，非法即**响亮拒绝**并指明冲突源）→ 该位已占用？则先显示"将被换下"并要求**显式确认**（**不做隐式覆盖**）→ `PoolService.socket(state, box_id, module_id, slot)`（含制造消耗：**一次 `transact()`、原子**）→ `_rebuild(state, box_id)`（`revision += 1`）→ **`pool_changed(box_id, revision)`** → 07 缓存失效（键 `(box_id, revision)`）→ 08 六面板刷新（**默认层两数字立即变化，仅针对这个盒子**）→ ★ 模块**进入该盒 `modules`**、锁定在这个盒子（该盒施工台清空；配置**下一个盒子**需要**新的模块**）。
+
+**拆卸**：`unsocket(state, box_id, slot)` —— 先做**空间预检**（装不下 ⇒ 拒绝，`PoolState` 与实例列表逐项不变）→ 一次 `transact()`：置空该位 + 返还 `floor(cost × 0.5)` 的**新实例** → `_rebuild` → 信号。
+
+**B. 兑现（抽取侧）**
+
 ```
-     [囤积清单 pending_boxes（01 拥有）]
-                │ redeem(box)  ← 兑现时机是玩家决策（核心 §4.6）
-                ▼
-     [求值 → roll 结算（纯函数 evaluate_pool + 覆盖 void 的抽样；**只产出 item_id，不建实例**）] ──校验失败──▶ [拒绝：盲盒不消耗、计数不改、不发物品]
-                │ GachaResult（**先结算后演出**，核心 §16）
-                ▼
-     [演出（见 09-presentation）]  ← 可跳过；演出只播报，不得重抽
-                │ 提交（唯一副作用段）
-                ▼
-     物品入库：`ItemService.grant(item_id, source)` **由 02 创建实例并判定落点**（01 不创建、不持副本、**不感知 `location`**）｜void 例外：不入库、**不产生实例**（因此也没有落点） ／ 图鉴标记(10) ／ pity_counter +1（void 亦计入）+ 开箱日志(01 + 10)
+[盲盒获得（03 的任务奖励 / 10 的解锁发放）]
+      │ grant_box(series_id, count, source)  ← 每个新盒子：生成 box_id（Uuid.v4()）+ init_pool() 复制基础池 + 定长空 modules
+      ▼
+[囤积清单 pending_boxes；**每个盒子各带一份池子与自己那份模块列表**]
+      │ redeem(box)  ← 兑现**哪个盒子**是玩家决策（决策内容 = "给哪些盒子配置好了"）
+      ▼
+[本系统求该盒当前状态（_rebuild）→ 07 求值成 PoolEvaluation → 纯函数 roll(evaluation, seed) + 覆盖 void 的抽样]
+      │ ──校验失败──▶ [拒绝：盲盒不消耗、不发物品]
+      ▼
+[GachaResult（**先结算后演出**）] → [演出（09，可跳过；只播报、不得重抽；**只反映这一个盒子的池子**）]
+      │ 提交（唯一副作用段）
+      ▼
+物品入库：ItemService.grant(item_id, source)（**由 02 创建实例并判定落点**；本系统不创建、不持副本、**不感知 location**）
+｜void 例外：不入库、不产生实例 ／ 图鉴标记(10) ／ 开箱日志(01 + 10)　← **无计数器可推进**（§5.3）
 ```
 
-**提交段的落点分支（v0.9，判定在 02 内部）**：`grant()` 拿到 `item_id` 与 `source` 后**自己决定**"入库（`location = warehouse`）还是进邮件（`location = mail`）"——**放不下就进邮件，绝不丢弃**（核心 §4.7 / §14.2 铁律 9 / P5）。**01 不参与这个判定**：它既不算剩余空间、也不读返回实例的 `location`、更不记录落点（§5.7 / §8）。
-
-**只有开盒这一支会走邮件（裁决 17）**：
-```
-被动产出（开盒）          ──▶ 放不下 ──▶ 进邮件          ← 01 走这条
-主动操作（转化 / 拆卸返还）──▶ 放不下 ──▶ 拒绝整个操作    ← 06 / 02 的事，不走邮件
-```
-开盒是**被动产出**：玩家按下兑现后产出必然发生，所以"放不下"的唯一合理处置是进邮件（P5：产出永不丢失）。
-**主动操作不同**：转化为"销毁源实例 → 创建新实例"，若产物因空间不足进邮件，就变成"**销毁了源、产物却锁在邮件里**"——**净损失可用持有**，转化从"资源改造"变成"自伤"。因此主动操作在空间不足时**整体拒绝**（源不销毁、不产出、不留邮件痕迹），**不存在"部分成功"**。**不要把"任何产出放不下都进邮件"当成统一规则。** 01 只实现开盒这一支的调用次序，主动侧完整规则归 `06-conversion.md` / `02-item.md`。
-
-**提交段只覆盖物品侧的产出交付（裁决 13）**：`ItemService.grant` 的落点判定与**盲盒的发放 / 消耗**（`grant_box`，来自 03 的任务奖励）**不在同一个跨系统事务里**——**不承诺跨系统原子性**，一致性靠**各自幂等键 + 重放**（01 侧的锚点是全局 `draw_index` 与 `instance_id`，§4.4）。**01 不实现、也不假设任何跨系统回滚。**
-
-保底分支（同一次结算内）：`armed = (pity_counter[s] >= pity_threshold) and 候选集非空`；`armed` → 未拥有物品子集内条件抽样、`pity_triggered = true`，**此时 `void` 不参与**（保底保证的是"必出新物品"）；`!armed` → 在 `PoolEvaluation.probs` + `void_prob` 上全量抽样。出新物品 → 计数清零；未出新物品 **或 `void`** → +1（封顶）。
-
-- **产出契约与"01 × 02"的调用次序（v0.8；v0.9 补落点）**：`roll()` **只产出 `item_id`（及 `void` 判定）**，**不创建实例**；实例由 02 在提交段创建。次序固定如下——**01 全程不碰持有模型，也不碰落点**：
-
-  ```text
-  roll(series_id, evaluation, seed, pity_counter)     # 纯函数（01 拥有），无副作用
-    └─ GachaResult{ item_id, is_void, source{series_id, box_seed, draw_index} }   # 无 location 字段
-         → 演出播报（09，可跳过；不得重抽、不得提前发实例）
-         → 提交（唯一副作用段）：
-              is_void → **不调用 02**（void 不产生实例），只推进 pity 与日志
-              否则    → ItemService.grant(item_id, result.to_source())   # 调用 02
-                          └─ 02 创建实例（分配 UUIDv4 与 serial）**并判定落点**：
-                               放得下 → location = warehouse
-                               放不下 → location = mail   ← **溢出判定只在 02 内部发生**（v0.9）
-                          → 返回 ItemInstance
-                          → 图鉴标记(10) ／ pity_counter 更新 ／ 开箱日志(01 + 10)
-  ```
-
-  **01 对返回的 `ItemInstance` 只读 `instance_id` 转交日志与演出，不缓存、不建副本**（README §3 铁律 2：物品实例列表只允许 `ItemService` 改）；`grant` 的完整签名、幂等规则、`serial` 分配**与落点判定**归 02（见 `02-item.md`）。
-  **落点不可回推抽样**：同一批 `seed` 在"容量充足"与"容量已满"两种状态下，`GachaResult` 序列**逐项相同**——容量只改落点，不改抽样（§10.1 I4）。
-- `[补充]` **批量兑现**：一次兑现 N 个盲盒 = 按清单顺序 **N 次独立结算**，`draw_index` **全局递增**（跨批次不重置，§4.4）；顺序必须确定，日志与回放依赖它。
+**提交段只覆盖物品侧的产出交付**：落点判定与**盲盒的发放 / 消耗**（`grant_box`）**不在同一个跨系统事务里**——**不承诺跨系统原子性**，一致性靠**各自幂等键 + 重放**（本系统侧的锚点是全局 `draw_index` 与 `instance_id`）。**本系统不实现、也不假设任何跨系统回滚。**
+**落点分支（裁决 17）**：`grant()` 自己决定"入库还是进邮件"——**被动产出（开盒）放不下 → 进邮件，绝不丢弃**（P5）；**主动操作（转化 / 拆卸返还）放不下 → 拒绝整个操作**，因为主动操作会销毁源实例腾空间、产物若进邮件就是**净损失可用持有**。**不要把"任何产出放不下都进邮件"当成统一规则。**
+**提交段次序（本系统 × 02）**：`roll(evaluation, seed)`（纯函数，无副作用）→ `GachaResult{ box_id, series_id, item_id, is_void, source{...} }` → 演出播报（09）→ 提交：`is_void` ⇒ **不调用 02**（只落日志）；否则 `ItemService.grant(item_id, result.to_source())` → 02 创建实例（UUIDv4 + `serial`）**并判定落点** → 图鉴标记(10) ／ 开箱日志。**本系统对返回的 `ItemInstance` 只读 `instance_id` 转交日志与演出**，不缓存、不建副本。
+`[补充]` **批量兑现**：一次兑现 N 个盲盒 = 按清单顺序 **N 次独立结算**，`draw_index` **全局递增**（跨批次不重置）；**每个盒子各用自己的池子当前状态**——同套系的两个盒子在同一批里可以有完全不同的分布，**不得**在批内共用一份求值结果或快照。
 
 ## 8. 与其它系统的接口
 
 | 对端 | 方向 | 内容 |
 |---|---|---|
-| **07 数值与期望** | 调用 → | `EvalService.evaluate_pool(pool_state, series) -> PoolEvaluation`（`probs` + `void_prob`）：**唯一权重路径**（README §2.2 铁律）；`headline` / EV / ρ 由 07 产出，01 不产出、08 不另算 |
-| **05 模块与池子** | 只读 ← | **不读 `PoolState` 原始结构**（05 §8.1），只消费经 07 求值的 `PoolEvaluation`；`void_prob` 由 05 的损耗产生；隐藏物品免疫规则（§5.4）由 05 在 `socket()` 校验中**执行** |
-| **02 物品** | 调用 → | **`ItemService.grant(item_id, source) -> ItemInstance`**：01 只传"抽到了哪一件"（`item_id`）与溯源三元组（`GachaResult.to_source()`，§4.4），**由 02 创建实例并返回 `instance_id`**（UUID 生成、`serial` 分配、派生 `count` 维护全在 02）；**01 不创建实例、不生成 UUID、不维护持有量副本**；**`void` 结果不产生任何实例，故不调用该接口**（§5.6） |
-| **02 物品（仓库 / 邮件）** | 不调用 · **不感知** | **`grant()` 内部**决定"入库还是进邮件"（`location ∈ {warehouse, mail}`）——**判定只在 02 发生**（核心 §4.7 / §14.2 铁律 9）；**01 不读 `location`、不读 `warehouse_capacity`、不读 `ItemDef.size` 做溢出判断、不实现任何预留或占位**。`GachaResult` **不含** `location` 字段（§5.7 / §7）。**适用范围（裁决 17）**：本条**只覆盖开盒这类被动产出**——**主动操作（转化 / 拆卸返还）放不下时拒绝整个操作，不走邮件**，规则归 02 / 06 |
-| **02 物品（容量只读查询）** | 只读 ←（转交 08） | §5.7 的开盒前预告需要 `warehouse_capacity` 与已用空间（→ 可用空间），**由 02 提供只读查询、由 08 渲染**；**01 只提供"本次将结算 k 盒"与 `SeriesDef` 引用，不参与该提示的计算**（01 不是容量数据的所有者） |
-| **03 任务** | 被调用 ← | `GachaService.grant_box(series_id, count, source)`：任务奖励发放盲盒入清单。**v0.9（裁决 13）**：盲盒的发放**不在物品侧 `transact()` 事务内**，**不承诺跨系统原子性**——一致性靠幂等键 + 重放（01 侧锚点 = 全局 `draw_index`），**01 不实现任何回滚**（§7） |
-| **10 收集与进度** | 双向 | 只读 **`collected`（收藏口径——×1.5 与 `is_new` 的判定源，裁决 11，§5.2.1）**；**不得**改用持有 / 仓库口径（02 的 `find_unstocked_items()` 不是本用途）；交付开箱日志内容（seed + 池子快照 + 结果 + `is_void`），**持久化格式与文件归 10**；全收集判定归 10 |
-| **09 演出** | 交付 → | `GachaResult`（`item_id` / `quality` / `is_void` / `is_new` / `pity_triggered`）；`void` 的演出呈现归 09，排除物品过滤由 09 依池子状态完成 |
-| **08 界面** | 交付 → | 囤积清单、`pity_counter`、`SeriesDef`（物品数 N）、错误码、`is_void` / `void_prob`（§9）；**开盒前预告所需的"本次将结算 k 盒"**（容量与剩余空间由 02 提供、08 渲染，§5.7） |
+| **07 数值与期望** | 调用 → | `EvalService.evaluate_pool(pool_state, series) -> PoolEvaluation`（`probs` + `void_prob`）：**唯一权重路径**；**入参一律是"被兑现（或被选中）那个盒子"的池子当前状态**——同一套系的不同盒子会得到不同分布。`headline` / EV / ρ 由 07 产出（口径 = **选中那个盒子的池子**），本系统不产出、08 不另算。**07 的另一个入口是 `compute(state, box_id)`**（供 08 / 09 用，**本系统不调用**；其第一个形参叫 `state`、不叫 `pool_state`） |
+| **池子 / 模块子模块（本文件内）** | 内部 | **`PoolService` 是本系统内唯一的池子写入方**：池子 / 模块的变更一律经其接口（**全部带 `box_id`**），**变更后广播 `pool_changed(box_id, revision)`**；抽取侧（`GachaService`）**只读**经 07 求值的结果，**不写池子、不读 `modules` 内容、不应用模块** |
+| **02 物品** | 调用 → | **`ItemService.grant(item_id, source) -> ItemInstance`**：只传"抽到了哪一件"与溯源三元组，**由 02 创建实例并返回 `instance_id`**；模块**制造**用 `consume(instance_ids)`（**只挑仓库实例**、原子销毁）、**拆卸返还**用 `grant(item_id, { kind = &"refund" })`（新建实例、`serial = 0`）、**替换 = 一次 `transact()`**；返还的 `item_id` 经 `resolve_item_id(category, quality)` 反查。**实例列表的唯一写入方是 02**，本系统只发起请求。**`void` 不产生实例，故不调用 `grant`** |
+| **02 物品（仓库 / 邮件）** | 不调用 · **不感知** | "入库还是进邮件"的判定**只在 02 的 `grant()` 内**发生；本系统**不读 `location` / `warehouse_capacity` / `ItemDef.size` 做溢出判断**（§5.7 的预告只提供 k 与数据引用）；`GachaResult` **不含** `location` 字段。**但拆卸返还例外**：**主动操作**必须在事务前做**空间预检**（§5.8）——这不是"判定落点"，而是"先查再动" |
+| **02 物品（容量只读查询）** | 只读 ←（转交 08） | §5.7 的开盒前预告需要 `warehouse_capacity` 与已用空间，**由 02 提供只读查询、由 08 渲染** |
+| **03 任务** | 被调用 ← | `GachaService.grant_box(series_id, count, source)`：奖励发放盲盒入清单。**发放时为每个新盒子生成 `box_id`（`Uuid.v4()`）、`init_pool()` 复制基础池、`modules` 填定长空位**；`box_id` 随盒子落盘，**重放 / 读档 / 迁移读回原值、不重新生成**。**盲盒发放不在物品侧 `transact()` 内**，**不承诺跨系统原子性** |
+| **04 装置** | 只读 ← | 04 的转化端判定读**指定盒子的池子当前状态**（`get_pool_state(state, box_id)`）；装置**永不写池子** |
+| **08 界面** | 交付 → | 囤积清单与 `box_id`、每个盒子的 `item_pool` 摘要与**独立可查的 `modules`**（`get_modules(box)`）、编辑操作入口（**每次操作显式指定盒子**）、错误码、`is_void` / `void_prob`、开盒前预告的"本次将结算 k 盒"。08 维护**选中盒子 `selected_box`** |
+| **09 演出** | 交付 → | `GachaResult`（`box_id` / `item_id` / `quality` / `is_void` / `is_new`）+ **该盒的池子快照**（**= 兑现那一刻 `get_pool_state(box)` 的冻结副本，由本系统在结算时冻结**——日志与 10 的持久化各自留档）；`void` 的呈现归 09，**排除物品过滤由 09 依该盒池子状态完成**；**09 不得调用 `preview_socket()`** |
+| **10 收集与进度** | 双向 | 只读 **`collected`（收藏口径——×1.5 与 `is_new` 的判定源）**；发放**新模块的产出权限**（D13 品质梯度）；持久化侧取 `get_item_pool(box)` / `get_modules(box)`（**基础池只存引用、当前状态不入档**）；全收集判定与日志持久化格式归 10 |
 
 ## 9. UI 需求
 
-数据由 01 提供，**渲染与布局归 08**（见 `08-ui-panels.md`）。
+本系统**提供数据与操作，不实现面板**（面板归 08），但下列为硬要求：
 
-| 需求 | 内容 | 依据 |
-|---|---|---|
-| 架上面板 | 囤积清单按套系分组、数量、单个/批量兑现入口 | 核心 §8.1 |
-| **保底可见性** | 展开层显示"距离保底还差 M 次"（`pity_counter` 与阈值都可读）；已触发时提示"**必出新物品**" | **P1：保底计数必须可查**；核心 §5.4 |
-| 分池提示 | 保底计数**按套系分别显示**，不得合并成一个数字 | §5.5 |
-| 兑现与错误提示 | 即时结算、无等待、无冷却，批量兑现显示进度；`GachaResult.error` 映射为可读文案且**不消耗盲盒** | 核心 §4.6 / §5.6 |
-| **空洞呈现** | 展开层与直方图必须有独立的 `void` 柱（渲染归 08），**镶嵌预览必须显示"排除会让 `void_prob` 升到多少"**（否则玩家会抱怨"排除之后反而更容易白开"，§10.3）；01 提供 `void_prob` 与 `is_void` | 05 §5.4 ／ 07 §5.4 |
-| **开盒前预告（R14 对策③，v0.9）** | 兑现入口旁显示 **"本次将结算 k 盒｜仓库剩余空间至少还能放下 N 件本套系物品"**；`k > N` 时追加 **"超出部分会进邮件，不会丢失"**；剩余空间为 0 时退化为 **"仓库已满，本次产出会进邮件（不会丢失）"**；**结算后**播报 **"其中 M 件进了邮件"** | 规格见 §5.7；**容量查询归 02、渲染归 08**；**01 只提供 k 与 `SeriesDef`** |
+| 需求 | 内容 / 依据 |
+|---|---|
+| 架上面板与池子摘要 | 囤积清单按套系分组、数量、单个/批量兑现入口；**每个盒子显示"自己的"池子摘要**——封面两数字取自 07 的 `headline`，**同套系的两盒可以不同** |
+| **镶嵌前实时预览** | 显示编辑后分布、`void_prob` 变化、**默认层两数字的变化**（`preview_socket()`，P6）。**没有预览的池子编辑不可用** |
+| **直方图与空洞** | **必须同时画编辑前后两条分布**（玩家要亲眼看到自己把分布捏成了另一个形状）；**`void` 必须有独立可视元素**（一根柱子）；镶嵌预览必须显示"**排除会让 `void_prob` 升到多少**"（否则玩家会抱怨"排除之后反而更容易白开"） |
+| **位次与占用常驻可见** | `socket_count` 个格子（按该盒所属套系品质为 2–5）——**位次稀缺是全部重量所在**；"占用 x / N"直接可读（`modules` 定长，数非空项即可） |
+| **★ 必须显示"正在配置的是哪个盒子"** | 并在镶嵌确认处写明"模块将**锁定进这个盒子**、**配置下一个盒子需要新的模块**"——模块一次性、不可移动、不可复用；**替换时必须显示被换下的模块及其损失**（否则玩家会因害怕误操作而不敢决策，R10） |
+| **★ 切换盒子时，池子面板整体切到该盒的池子** | 含已镶嵌模块、`void_mass`、位子占用；**不得做"套系级"合并展示**（那会重新造出"这套系的期望"这个已不存在的概念）。**★ 模块列表必须能独立于池子被查看**（来源 `get_modules(box)`，**不是"池子里的一个字段"**——否则界面会重新暗示"模块被折进了池子"） |
+| **★ 拆卸空间不足必须前置提示** | `Σ(返还 size) > 仓库剩余空间` 时拆卸按钮置灰 / 前置拦截，并显示**还缺多少空间**；界面必须与 §5.8 的空间预检同源，**不得**先执行再报错。非法操作必须指出冲突源（"与槽位 2 的模块冲突"）——静默拒绝等于欺骗（P1） |
+| 保底与预告 | **保底相关的一切不显示**（v0.11：没有保底计数器，**"距离必出还差 M 次"这类提示不存在**）；**禁止**任何"必出 / 系统会兜底 / 再开几次就该出了"式暗示；开盒前预告按 §5.7（只给容量下界、**禁止件数预测**） |
 
-**禁止项：** 不得显示"下一次会出**哪一个物品**"（P4 单次悬念不可消除，只允许提示"必出新物品"）；**开盒前预告不得给出精确件数、也不得给出任何可反推"这次抽出什么"的提示**——只允许停留在容量维度（§5.7 第 3 条）；不得在 UI 层自行计算概率或 EV（`headline` 一律取自 07，核心 §6.4）；`seed` 与日志只在展开层或调试面板出现，不得出现任何"按进度调爆率"的暗示（P1）。
+**禁止项**：不得显示"下一次会出**哪一个物品**"（P4）；不得在 UI 层自行计算概率或 EV（`headline` 一律取自 07）；`seed` 与日志只在展开层或调试面板出现；**不得出现任何"按进度调爆率"的暗示**（P1）；**不得提供任何增加镶嵌位 / 移动已镶嵌模块的入口**（P7）。
 
 ## 10. 测试点与验收标准
 
-全部测试在**无头模式**运行（铁律 1）；夹具覆盖"原始池 / 已 ban / 已 boost / 组合"四类 `PoolState`，并**各跑 `regular_count == 8` 与 `== 12` 两种套系**（核心 §4.1.1）。
+全部测试在**无头模式**运行；夹具覆盖"原始池 / 已 ban / 已 boost / 组合"四类，并**各跑 `regular_count == 8` 与 `== 12` 两种套系**。
 
 ### 10.1 红线测试（缺一即阻塞发布）
 
-- **T（C1 概率守恒，修订）**：任意合法 `PoolState` 下 `Σ probs(常规物品) + void_prob == 0.98` 且 `Σ probs + void_prob + 0.02 == 1.0`（**容差 1e-6**；与 07 §10.1 T2 同源，07 以上界 `≤` 形式表述），**含 ×1.5 生效后的归一化路径**。
-- **C3**：同上 `p_hidden == 0.02` 恒成立；**隐藏物品未拥有时也不因 ×1.5 变化**；ban / boost 隐藏物品的请求被 05 拒绝（跨系统测试）。
-- **C4 / C2（交界）**：`pool_state.socket_count` **恒等于该套系 `SeriesDef.socket_count`**（即随套系品质取值的那个数，2/3/4/5），且**01 的任何代码路径都不得改变它**——含校验失败回滚、批量兑现、保底触发、存档载入与配置重载；也不实现、不修改损耗率，只断言消费的分布与 05 状态一致（完整测试见 `05-module-pool.md`）。
-- **C6（v0.6 新增，交界）**：**任意合法 `PoolState` 下，可产出常规物品数 ≥ 3**（即 `regular_count − 已排除物品数 ≥ 3`）；01 侧断言"抽样空间中常规物品条目数 ≥ 3 且 `probs` 长度 == `regular_count`"，越界请求由 05 在 `socket()` 时拒绝（完整测试见 `05-module-pool.md`）。夹具须覆盖 `regular_count == 8` 与 `== 12` 两种套系。
-- **I1–I3（v0.8 实例不变量，**交界：01 × 02**）**：
-  - **I1 跨系统幂等（本文新增的核心项）**：对**同一个 `instance_id`** 重复调用 `ItemService.grant`，**不得产生第二个实例**——实例总数不变、该 `(category, quality)` 的派生计数不增、累计入库计数不重复累加（核心 §14.2 铁律 8 / README §3 铁律 8）；**等价形态**：对同一 `GachaResult` 在提交段重复提交（重试、重放、演出中断后补交）也只产生**一个**实例。
-  - **I2 01 侧无实例化**：`roll()` 调用前后实例列表逐字段不变；`roll()` 内 `ItemService.grant` **一次都不被调用**（纯函数性，铁律 1）；`item_def` / `gacha_service` 的代码路径中**不得出现 UUID 生成或 `serial` 计算**（静态检查守护，README §3 铁律 8）。
-  - **I3 产出 ≠ 计数**：任一次非 `void` 兑现的判据是"**产生了一个新实例**"（实例数 +1、`instance_id` 为新值），**不是"某个计数字段 +1"**；派生计数由实例列表数出（§10.2 末条）。**v0.9**：落点在 `warehouse` 还是 `mail` 不影响这条判据——**产出 = 新实例，不是"入库成功"**。
-  - **I4 溢出进邮件、产出不丢失（v0.9 新增，**交界：01 × 02**）**：
-    - **产物不丢失**：**把仓库剩余空间调到放不下任何一件（容量已满）**后兑现——**每个非 `void` 结果都产生一个实例**，仓库 + 邮件的实例总数**恰好 +1**，**没有任何产出被丢弃**（核心 §14.2 铁律 9 / P5）；放不下的实例 `location == mail`。
-    - **盲盒照常消耗**：`pending_boxes` −1、`draw_index` +1、开箱日志照常落盘、`pity_counter` 照常推进——**容量不足不是失败**，不返回 `ok == false`、不退款。
-    - **`void` 仍不产生任何东西**：仓库满时抽中 `void` → 不调用 02 的 `grant`、实例总数不变、**邮件里也不会多出一件**（§5.6）。
-    - **`count()` 只见仓库**：溢出后的派生计数**不增加**，邮件实例**不可用于交付 / 装配 / 镶嵌 / 转化**（口径归 02 / 03，01 只做跨系统断言）；**邮件里的物品不改变任何抽取值**（×1.5 看 `collected`，§5.2.1）。
-    - **落点不改抽样**：同一批 `seed` 在"容量充足"与"容量已满"两种状态下重放，`GachaResult` 序列（`item_id` / `is_void` / `is_new` / `pity_triggered` / `draw_index`）**逐项相同**。
-    - **01 侧无落点感知（静态检查）**：`gacha_service.gd` 的代码路径中**不得出现** `location` / `warehouse` / `mail` / `warehouse_capacity` 字面量；`GachaResult` **不得有** `location` 字段；**01 不实现、不调用任何溢出判定或空间预留**（§5.7 / §8）。
-    - **守恒等式仍成立（v0.9 裁决 12）**：溢出发生后 **`total_granted − total_consumed == Σ 全部实例（含邮件）`** 必须成立（**权威等式按全部实例，`count()` 只是带 `location` 过滤的查询**）；01 侧只断言"**实例总数恰好 +1、无丢弃**"，等式校验归 02。
-    - **边界：主动操作不走邮件（v0.9 裁决 17）**：同一溢出状态下，**开盒进邮件**、**主动操作（转化 / 拆卸返还）整体拒绝**——**两者不是同一条规则**。01 只断言**开盒这一支**；"主动操作被拒后源实例不销毁、不产出、不留任何邮件痕迹"的测试归 `06-conversion.md` / `02-item.md`。
+| 红线 | 测试与判据 |
+|---|---|
+| **C1 概率守恒**（T2） | 任意合法池子：**`Σ probs(全部物品) + void_prob ≤ 1.0`**（**浮点断言形式、留取整容差 1e-6**——**`≤` 是回归断言的写法，不是 C1 的陈述**：**C1 的规范陈述是 §5.1 的"物品概率之和 + `void_prob` 恒为 100%"**；含 ×1.5 生效后的归一化路径）；**要断言精确性，只断言整数形态** **`Σ weights_bp + void_mass_bp == 10000`**——零和等式因此可**精确**断言。**v0.13：不再有"隐藏恒 200 bp"与 `≤ 0.98` 这类留白**（隐藏款已删除） |
+| **C2 损耗率**（T3） | `void_mass` 增量 == `0.4 × freed_mass`（容差 1e-9） |
+| ~~**C3 隐藏物品免疫**~~（T1） | **【v0.13 作废】行号保留、不重编号**（以免牵动全库对 C4 / C6 的引用）。原判据"穷举所有模块组合，`probs[hidden] == 0.02`（容差 1e-6）；ban / boost 隐藏物品的请求被 `socket()` 拒绝"**随隐藏款删除而不再存在**——保护对象不存在了（核心 §5.4 / §16.8）。**不得**把它改写成"某个物品的概率恒定"之类的替代断言 |
+| **C4 位数不变量**（T4 / T15） | **两件事都要断言到**：①**定长长度**——`b.modules.size() == b.item_pool.socket_count == SeriesDef(b.series_id).socket_count`（同一池内恒定；跨套系随品质 2/3/4/5）；②**已占用位数（非空项数）≤ 它**——**这一条才是真正的守护**（只断言长度是恒真的）。并对 `item_pool` 与 `PoolState` 做 **getter/setter 审计**，确认不存在任何设置它的接口 |
+| **C6 收敛下限**（T4b） | 任意合法池子下**可产出常规物品数 ≥ 3**（穷举全部合法排除组合）；越界请求由 `socket()` 拒绝 |
+| **单写入方**（T5） | 除 `PoolService` 外，**全仓库无任何位置写入 `PoolState`**（静态检查 + 运行时断言）；`_rebuild()` 的唯一输入是 `item_pool` + `modules` |
+| **实例不变量 I1–I3** | **I1 跨系统幂等**：同一 `instance_id` 重复 `grant` **不得产生第二个实例**（重试 / 重放 / 演出中断补交亦然）；**I2 抽取侧无实例化**：`roll()` 前后实例列表逐字段不变、`grant` 一次都不被调用，且 `gacha_service.gd` 中**不得出现 UUID 生成或 `serial` 计算**；**I3 产出 ≠ 计数**：判据是"产生了新实例"（派生 `count` 由实例列表数出，**不得直接写计数字段**） |
+| **I4 溢出进邮件、产出不丢失** | 仓库填满后兑现：**每个非 `void` 结果都产生一个实例**（总数恰好 +1、**无丢弃**），放不下的 `location == mail`；**盲盒照常消耗**（不返回 `ok == false`、不退款）；**`void` 仍不产生任何东西**（邮件里也不会多一件）；**落点不改抽样**（同批 `seed` 在两种容量状态下 `GachaResult` 序列逐项相同）；**主动操作不走邮件**（同一溢出状态下主动操作整体拒绝，两条路径必须可分辨） |
+| **T6 拆卸完全可逆** | 镶嵌 N 个模块后全部拆卸：① **`PoolState` 回到基础态且 `void_mass == 0`**；② **物品实例数量回到拆卸前**（返还量 == `Σ floor(cost × 0.5)`，口径为**全部实例含邮件**）；③ **但实例 UUID 是新的**——返还走 `grant(item_id, { kind = &"refund" })` **新建实例**，`instance_id` 与拆卸前集合**交集为空**、`serial == 0`；**"UUID 集合与拆卸前相同"是错误断言**，正确断言是**状态级 + 数量级**可逆；④ 制造 / 拆卸的销毁与创建必须在**同一事务（一次 `transact()`）**内原子完成，失败时**物品侧**逐项回到事务前；⑤ **返还空间不足时拆卸被拒绝**：填满仓库 → `unsocket` 返回失败、`PoolState` 与实例列表**逐项不变**（不销毁原实例、不创建返还实例），并给出可读错误——断言"失败路径上两份快照逐项相等"；⑥ **幂等键守卫**：返还调用点**不得**出现 `serial` 参数，且**连续拆卸两次必须得到两个不同 `instance_id`、两次都成功**（若第二次被幂等吞掉，说明 `serial` 被误写进了 `grant` 的第三位——**会吃掉玩家资产的 bug**） |
 
 ### 10.2 功能测试
 
-- **确定性与 `void` 专项**：同 `(evaluation, pity_counter, seed)` 跑 1000 次结果完全相同，不同 `seed` 分布一致；`void` 抽样频率 == `void_prob`（1e6 次，±0.1%）；`void` 结果**不产出任何物品、不产生实例**（02 的 `grant` 不被调用）但**仍消耗一个 `Box`**；`void` 使 `pity_counter + 1`；**保底 armed 的那一次绝不出现 `void`**；存档往返后以同一 `seed` 重放仍得到 `void`。
-- **×1.5（收藏口径，裁决 11）**：1 个 / 2 个 / 0 个未拥有物品三种情形与 §5.2 的 17.29% / 16.33% / 12.25% 逐项相符（**该三例假设 `regular_count == 8`**，`void_prob = 0` 时常规物品合计仍为 98%）；`regular_count == 12` 时按 §5.2 的比例关系重算并断言。
-- **×1.5 只看收藏、不看持有与落点（v0.9 新增，守护裁决 11）**：对一个**已开出过**的物品依次施加——**交付掉全部该物品实例**（`consume`）→ **把该物品的实例全部改到 `location = mail`** → **仓库容量归零** → **领取 / 不领取**——**每一步之后 `probs` 都逐项不变**（收藏口径下它始终算"已拥有"）。**反向对照**：只有把该物品从 `collected` 中移除（模拟从未开出过），分布才切换为"未拥有"口径。**静态检查**：`gacha_service.gd` / `eval_service.gd` 中**不得出现** `find_unstocked_items`（02 的持有 / 仓库口径，含义不同，§5.2.1）。**滥用专项（v0.9，03 / 06 复核发现）**：把某物品的**全部实例留在邮件里不领取**（仓库持有 = 0、也不交付）后，**该物品不得重新获得 ×1.5**——`probs` 逐项不变；**反向**断言：只有 `collected` 变化才会改变加权。这条测试的目的就是堵住"**把实例压在邮件里长期吃 ×1.5**"（§5.2.1 第三条理由）。
-- **开盒前预告的保守性与无害性（v0.9，§5.7）**：`N = floor(可用空间 ÷ 池内最大 size)`；对任意 **`k ≤ N`** 的批量兑现，**用 1e3 组随机种子断言"进邮件件数恒为 0"**（这是 §5.7 承诺的下界保证）；可用空间不足以放下一个最大件时 `N == 0` 且提示文案退化为"仓库已满…"；**预告是只读的**——同一 `seed` 在"看预告"与"跳过预告"两条路径下结算结果完全相同（不预留空间、不改抽样）。
-- **保底与分池**：连抽 8 次不出新物品 → `pity_counter == 8` → 第 9 次必出新物品且 `pity_triggered == true`，出新物品后清零；**全收集时**保底不触发、计数封顶、不报错；A 池计数到 8 时 B 池仍为 0，A 的保底不影响 B 的抽样。**v0.9 追加**：把已开出物品的实例**全部交付 / 全部移入邮件**后，保底与 `is_new` 的判定**逐项不变**（收藏口径，§5.3）。
-- **零概率物品 / 错误处理 / 批量兑现 / 日志**：被 ban 物品在 1e6 次抽样中出现 0 次；未知 `series_id` / 空池 / 配置不合法 → `ok == false` 且不发物品、不改 `pity_counter`、不消耗盲盒；批量兑现顺序确定、`draw_index` **全局递增且连续（跨批次、跨套系不重置，§4.4）**，重放同批 `seed` 得同批结果；每次兑现都产生 `{seed, series_id, pool_snapshot, item_id, quality, is_void}`，存档载入后以同一 `seed` + 快照重放结果一致。
-- **物品产出与实例创建（v0.8）**：开出任一非 `void` 物品时，**恰好产生一个新实例**——02 的 `grant(item_id, source)` 被调用**恰好一次**，返回的 `ItemInstance.item_id == GachaResult.item_id`、其 `source` 含 `{kind = &"gacha", series_id, box_seed, draw_index}`（**前三键由 01 的 `to_source()` 提供**，`box_seed` 即本次 `seed`、`draw_index` 为该次兑现的**全局**序号；`kind = &"gacha"` 由 02 按裁决 4 的取值域补，§4.4），并且**该物品的派生计数 +1**（由实例列表数出并缓存，**不得直接写某个计数字段**）；不得出现"抽到一个物品、再折算成另一个物品"的两层换算；并断言 `ItemDef` 的字段列表中**不存在任何产出映射字段、也不存在任何持有模型字段**（见 §4.2）——池中的物品就是入库的物品。**v0.9 追加**：仓库已满时该断言仍成立，只是实例的 `location == mail`（**派生计数不变，产出不丢失**，§10.1 I4）。
+| # | 测试 | 判据 |
+|---|---|---|
+| T7 | V1–V7 校验（**V1 已作废、跳过**） | 每一条非法输入都必须被拒绝且给出冲突源（**响亮拒绝，不静默钳制**） |
+| T8 | 零和正确性 | 编辑前后常规物品权重总和不变（仅被 `void` 抽走 `void_mass`） |
+| T9 | `AUTO` / `TARGETED` 重分配 | 两种模式下质量守恒 |
+| T10 | 替换路径 | 槽位满时 `socket(box, module, slot)` 必须失败；显式 `unsocket(box, slot)` 后成功（每次操作都作用在**指定的那一个盒子**上） |
+| T11 | `revision` 单调 | 每次写入严格 +1，无跳号无回退（**每盒各自单调**） |
+| **T12** ★ | **同套系的两个盒子可持有不同池子且互不影响** | 给 A 镶嵌若干模块后：① A 的派生状态分布 ≠ B 的；② **B 的 `item_pool` / `modules` / 派生状态（含 `void_mass`）与之前逐项相等**（A 的编辑**一个字节都不许渗到 B**）；③ 两者 `revision` **各自独立**递增 |
+| **T13** ★ | **模块镶嵌后即锁定（不得移到别的盒子）** | ① 全仓库**不存在**"把 A 的模块移到 / 复制到 B"的接口（静态检查 + getter/setter 审计）；② 对 B 调用 `unsocket(B, slot)`（该位为空项）必须失败，且 **A 的 `modules` 与派生状态逐项不变**；③ 对 A 做任何编辑，**B 的池子逐项不变** |
+| **T14** ★ | **模块随盒子兑现而消耗** | 兑现一个已配置盒子后：① 该盒连同 `item_pool` / `modules` 从清单移除、**不再存在**；② 其模块**不返还、也不回到任何可复用位置**（物品侧**无** `refund` 记录）；③ **不存在对"已兑现盒子"调用 `unsocket` 的合法路径**（必须返回失败）；④ 同套系另一个盒子不受影响 |
+| **T15** ★ | **C4 的新表述：每池位数恒等于该盒所属套系品质对应的值** | 对任意盒子：`modules.size() == item_pool.socket_count == SeriesDef(series_id).socket_count`，且**已占用位数 ≤ `socket_count`**；**任意次镶嵌 / 拆卸后两条断言都不变**；同套系所有盒子位数取值相同 |
+| **T16** ★ | **模块不折进池子（结构性断言）** | ① **静态检查**：`PoolState` **不存在** `socketed` 之类的模块字段，**模块列表只出现在 `Box.modules`**，`item_pool` 里也没有模块字段；② **派生性**：把某盒 `modules` 的**所有位置空**（**不是 `[]`**，长度仍 == `socket_count`）后重建，派生状态**逐项等于**该盒 `item_pool` 的基础分布（`void_mass_bp == 0`）——证明"状态是函数"而非"被挖掉一块后累积的坑"；③ **可独立读取**：不经任何池子求值即可读到该盒 `modules`（`get_modules(box)`），长度恒 == `socket_count` |
+| **T17** ★ | **`Module` 无 `slot` 字段 + `ItemPool` 的落盘子集** | ① **静态检查**：`Module` **不含** `slot`（槽位一律取自数组下标，全仓库不存在第二份副本）；② **落盘**：逐盒条目里**不得出现 `base_items` / `base_weights`**，`ItemPool` 只落 `box_id` / `series_id` / `regular_count` / `socket_count` / `revision`——**基础池载入时从 `series_id` 解析**；③ **正向断言**：**改配置里的 `rarity` / 基础权重后，所有存量盒子重载得到的池子一起变**（这是**已接受的代价**，不是 bug；断言它"一致地变"，而不是"各不相同"） |
+
+**抽取侧（01 部分）的功能项**：
+
+- **确定性与 `void` 专项**：同 `(evaluation, seed)` 跑 1000 次结果完全相同；`void` 抽样频率 == `void_prob`（1e6 次，±0.1%）；`void` 不产出物品与实例（02 的 `grant` 不被调用）但**仍消耗一个 `Box`**、**不推进任何计数器**；存档往返后以同一 `seed` 重放仍得到 `void`。
+- **×1.5 取收藏口径（守护裁决 11）**：1 / 2 / 0 个未拥有物品三种情形与 §5.2 的示例逐项相符（假设 `regular_count == 8`、`void_prob = 0`）；**静态检查**：`gacha_service.gd` / `eval_service.gd` 中**不得出现** `find_unstocked_items`。**滥用专项**：把某物品的**全部实例留在邮件里不领取**后，该物品**不得重新获得 ×1.5**——反向断言：只有 `collected` 变化才会改变加权。
+- **开盒前预告的保守性与无害性**：`N = floor(可用空间 ÷ 池内最大 size)`；对任意 `k ≤ N` 的批量兑现，**用 1e3 组随机种子断言"进邮件件数恒为 0"**；可用空间不足一个最大件时 `N == 0` 且文案退化；**预告是只读的**（同一 `seed` 在"看预告"与"跳过预告"两条路径下结算结果完全相同）。
+- **无状态抽取与"不得有隐式必出"**：①同一 `(evaluation, seed)` 必得同一结果；②**连开 8 次（乃至 800 次）不出新物品不得触发任何特殊行为**——按"每 8 次一桶"分桶后各桶经验频率与理论分布卡方一致、**没有任何桶被抬到 1.0**；③**静态检查**：`gacha_service.gd` / `game_state.gd` 内**不得出现** `pity` 前缀标识符，也**不得存在**"累计次数 → 条件覆盖分布"的分支；④`roll()` 的**签名里没有计数器**；⑤**"必出"语言不存在**（UI / 文案 / 演出资源）。
+- **零概率物品 / 错误处理 / 批量兑现 / 日志**：被 ban 物品在 1e6 次抽样中出现 0 次；未知 `series_id` / 空池 / 配置不合法 → `ok == false` 且不发物品、不消耗盲盒；批量兑现顺序确定、`draw_index` **全局递增且连续**、重放同批 `seed` 得同批结果；每次兑现都产生 `{box_id, seed, series_id, pool_snapshot, item_id, quality, is_void}`，存档载入后以同一 `seed` + 快照重放结果一致。
+- **物品产出与实例创建**：开出任一非 `void` 物品时**恰好产生一个新实例**——`grant(item_id, source)` 被调用**恰好一次**，返回实例的 `item_id` 与 `GachaResult.item_id` 一致、`source` 含 `{kind = &"gacha", series_id, box_seed, draw_index}`，且**该物品的派生计数 +1**；`ItemDef` 的字段列表中**不存在任何产出映射字段或持有模型字段**。
+- **盒子身份与池子随盒子走**：①**同套系两盒的池子可以不同且各自独立**（A 配 2 个 ban + 1 个 boost、B 各位皆空 → 分布逐项不同、各自仍满足 C1/C2/C6；两者的 `item_pool` / `modules` **不是同一个对象**）；②**编辑 A 不影响 B**（改 A 的 `modules` 后 B 的两个字段与派生状态逐字段不变）；③**`roll()` 只消费被兑现那个盒子的当前状态**（批量时第 i 次用第 i 个盒子的求值结果，日志第 i 条 `box_id` 逐位等于第 i 个盒子的 `box_id`）；④**不应用模块、当前状态不入档**（静态检查无 `modules` / `socketed` / ban / boost 读写与"编辑后的权重"字段；存→读→取状态逐字段相等；存档里**没有**"编辑后的权重"这第二份数据）；⑤**`box_id` 的稳定性来自持久化**（生成一次并随盒子落盘；重放 / 读档 / 迁移**读回落盘值、不重新生成**；读档后逐位不变、不同盒互不重复）。
 
 ### 10.3 切片失败信号（要正视）
 
-| 信号 | 指向 |
-|---|---|
-| 测试者在 10 分钟内把池子编到接近必出 | **C4 未生效或 C6 保底（≥3 个物品可产出）失效，检查代码**；同时确认 C1 / C3 红线是否真的在跑 |
-| 测试者问"这个盒子平均能拿多少"却找不到答案 | 核心 §6 默认层失败；核对 `headline` 是否被 UI 另算 |
-| 测试者怀疑概率被暗改 / 显示的分布与实际不符 | **R4（头号 bug 源）**：共享求值路径被绕过 |
-| 测试者从不囤积，拿到盒子就开；或对保底毫无感知、把保底理解为"系统预先知道我要什么" | 核心 §4.6 兑现时机未成立（检查清单可见性）／ 保底 UI 可见性失败、提示文案越界（显示了具体物品），见 §9 |
-| **玩家反映"排除之后反而更容易白开"，或不明白排除为何会减少产出** | **`void` 的代价超出预期，或未在 UI / 镶嵌预览中说明**；检查直方图的 `void` 柱与镶嵌预览文案（05 §5.4 / §9），必要时下调 D6 损耗率 |
-| **测试者攒了一批盒子却说"不敢开"，或抱怨"开出来的东西丢了 / 没地方放"** | **R14（v0.9 新增风险）**：①"东西会丢" → 邮件兜底未生效，检查 §10.1 I4；②"不敢开" → **开盒前预告缺失（§5.7）或文案没把"超出部分进邮件"说清楚**；③核对容量是否已由里程碑解锁（D15） |
-
-**验收标准**：§10.1 全绿 + §10.2 全部通过 + §5.2 四项共享路径保证全绿，且能由无头模式单条命令跑完。
+- ✅ 测试者主动讨论"**这个要不要留**"；✅ 在被排除物品与缺口物品之间做出**有意识的取舍**；✅ 表现出"**给哪些盒子配置好了，就先开哪些**"的分批行为（**而不是**旧口径的"等我把池子编好再开这批"）。
+- ❌ **10 分钟内把池子编到接近必出** → C4 / C6 / C2 未生效，**检查代码而非调参**（这里的"必出"指 C6 保留下限，与 v0.11 已删除的保底无关）。
+- ❌ 抱怨"**想再装一个但位子不够**" → ⚠️ **这是设计意图，不是 bug**；但若玩家感到的是**挫败**而非**取舍**，应调低拆卸成本（50% → 更高返还），**而不是增加镶嵌位**。
+- ❌ **完全忽略池子面板** → R3 成立，"燃料/引擎"被淹没，需要简化而非放弃本系统；❌ **不理解 `void`** → 可视化失败，直方图必须重做。
+- ❌ 抱怨"**高品质盒子位子多了但没什么用**" → **位子/池子比例失衡**，核对 **25%–40%** 区间，修正比例而**不是**加排除强度。
+- ❌ 问"这个盒子平均能拿多少"却找不到答案 → 默认层失败，核对 `headline` 是否被 UI 另算；❌ 怀疑概率被暗改 → **R4（头号 bug 源）**：共享求值路径被绕过。
+- ❌ 攒了一批盒子却说"**不敢开**"（R14）→ 检查开盒前预告与"超出部分进邮件"的文案、容量是否已由里程碑解锁；❌ 仓库满时开盒后说"**东西不见了**" → 溢出告知未落地。
+- ❌ 说"**我明明没排除这个，怎么它没了**"／"我排除了它却还出现"／**两个同套系盒子的表现一模一样** → **池子随盒子走未落地**（读了"套系池子"、批内共用快照、编辑写回 `SeriesDef`、或把模块"折进"了 `item_pool`）。
+- ❌ 预期"**系统会兜底**"（"我都开了这么多次，该出了吧"）→ 检查展开层是否**明确写清"每一次抽取就是公布的分布、没有任何必出"**；**处置是"把概率讲清楚"，绝不是在代码里加隐式必出**（核心 R15 / D18）。
 
 ## 11. 待定项
 
 | # | 待定项 | 推荐 | 影响 |
 |---|---|---|---|
-| G1 | 核心 §5.4 的"隐藏物品**独立保底**（开满 N 次必出）"与术语表"连续 8 次未出新物品"是同一机制还是两套计数器 | 按**单一保底**落地（候选集含隐藏物品） | 若为两套需回写核心文档并增加计数器 |
-| G2 | `[补充]` 的权重路径顺序（×1.5 与编辑、损耗的先后）最终确认 | ①→②→③→④→⑤（见 §5.2） | 顺序改变分布与归因面板口径 |
-| G3 | 保底是否计入默认层显示的概率与 EV；`void` 是否进入默认层 | 由 07 定口径，`PoolEvaluation` 保持无条件分布，`void_prob` 单列 | 影响 `headline` 语义（P2） |
-| G4 | "仅剩隐藏物品未拥有"且保底触发时结果完全确定，与 P4"预知"字面存在张力 | 视为设计意图（核心 §5.4 明确要求保底） | 若不可接受需把保底候选集限制为常规物品 |
-| G5 | 未拥有物品 ×1.5 是否随进度变化；批量兑现中单个盒子校验失败的处理；第 2 套系池边界；日志持久化格式 | **恒定 1.5**（随进度变化即"按进度调权"，P1 否决）；**判定源已定为收藏口径 `collected`**（裁决 11，§5.2.1——不是持有 / 仓库口径）；全部预校验后再逐个提交；切片不做第 2 套系但结构按 N 套系预留；日志格式归 10 | P1 红线、错误文案、存档结构 |
-| G6 ⚠️ | `void` 的最终形态：**完全无产出**（07 E2 / 05 M3）是否成立；`void` **计入保底**（§5.3）与 P5"永远不是空手"的张力如何回写核心设计书 | 维持"完全无产出"；保底计入保持 | 若要改为"产出极低价值废料"，需回改 01 / 02 / 09；C1 措辞修订须回改核心设计书 |
-| G7 ★ | **核心 D3（v0.6 改版）：套系品质 → 常规物品数 / 镶嵌位数的曲线**——由"取一个数"变为**取一条品质曲线** | **按核心 §4.1.1 的表落地**（品质 1：8 个物品/2 位 · 2：8 个物品/3 位 · 3：12 个物品/4 位 · 4：12 个物品/5 位）；**不再是开工阻塞**：切片只有 1 个套系，取**品质 2 = `regular_count` 8 / `socket_count` 3**（沿用 v0.5 手感数据），曲线形状推迟到**第 2 个套系上线前**定 | 曲线形状直接决定 **ρ 上限与 R2 强度**，且**一旦上线极难回改**；曲线若有改动，`regular_count` / `socket_count` / `device_slot_count`、本文 §5.1 与 §5.2 的权重与示例数字、C6 的 ≥3 个物品断言须同步更新 |
-| **G8** ✅ | ~~**开盒前预告的形态（R14 对策③，v0.9 新增）**~~ | ✅ **已定（§5.7）**：**保守容量提示**——`N = floor(可用空间 ÷ 池内最大 size)`，只承诺"`k ≤ N` ⇒ 必然 0 件进邮件"；**禁止件数预测**（核心 §12 R14 对策③ 已明文写死）。精确件数 `M` **只在结算后**由 02 的落点汇总给出 | 预告文案与位置归 08（R-20）、容量查询归 02。**件数预测会泄露单次悬念、违反 P4**，故不是"暂时不做"，而是**永久禁止**——除非先解决 P4 泄露问题 |
-| **G9** | `ItemDef.size` 的取值是"每件都很大"（挤压囤积）还是"多数很小"（容量几乎不痛） | 按核心 D16 的示意（品质 1/2/5/10，容量 1000），**切片实测**；`size` 取值决定 R14 的强度，**不改任何抽取规则** | 只影响 §5.7 的 `N` 与仓库压力，**不影响概率、保底与 `void`** |
-
-> **D3 状态（v0.6）：不再是开工阻塞项。** 切片单套系取**套系品质 2 = 8 个常规物品 / 3 镶嵌位**（核心 §13.1 / §15 D3）；
-> 阻塞解除的代价是**文档内的数字多了一个维度**——凡权重、概率示例与测试夹具，都必须写明所假设的 `regular_count`（§5.2 / §10.2）。
+| **G7 / M1** ★ | **套系品质 → 常规物品数 / 镶嵌位数的曲线**（核心 D3；原 01 G7 与 05 M1 合并） | **按核心 §4.1.1 的表落地**（品质 1：8 物品/2 位 · 2：8/3 · 3：12/4 · 4：12/5）；**不再是开工阻塞**：切片只有 1 个套系，取**品质 2 = `regular_count` 8 / `socket_count` 3**；曲线形状推迟到**第 2 套系上线前**定 | 直接决定 **ρ 上限与 R2 强度**，且**一旦上线极难回改**；曲线若有改动，`regular_count` / `socket_count` / `device_slot_count`、§5.1 与 §5.2 的示例数字、C6 断言须同步更新 |
+| **G6 / M3** ✅⚠️ | **`void` 的最终形态**（原 01 G6 与 05 M3 合并） | **M3 ✅ 已定（核心 §5.6）**：**完全无产出**——抽中即不产出任何物品、仅消耗一个盲盒，**且不推进任何计数器**。**G6 ⚠️ 仍开放**：它与 P5"永远不是空手"的张力**更大**了——"计入保底推进"这条补偿已删除，**P5 的满足只剩演出层两项** | 若要改为"产出极低价值废料"，需回改 01 / 02 / 09；**正确反应是先测 R15，而不是给 `void` 加产出**（加产出会同时破坏自限机制与 C2） |
+| **G2** | `[补充]` 的权重路径顺序（×1.5 与编辑、损耗的先后）最终确认 | ①→②→③→④（§5.2） | 顺序改变分布与归因面板口径 |
+| **G3** | `void` 是否进入默认层显示的概率与 EV | 由 07 定口径，`PoolEvaluation` 保持无条件分布，`void_prob` 单列 | 影响 `headline` 语义（P2） |
+| ~~G1~~ ❌ ／ ~~G4~~ ❌ ／ ~~G10~~ ❌ | ~~隐藏物品独立保底是否为另一套计数器（G1）／保底触发时结果完全确定与 P4 的张力（G4）／`pity_counter` 的归属（G10）~~ | ❌ **三条都随 v0.11 删除保底而"问题本身消失"**（不是"已裁决"，是**不存在**：没有"必出"覆盖，也没有计数器）。**另（v0.13）**：G1 里"隐藏物品独立保底"这个设想连**对象**都没有了——**C3 与隐藏款一并作废**（§5.4） | 记录留存以免重提；**不要按 v0.10 的结论实现任何东西** |
+| **G5** | ×1.5 是否随进度变化；批量兑现中单个盒子校验失败的处理；第 2 套系池边界；日志持久化格式 | **恒定 1.5**（随进度变化即"按进度调权"，P1 否决）；**判定源已定为收藏口径 `collected`**；全部预校验后再逐个提交；切片不做第 2 套系但结构按 N 套系预留；日志格式归 10 | P1 红线、错误文案、存档结构 |
+| **G8** ✅ | ~~开盒前预告的形态（R14 对策③）~~ | ✅ **已定（§5.7）**：**保守容量提示**，只承诺"`k ≤ N` ⇒ 必然 0 件进邮件"；**禁止件数预测**（核心 §12 R14 对策③ 已写死）。精确件数 `M` **只在结算后**由 02 的落点汇总给出 | 预告归 08、容量查询归 02。**件数预测会泄露单次悬念、违反 P4**，**永久禁止** |
+| **G9** | `ItemDef.size` 的取值（挤压囤积 vs 容量几乎不痛） | 按核心 D16 的示意（品质 1/2/5/10，容量 1000），**切片实测**；不改任何抽取规则 | 只影响 §5.7 的 `N` 与仓库压力，**不影响概率与 `void`** |
+| **G11** ✅ | ~~盒子的稳定身份~~ | ✅ **已裁决（核心 §4.1.2）：加**——`Box.box_id : String`，`Uuid.v4()`（**不用** `ResourceUID.create_id()`）；**与 `instance_id` 同源同类型、无转换**；**稳定性来自持久化、不来自派生**（生成一次并随盒子落盘，重放 / 读档 / 迁移读回原值）。**连带**：`pool_changed` 携带它、日志记它 | 记录留存以免重提：**`ItemInstance.source` 暂不加 `box_id`**（反向链路 `source.{box_seed, series_id}` → 日志 → `box_id` 已够用，且加它会改 02 已实现并全绿的实例存档 schema）；**触发条件：若将来要做"逐盒归因 ρ"，才需要给 `source` 补 `box_id`**——已登记为 **`02-item.md` §11 M10**。**两者不得互为主键** |
+| **G12** ★★ ／ **M9** ★ | **去掉保底后的尾部风险（G12 = 核心 R15 / D18）／ 跨池复制的成本（M9 = 核心 D17）** | **两者都需切片实测、且都要优先测**：**G12** 先按"无保底"实测尾部（记录"开出下一个缺口物品"的实际次数分布，判断是否出现心理死墙）；**M9** 标定单个模块的物品成本（它**是 P7 的实际执行者**：过低 ⇒ 配置被复制到大量盒子、P7 实质回归；过高 ⇒ 只配得起少数盒子、per-box 池子退化） | **G12**：决定全收集尾部的可忍受度；**处置纪律**：不得以"隐式必出"复活保底，替代机制必须**可公布、可查**（P1 / P6）。**M9**：同时决定"使用物资"的压力强度（**配置 100 个盒子 = 100 × N 个模块的物品**）。**v0.13 修订（R15 大幅缓解）**：隐藏款删除后**不再有"最难、又无法被编辑影响"的那一款**，每一款都能用"提升"加速；**残留风险 = "抬缺口很贵"**——实测要测的是"**达到可接受出率所需付出的物品成本**"，而不是"是否存在死墙"。**D18 的选项②（松绑 C3）已随 C3 作废而失去意义**（核心 §12 R15 / §16.8） |
+| **M10** ★ | **各物品的稀有度配置（v0.12 新增 = 核心 D19）** | **需切片实测标定**：先按"品质越高、稀有度越小"配一版，再看封面两个数字（头奖概率 / 数学期望）是否失衡 | 直接决定 **`M̄`（期望）与头奖概率**的分布形态，是内容侧的**主要经济旋钮**，量级与 D17 同级。三条纪律：①`rarity ≥ 1`（**0 表示永不产出**，是配置错误）；②极端差距会把最小的一件**取整成 0 bp**（用 `ItemPool.zero_bp_items()` 可查）；③`rarity` 是**权重**、不是"稀有等级"，**越大越常见**。**④ v0.13 口径变更（实测纪律）**：旧 `rarity` 数字是在"常规物品共分 98%（隐藏恒 2%）"的基线上标的，**隐藏款删除后那 2% 并入全部物品的归一化**，因此 `M̄`（期望）会**随之上升约 2%（相对量级，非精确算式）**——**旧数字不可直接复用，D19 必须在新 100% 基线上重新实测标定**（核心 §16.8 / D19） |
+| **M2** ✅ | ~~C1 措辞修订（≤ 98% + `void`）~~ | **已回改核心（v0.6）**：C1 = "常规物品概率之和 + `void_prob` 恒为 98%"，并新增核心 **§5.6「空洞 void」**正式定义。**v0.13 再修订**：该式现为"**物品概率之和 + `void_prob` 恒为 100%**"（隐藏款删除，`≤ 98%` 的留白不再存在；核心 §16.8） | 记录留存以免重提 |
+| **M4** | `recover`（回收）模块的具体规则 | 第二切片（本版仅定义接口与 `recover_rate = 0.60`） | 决定损耗是否可被部分对冲 |
+| **M5 / M6 / M7** | 模块品质梯度（D13）的释放节奏 ／ 多目标排除的上限 ／ 是否给"排除"提供撤销窗口 | 由里程碑任务逐步解锁 ／ 上限 **2 个** ／ **不做**，靠 50% 拆卸返还 | R11 关键（ρ 只能靠内容释放成长）／ 影响 R2 ／ 关系 R10 |
+| **M8** ✅ | ~~返还实例的 `source` 形状与 `serial = 0`；两文档消耗维度不对称~~ | **已解决**：① `source` 是**开放字典、`kind` 必填**，返还写 `{ kind = &"refund" }`（可再带 `module_id` / 槽位下标——**不是 `Module` 的字段**）；`serial = 0` 由 02 内部置位、允许重复；② **消耗维度已统一为 `(category, quality, amount)` 需求向量**，与 04 的 `DeviceCost` 同结构 | 记录留存以免重提：**`serial` 不是 `grant` 的参数**（第三位是幂等键）——这条同时是本作最重要 bug 的根因（§5.8 / T6） |

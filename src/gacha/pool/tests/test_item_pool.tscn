@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cob0testpool1"]
+
+[ext_resource type="Script" path="res://src/gacha/pool/tests/test_item_pool.gd" id="1_tests"]
+
+[node name="TestItemPool" type="Node"]
+script = ExtResource("1_tests")

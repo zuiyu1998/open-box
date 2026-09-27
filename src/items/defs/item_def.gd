@@ -17,7 +17,12 @@ extends Resource
 @export_range(1, 5) var quality: int = 1    # 物品品质 quality（≠ 套系品质 series_quality）
 @export var value: int = 1                  # 该物品的 TVU 价值 v（本系统定义，07 使用）
 @export var size: int = 1                   # 占仓库多少空间；必须 > 0（§5.12 V2）
-@export var is_hidden: bool = false         # 隐藏物品（概率恒 2%，免疫一切池子编辑）
+@export_range(1, 100000) var rarity: int = 10
+## ★ `rarity` 是**权重**，不是「稀有等级」：**数值越大越常见**。
+## 物品池的产生概率由它归一化而来（`ItemPool.compute_probabilities()`）：
+##   p_i = rarity_i / Σ rarity——**全部物品共分 100%**（v0.13 起隐藏款已删除）。
+## 所以「越稀有的物品」应当把 `rarity` 写得**越小**。必须 ≥ 1：`rarity == 0` 的物品
+## 出率为 0（永不产出），那是配置错误而不是设计意图。
 @export var icon: Texture2D                 # 面板 / 条目图标
 @export var tags: Array[StringName] = []    # 预留：场景约束 / 特殊需求标记（见 03）
 
