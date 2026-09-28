@@ -21,6 +21,8 @@ const UNSOCKET_REFUND_RATE := 0.5            # 核心 D8：拆卸只返还 50% �
 # ── 拒绝原因码（`[补充]`：文档只写"响亮地拒绝并指明冲突源"，未给码；这里集中定义便于测试）──
 const R_OK := &""
 const R_BOX_NOT_FOUND := &"box_not_found"
+## v0.14 裁决：**没有设备就不能装模块**（与开盒侧 `GachaService.R_NO_DEVICE` 同名同义）
+const R_NO_DEVICE := &"no_device"
 const R_BAD_SLOT := &"bad_slot"
 const R_UNKNOWN_MODULE := &"unknown_module"
 const R_SLOT_OCCUPIED := &"slot_occupied"
@@ -157,11 +159,28 @@ static func drop_all_cached_states() -> void:
 ## · 玩家可指定**任意空位**；往**占用位**放必须**显式替换**（先 `unsocket`），**不做隐式覆盖**；
 ## · 制造消耗 = **一次 `ItemService.transact()`**：任一 `item_cost` 条目实例不足即**整体失败**
 ##   （原子、全有或全无）；**制造侧不做空间预检**——它只消耗不产出，不因仓库满而失败；
-## · **镶嵌即锁定进这个盒子**：配置**下一个盒子**需要**新的模块**（不存在"模块库存"）。
+## · **镶嵌即锁定进这个盒子**：配置**下一个盒子**需要**新的模块**（不存在"模块库存"）；
+## · **★ v0.14 裁决：设备是硬门槛**——`state.has_device() == false` ⇒ 拒绝 `no_device`，
+##   **一次寿命都不扣**（门槛检查排在所有消耗之前）；
+## · **★ v0.14：装模块也消耗这个盒子的一次使用**（与兑现共用同一个计数器）——
+##   归零即摧毁；**失败一律不扣次数**（校验失败、制造成本不足都在消耗之前返回）；
+## · 返回 `{ok, reason, state, errors, destroyed}`：`destroyed == true` 表示这次镶嵌把盒子扣到 0、
+##   盒子已被摧毁（**即使它从未兑现过**，那是合法路径）。
+##
+## `[登记·待定]` **04 设备系统是"装模块的入口 / 工具路径"，本方法仍是池子数据的唯一写入方**——
+##   **"唯一写入方"这条不变量不因装置成为工具而改变**。
+##   **未定项**：「是否必须先有装置才能镶嵌」（即装置成为镶嵌的**前置门槛**，而不只是 UI 路径）
+##   —— 用户原话"设备系统**用于**给盲盒添加模块"读起来像工具路径，但"必须先有装置"也说得通。
+##   **本实现按"工具路径"落地：不设任何装置门槛**；该判定留给 **04 重写**那一轮。
 static func socket(state: GameState, box_id: String, module_id: StringName, slot: int) -> Dictionary:
 	var b := _find(state, box_id)
 	if b == null:
 		return _reject(R_BOX_NOT_FOUND)
+	if not state.has_device():
+		# ★ v0.14 裁决：**设备是硬门槛**——没有设备就不能装模块。
+		#   这里在**任何消耗之前**返回 ⇒ **一次寿命都不扣**（与"校验失败不扣次数"同一纪律）。
+		#   注意：设备只是**前置条件**，本函数仍是池子数据的**唯一写入方**（不变量不变）。
+		return _reject(R_NO_DEVICE)
 	if b.item_pool == null:
 		return _reject(R_POOL_INVALID)
 	if slot < 0 or slot >= b.modules.size():
@@ -195,11 +214,29 @@ static func socket(state: GameState, box_id: String, module_id: StringName, slot
 	b.item_pool.revision += 1                     # ★ 每次写入 +1（revision 是缓存与失效的唯一依据）
 	var s := _compute(b, b.item_pool.revision)
 	_states[box_id] = s
+	# ★ v0.14：**成功镶嵌消耗一次使用**（与兑现**共用同一个计数器**）。
+	#   `uses_remaining` 归 0 ⇒ **归零即摧毁**（盒子连同 `item_pool` / `modules` 从清单移除）——
+	#   **哪怕它一次都没兑现过也合法**，这就是"装模块把盒子扣到 0"的那条路径。
+	var destroyed := state.spend_use(b)
+	if destroyed:
+		# 盒子已经没了：丢掉它的派生状态缓存，并且**不发** `pool_changed`
+		# （订阅方按 box_id 取状态只会拿到 null；"盒子被摧毁"目前没有定义信号，已登记为待定）
+		drop_cached_state(box_id)
+		return {
+			"ok": true, "reason": R_OK, "state": s, "errors": [] as Array[String],
+			"destroyed": true,
+		}
 	bus.pool_changed.emit(box_id, b.item_pool.revision)
-	return {"ok": true, "reason": R_OK, "state": s, "errors": [] as Array[String]}
+	return {
+		"ok": true, "reason": R_OK, "state": s, "errors": [] as Array[String],
+		"destroyed": false,
+	}
 
 
 ## 拆卸：把该盒 `modules` 的第 `slot` 位**置空**（**定长长度不变**）+ 返还 50% 材料。
+##
+## ★ **拆卸不要求设备**：v0.14 裁决把设备门槛只摆在**两个消耗寿命的动作**上（开盒、装模块），
+##   拆卸既不消耗寿命、也不消耗设备。
 ##
 ## · 返还量 = **逐条 `floor(amount × 0.5)`**（余数不累加——与 04 §5.3 同一口径，保证与操作顺序无关）；
 ## · 返还走 `grant(item_id, { kind = &"refund" })` **新建实例**（新 UUID）——"可逆"说的是
@@ -262,8 +299,13 @@ static func unsocket(state: GameState, box_id: String, slot: int) -> Dictionary:
 	b.item_pool.revision += 1
 	var s := _compute(b, b.item_pool.revision)
 	_states[box_id] = s
+	# ★ v0.14：**拆卸不消耗使用次数**（消耗点只有"装模块"与"兑现"两个）；
+	#   因此 `destroyed` 恒为 false——盒子的寿命只由那两个动作决定。
 	bus.pool_changed.emit(box_id, b.item_pool.revision)
-	return {"ok": true, "reason": R_OK, "state": s, "errors": [] as Array[String]}
+	return {
+		"ok": true, "reason": R_OK, "state": s, "errors": [] as Array[String],
+		"destroyed": false,
+	}
 
 
 ## 试算：算出"若把 `module_id` 放进该盒第 `slot` 位"的**候选派生状态**。

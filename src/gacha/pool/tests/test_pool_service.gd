@@ -95,7 +95,6 @@ func _setup() -> void:
 	_series.series_quality = 2                    # 品质 2 ⇒ 8 物品 / 3 位（核心 §4.1.1）
 	_series.regular_count = N
 	_series.socket_count = 3
-	_series.device_slot_count = 4
 	_series.regular_items = _defs.duplicate()
 	GachaCatalog.register_series(_series)
 
@@ -150,7 +149,7 @@ func _module(
 ## 新档 + 发 `n` 个盒子。
 func _new_state(n: int = 1) -> Dictionary:
 	_setup()
-	var st := GameState.new()
+	var st := GameState.new_game()   # v0.14：镶嵌需要设备（开局送一台基础装置）
 	var boxes := GachaService.grant_box(st, &"series_01", n, &"test")
 	return {"state": st, "boxes": boxes}
 

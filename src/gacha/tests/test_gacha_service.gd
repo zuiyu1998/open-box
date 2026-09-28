@@ -98,7 +98,6 @@ func _setup() -> void:
 	graded.series_quality = 2
 	graded.regular_count = N
 	graded.socket_count = 3
-	graded.device_slot_count = 4
 	graded.regular_items = _defs.duplicate()
 	GachaCatalog.register_series(graded)
 
@@ -108,7 +107,6 @@ func _setup() -> void:
 	uniform.series_quality = 2
 	uniform.regular_count = N
 	uniform.socket_count = 3
-	uniform.device_slot_count = 4
 	var u_defs: Array[ItemDef] = []
 	for i in N:
 		var d2 := ItemDef.new()
@@ -134,7 +132,7 @@ func _setup() -> void:
 
 func _new_state(sid: StringName = &"series_01", n: int = 1) -> Dictionary:
 	_setup()
-	var st := GameState.new()
+	var st := GameState.new_game()   # v0.14：走两个消耗入口的档必须有设备（开局送一台）
 	var boxes := GachaService.grant_box(st, sid, n, &"test")
 	return {"state": st, "boxes": boxes}
 
@@ -155,6 +153,8 @@ func _test_grant_box_shape() -> void:
 	var a: Box = f["boxes"][0]
 	var b: Box = f["boxes"][1]
 	eq(st.box_count(), 2, "囤积清单里有 2 个盒子")
+	eq(a.uses_remaining, 15, "v0.14：品质 2 ⇒ 初始寿命预算 15（新曲线 10/15/20/25）")
+	eq(b.uses_remaining, 15, "两个盒子各自持有自己的次数（不是共享的计数器）")
 	eq(a.modules.size(), 3, "modules 定长 == socket_count")
 	eq(a.item_pool.regular_count, 8, "item_pool 是基础池副本（8 件）")
 	ok(a.item_pool != b.item_pool, "两盒各持一份 item_pool（**不是同一个对象**）")
@@ -335,7 +335,8 @@ func _test_redeem_consumes_box_and_grants_exactly_once() -> void:
 	ok(r.ok, "兑现成功")
 	ok(not r.is_void, "本次不是 void")
 	eq(ItemService.instances.size(), size_before + 1, "**恰好产生一个新实例**")
-	eq(st.box_count(), 0, "盒子被消耗（兑现即从清单移除）")
+	eq(st.box_count(), 1, "**盒子仍在清单里**（v0.14：一次兑现只消耗一次使用，不消耗盒子）")
+	eq(bx.uses_remaining, 14, "使用次数 15 → 14（品质 2 的预算 15，兑现 −1）")
 	eq(r.draw_index, 1, "draw_index == 1（全局计数器）")
 	eq(st.draw_index, 1, "状态里的计数器同步")
 	eq(r.box_id, bx.box_id, "结果记住了盒子身份")
@@ -353,7 +354,7 @@ func _test_redeem_consumes_box_and_grants_exactly_once() -> void:
 
 
 func _test_redeem_void_consumes_box_without_item() -> void:
-	print("— void 的兑现：**不产出任何东西，但仍消耗一个盒子**（§5.6）")
+	print("— void 的兑现：**不产出任何东西，但仍消耗一次使用**（§5.6 + v0.14）")
 	var f := _new_state()
 	var st: GameState = f["state"]
 	var bx: Box = f["boxes"][0]
@@ -370,7 +371,8 @@ func _test_redeem_void_consumes_box_without_item() -> void:
 	eq(r.quality, 0, "quality == 0")
 	eq(ItemService.instances.size(), size_before, "**没有产生任何实例**")
 	eq(ItemService.total_granted, granted_before, "grant 一次都没被调用")
-	eq(st.box_count(), 0, "盒子仍被消耗")
+	eq(st.box_count(), 1, "v0.14：盒子**仍在清单里**（void 消耗的是一次使用，不是盒子）")
+	eq(bx.uses_remaining, 13, "void 照样扣一次使用：装模块 −1、本次兑现 −1 ⇒ 15 → 13")
 	eq(r.draw_index, 1, "draw_index 照常推进（它不是概率状态）")
 
 
@@ -383,15 +385,25 @@ func _test_redeem_rejects_unregistered_series() -> void:
 	tmp.series_id = &"series_offline"
 	tmp.item_pool = PoolService.init_pool(st, tmp.box_id, &"series_01")
 	tmp.modules = PoolService.empty_slots(3)
+	tmp.uses_remaining = 3        # v0.14：真实发放的盒子必然 > 0（默认 0 现在表示"已用尽"）
 	st.add_box(tmp)
 	var count_before := st.box_count()
 	var size_before := ItemService.instances.size()
+	var uses_before: Array[int] = []
+	for b in st.pending_boxes:
+		uses_before.append(b.uses_remaining)
 	var r := GachaService.redeem(st, tmp)
 	ok(not r.ok, "未注册的套系 ⇒ 失败")
 	eq(r.error, GachaService.R_BAD_SERIES, "错误码 = bad_series")
 	eq(st.box_count(), count_before, "**盒子还在清单里**（校验失败不消耗盲盒）")
 	eq(ItemService.instances.size(), size_before, "没有产生实例")
 	eq(st.draw_index, 0, "draw_index 没有推进")
+	var uses_intact := true
+	for i in st.pending_boxes.size():
+		if st.pending_boxes[i].uses_remaining != uses_before[i]:
+			uses_intact = false
+	ok(uses_intact, "v0.14：**校验失败不消耗任何一次使用**（逐盒逐项不变）")
+	eq(tmp.uses_remaining, 3, "那个盒子自己的次数也没被动（仍是 3）")
 
 
 func _test_batch_redeem_is_ordered_and_contiguous() -> void:
@@ -400,14 +412,17 @@ func _test_batch_redeem_is_ordered_and_contiguous() -> void:
 	var st: GameState = f["state"]
 	var boxes: Array = f["boxes"]
 	var seeds := [11, 22, 33]
-	var results := GachaService.redeem_batch(st, boxes, seeds)
-	eq(results.size(), 3, "返回 3 个结果")
+	# v0.14：第 3 个参数是**本次结算的使用次数 k**（不再是盒子数）
+	var results := GachaService.redeem_batch(st, boxes, 3, seeds)
+	eq(results.size(), 3, "返回 3 个结果（k == 3 次使用）")
 	var all_ok := true
 	for r in results:
 		if not r.ok:
 			all_ok = false
 	ok(all_ok, "三个都成功")
-	eq(st.box_count(), 0, "三个盒子都被消耗")
+	eq(st.box_count(), 3, "3 次结算落在第 1 个盒子上；预算 15 未耗尽 ⇒ **三个盒子都还在**")
+	eq(boxes[0].uses_remaining, 15 - 3, "第 1 个盒子被扣 3 次（15 → 12；新曲线下 3 次烧不光它）")
+	eq(boxes[1].uses_remaining, 15, "第 2 个盒子一次都没被碰")
 	eq(results[0].draw_index, 1, "第 1 个 draw_index = 1")
 	eq(results[1].draw_index, 2, "第 2 个 draw_index = 2（连续）")
 	eq(results[2].draw_index, 3, "第 3 个 draw_index = 3（连续）")

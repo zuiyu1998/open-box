@@ -16,6 +16,15 @@ extends Resource
 @export var probability: float = 0.0      # 本次所用分布中该结果的概率（void 时为 void_prob）
 @export var seed: int = 0                 # 本次兑现的种子；即 source.box_seed
 @export var draw_index: int = 0           # **全局单调递增**的兑现序号（不是"批次内序号"）
+## **v0.14：本次抽取所用的池子快照**（`{box_id, revision, void_mass_bp, weights_bp}`）。
+##
+## **每次抽取各取一份**——两次使用之间池子可能已被编辑，**绝不能复用上一份快照**：
+## 否则日志里"这一抽用的分布"与实际抽样用的分布不一致，P1（可核对）与 P2（可归因）当场失效。
+##
+## 存的是**整数权重**（`weights_bp`）而不是浮点 `probs`：概率是派生值，
+## 快照留规范形态才不会变成"第二份事实来源"（07 §5.1 的整数口径）。
+## 值是**深拷贝**——改这份快照不影响在跑的池子。
+@export var pool_snapshot: Dictionary = {}
 
 
 ## 交付 02 的溯源三元组（核心 §4.2.1）：**只提供，不创建实例**。
