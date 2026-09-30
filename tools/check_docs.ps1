@@ -260,6 +260,95 @@ if (Test-Path $corePath) {
     $warnCount++
 }
 
+# ---------------------------------------------------------------------------
+# Cross-doc ITEM-ID references (WARN-only; deliberately NOT counted in the
+# summary and NOT a failure).
+#
+# Shape checked: "<doc>.md ... <ID>" where ID is one of G<n> / M<n> / T<n> /
+# U<n> / R-<n>. The ID must exist in the CITED document. Retired docs need no
+# special case: a reference to a retired doc cannot spell its file name (the
+# file is gone), so "05-M8" style ids never enter this check.
+#
+# Two suppressions, both to avoid crying wolf:
+#   * only ids within 40 chars after the cited file name are considered;
+#   * an id that the CITING doc defines itself is treated as a self-reference
+#     (e.g. 08 writing "this file's T23" shortly after citing another doc).
+# Findings are printed for manual review, and the summary line below is printed
+# on EVERY run -- including "0 finding(s)", so the check can never go silent.
+#
+# REPORT-ONLY MODE. This block sets no FAIL and never touches the summary
+# counts. Promotion to FAIL requires ALL THREE of:
+#   * the finding count stays 0 for several consecutive rounds;
+#   * zero false positives -- proven by a wide-window census (window widened,
+#     subject-switch cut and partial-id guard disabled) reporting nothing real;
+#   * a negative test: a planted bad id (e.g. T99) is still reported.
+# Known limits if it is ever promoted: the self-reference guard recognises only
+# table-row definitions (01-style "| **G12** / **M9**" rows expose just the
+# first id; 02-style bullet ids "R-M11" and retired ids such as "05-M8" are not
+# recognised at all), so a whitelist would be needed first.
+$itemIdPattern = '\b([GMTU]\d+|R-\d+)\b'
+# A doc "defines" an id when it opens a table row with it. Used ONLY to decide
+# whether a mention is a self-reference of the CITING doc. Deliberately stricter
+# than $itemIdPattern: a stray mention must not turn an id into "this doc's own",
+# otherwise a wrong citation would silence itself (caught by the T99 fixture).
+$definedIdPattern = '(?m)^\|\s*\*{0,2}([GMTU]\d+|R-\d+)'
+$systemDocs = @($files | Where-Object { $_.Name -match '^\d\d-' })
+$definedIds = @{}
+$ownDefinedIds = @{}
+foreach ($sd in $systemDocs) {
+    $idText = Get-Content -Path $sd.FullName -Raw -Encoding UTF8
+    if ($null -eq $idText) { $idText = '' }
+    $definedIds[$sd.Name] = @([regex]::Matches($idText, $itemIdPattern) |
+        ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+    $ownDefinedIds[$sd.Name] = @([regex]::Matches($idText, $definedIdPattern) |
+        ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+}
+
+$idFindings = @()
+foreach ($f in $files) {
+    $idSource = Get-Content -Path $f.FullName -Raw -Encoding UTF8
+    if ($null -eq $idSource) { continue }
+    $ownIds = @()
+    if ($ownDefinedIds.ContainsKey($f.Name)) { $ownIds = $ownDefinedIds[$f.Name] }
+    foreach ($sd in $systemDocs) {
+        if ($sd.Name -eq $f.Name) { continue }
+        $targetIds = $definedIds[$sd.Name]
+        foreach ($tm in [regex]::Matches($idSource, [regex]::Escape($sd.Name))) {
+            $w0 = $tm.Index + $tm.Length
+            $w1 = [Math]::Min(40, $idSource.Length - $w0)
+            if ($w1 -le 0) { continue }
+            $win = $idSource.Substring($w0, $w1)
+            # Stop at the next subject switch: another file name, another
+            # backticked system number, or end of line. Without this, an id
+            # belonging to a doc cited later on the same line is picked up
+            # (e.g. "01-gacha.md ... (`08` R-20)" would blame 01).
+            foreach ($stopRe in @('\.md', '`\d\d', "`n")) {
+                $stopAt = [regex]::Match($win, $stopRe)
+                if ($stopAt.Success -and $stopAt.Index -gt 0) { $win = $win.Substring(0, $stopAt.Index) }
+            }
+            foreach ($im in [regex]::Matches($win, $itemIdPattern)) {
+                $id = $im.Groups[1].Value
+                # Skip an id cut in half by the window (e.g. "R-20" seen as "R-2").
+                $idEnd = $w0 + $im.Index + $id.Length
+                if ($idEnd -lt $idSource.Length) {
+                    if ($idSource.Substring($idEnd, 1) -match '[0-9A-Za-z_]') { continue }
+                }
+                if ($targetIds -contains $id) { continue }
+                if ($ownIds -contains $id) { continue }
+                $idLine = ([regex]::Matches($idSource.Substring(0, $w0 + $im.Index), "`n")).Count + 1
+                $idRel = $f.FullName.Substring($Root.Length).TrimStart('\', '/')
+                $idFindings += ("{0}: '{1}' cited near {2} at line {3} -- no such id in {2}" -f $idRel, $id, $sd.Name, $idLine)
+            }
+        }
+    }
+}
+
+Write-Output ''
+Write-Output ("  cross-doc item ids: {0} finding(s) -- WARN only, NOT counted in the summary, NOT a failure" -f $idFindings.Count)
+foreach ($p in ($idFindings | Sort-Object -Unique)) {
+    Write-Output ("        warn: {0}" -f $p)
+}
+
 Write-Output ''
 Write-Output ("=== summary: {0} FAIL, {1} WARN, {2} PASS ===" -f $failCount, $warnCount, ($files.Count - $failCount - $warnCount))
 if ($failCount -gt 0) {
