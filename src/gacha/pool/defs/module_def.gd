@@ -19,7 +19,13 @@ enum RedistributeMode { AUTO, TARGETED }
 @export var magnitude: float = 1.0                       # BOOST 的倍数；BAN / RECOVER 忽略
 @export var redistribute_mode: RedistributeMode = RedistributeMode.AUTO
 @export var redistribute_target: StringName = &""        # TARGETED 时的目标物品
-@export var item_cost: Array[ModuleCost] = []            # 制造消耗（需求向量）
+## ★ v0.19（用户裁决）：**镶嵌这个模块要消耗的金币数**——**成本完全由本字段决定**。
+##
+## ★ 旧字段 `item_cost: Array[ModuleCost]`（物品需求向量）与 `ModuleCost` 类型**已整族删除**：
+##   **模块不再消耗任何物品**（核心 §3 / §4.5 / §15 D8 / §16.14）⇒ **物品的唯一出口是交付任务**。
+## ★ 价格口径不在本类：**标定归核心 D25**；扣款由 `PoolService.socket()` 经 `02` 的一次
+##   `transact([{ op=&"currency", kind=&"gold", delta=-gold_cost }])` 落地（`01-gacha.md` §5.8）。
+@export var gold_cost: int = 0
 @export var exclusive_tags: Array[StringName] = []       # 互斥标记（V6）
 
 const BOOST_CAP := 3.0                                   # 核心 D7 / 01 §5.2.3 V4：提升倍数上限 ×3

@@ -98,6 +98,14 @@ func _setup_catalog() -> void:
 		c.category_id = cat_id
 		c.display_name = String(cat_id)
 		ItemCatalog.register_category(c)
+	# ★ v0.18 / v0.19：**资源（货币类）必须先注册**——V6 要求开局必发的两种货币都在
+	#   （缺 gem 开不了盒、缺 gold 装不了模块）
+	for kind in ItemConstants.ALL_CURRENCIES:
+		var cur := CurrencyDef.new()
+		cur.id = kind
+		cur.display_name = String(kind)
+		cur.description = "夹具"
+		ItemCatalog.register_currency(cur)
 	# 2 类别 × 3 品质 = 6 个键（切片范围）
 	var sizes := {1: 1, 2: 2, 3: 5}
 	var values := {1: 1, 2: 3, 3: 9}

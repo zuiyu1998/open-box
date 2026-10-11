@@ -331,7 +331,7 @@ func _test_redeem_consumes_box_and_grants_exactly_once() -> void:
 	var seed := _find_seed(ev, false)
 	ok(seed >= 0, "找到一个会出物品的 seed")
 	var size_before := ItemService.instances.size()
-	var r := GachaService.redeem(st, bx, seed)
+	var r := GachaService.redeem(st, bx, 0, seed)
 	ok(r.ok, "兑现成功")
 	ok(not r.is_void, "本次不是 void")
 	eq(ItemService.instances.size(), size_before + 1, "**恰好产生一个新实例**")
@@ -364,7 +364,7 @@ func _test_redeem_void_consumes_box_without_item() -> void:
 	ok(seed >= 0, "找到一个会出 void 的 seed")
 	var size_before := ItemService.instances.size()
 	var granted_before := ItemService.total_granted
-	var r := GachaService.redeem(st, bx, seed)
+	var r := GachaService.redeem(st, bx, 0, seed)
 	ok(r.ok, "兑现成功（void 不是失败）")
 	ok(r.is_void, "结果是 void")
 	eq(r.item_id, &"", "item_id 为空串")
@@ -392,7 +392,7 @@ func _test_redeem_rejects_unregistered_series() -> void:
 	var uses_before: Array[int] = []
 	for b in st.pending_boxes:
 		uses_before.append(b.uses_remaining)
-	var r := GachaService.redeem(st, tmp)
+	var r := GachaService.redeem(st, tmp, 0)
 	ok(not r.ok, "未注册的套系 ⇒ 失败")
 	eq(r.error, GachaService.R_BAD_SERIES, "错误码 = bad_series")
 	eq(st.box_count(), count_before, "**盒子还在清单里**（校验失败不消耗盲盒）")
@@ -413,7 +413,7 @@ func _test_batch_redeem_is_ordered_and_contiguous() -> void:
 	var boxes: Array = f["boxes"]
 	var seeds := [11, 22, 33]
 	# v0.14：第 3 个参数是**本次结算的使用次数 k**（不再是盒子数）
-	var results := GachaService.redeem_batch(st, boxes, 3, seeds)
+	var results := GachaService.redeem_batch(st, boxes, [], 3, seeds)
 	eq(results.size(), 3, "返回 3 个结果（k == 3 次使用）")
 	var all_ok := true
 	for r in results:

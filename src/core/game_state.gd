@@ -16,12 +16,15 @@ extends RefCounted
 var pending_boxes: Array[Box] = []
 var draw_index: int = 0
 
-## **v0.14：玩家持有的设备**（裁决：设备是**开盒**与**装模块**的硬门槛）。
+## **v0.14 立、v0.18 改形态：玩家持有的设备**（设备是**开盒**与**装模块**的硬门槛）。
 ##
-## `[补充]` 现在只存 **id 列表**——**不实现** `DeviceDef` / 槽位 / 占用 / 装配（那是 04 的活）。
-## ★★ **必须入档**（归档格式归 10）：读档若把设备丢了，玩家会被**永久锁死**——
-##   两条消耗入口（`GachaService.redeem()` / `PoolService.socket()`）会全部拒绝。
-var devices: Array[StringName] = []
+## ★★ **v0.18 / v0.19：每台 = `Device { device_id, level }`**（设备带**等级**）。
+##   **存档条目形态随之变化** ⇒ v5 → v6 迁移（旧字符串条目回填 `level = 1`），
+##   见 `10-progression.md` §7.4 第 11 条。**必须入档**：读档若把设备丢了，
+##   玩家会被永久锁死（两条消耗入口会全部拒绝）。
+## ★ **本类只持有事实**；**判定与计价都在 `DeviceService`**
+##   （`has_device()` 镶嵌侧 / `can_open(state, box)` 开盒侧）——**不在这里做第二套判断**。
+var devices: Array[Device] = []
 
 
 func add_box(box: Box) -> void:
@@ -94,44 +97,56 @@ func total_remaining_uses() -> int:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  设备（v0.14 裁决：开盒与装模块的硬门槛）
+#  设备（v0.14 硬门槛；v0.17 三个动作的入口归 04；v0.18 带等级与资源；v0.19 镶嵌花金币）
 # ══════════════════════════════════════════════════════════════════════════════
 
-## **新游戏初始化**：**开局送一台基础装置**（id 取自 `DeviceConstants`，**不硬编码字面量**）。
+## **新游戏初始化**：**开局送一台基础装置（等级 1）＋ 一笔原石 ＋ 一笔金币**。
 ##
-## 为什么要送：设备是开盒与装模块的硬门槛，而设备由物品造、物品来自开盒——
-## 不送一台就**死锁**（"开盒需要设备 → 设备需要开盒"）。
+## ★ 为什么三样都必须发（`04-device.md` §1.1 / §1.2；核心 §16.13 / §16.14）：
+##   · **设备**：它是硬门槛，而**装置没有第二个来源**（制造已删除）⇒ 不发就**永远是 0 台**；
+##   · **原石**：开盒要付它，而它的来源是任务（任务又要先开盒产出物品）⇒ 不发就**开不了第一个盒子**；
+##   · **金币**：镶嵌要付它 ⇒ 不发就**装不了第一个模块**（中心机制的第一次体验被闸门挡住）。
+##
+## ★ **数额来自内容配置的同一处来源**（`ItemConstants.INIT_*`）——**迁移回填也必须读它**
+##   （`10-progression.md` §7.4 第 11 条），**不得在两处各写一个数**。
 static func new_game() -> GameState:
 	var st := GameState.new()
+	DeviceCatalog.ensure_default_content()
 	st.grant_device(DeviceConstants.STARTING_DEVICE_ID)
+	ItemService.grant_currency(
+		ItemConstants.CURRENCY_GEM, ItemConstants.INIT_GEM, ItemConstants.CURRENCY_SOURCE_INIT
+	)
+	ItemService.grant_currency(
+		ItemConstants.CURRENCY_GOLD, ItemConstants.INIT_GOLD, ItemConstants.CURRENCY_SOURCE_INIT
+	)
 	return st
 
 
-## 发放一台设备（初始化与将来的内容释放都走这里；**不是**"设备库存"的意思——
-## 设备**不会被消耗、也不会损耗**（已裁决），因此这个列表只增不减；持有与判定的完整口径见 `has_device()`）。
-func grant_device(device_id: StringName) -> void:
+## 发放一台设备（**只有"初始化 / 缺键补发"这一个调用方**——不是"设备库存"的意思）。
+## 设备**不会被消耗、也不会损耗**（D21 已裁决）⇒ 这个列表**只增不减**。
+func grant_device(device_id: StringName, level: int = 1) -> void:
 	if device_id != &"":
-		devices.append(device_id)
+		devices.append(Device.make(device_id, level))
 
 
 func device_count() -> int:
 	return devices.size()
 
 
-## **"是否有设备"的唯一判定入口**（v0.14 裁决：**没有设备 ⇒ 既不能开盒也不能装模块**）。
+## **"是否有设备"的判定**（v0.14 裁决：**没有设备 ⇒ 既不能开盒也不能装模块**）。
 ##
 ## **② 已裁决：设备不会被消耗、也不会损耗。**（用户原话"设备不会被消耗"）
 ##   ⇒ 本函数是**纯只读**判定；"扣设备"这件事**不存在**，因此它也不需要进 `spend_use()` 的事务。
-##   ★ **为什么这条要紧**：如果设备会被消耗，**开局送的那一台用完就会回到同一个死锁**
+##   ★ **为什么这条要紧**：如果设备会被消耗，**开局送的那一台用完就会回到"永远 0 台"**
 ##     （无设备 ⇒ 两条入口全拒）——所以"**设备耐用**"是"**开局送一台**"这个解法的
 ##     **前提条件**，不是附加细节。
 ##
 ## **① 最简默认（★ 可回滚）**：**一台设备是通用耐用工具——不绑定盒子、不限制次数**。
-##   理由：既然设备不会被消耗，"通用"就是最小假设。
-##   ⇒ `has_device()` 因此**保持无参**。
-##   ★ **将来若要改成"设备绑定盒子"，唯一要动的地方就是本函数**：改成 `has_device(box_id)`，
-##     并让 `redeem()` / `socket()` 把 `box_id` 传进来即可——这正是当初把判定**集中到一处**的目的。
-##     **现在不实现绑定。**
+##   ⇒ 本函数**无参**。
+##   ★ **v0.18：开盒侧还需要"等级够不够"** ⇒ 那一份判定是 **`DeviceService.can_open(state, box)`**
+##     （**带盒子**——D21 预写的回滚点被"等级门控"触发）。**两份判定同一份数据、同一处实现**
+##     （`DeviceService`），本函数只是它下面的**同一份事实**（"持有集合非空"），
+##     `01` 的两条入口调它做兜底。
 func has_device() -> bool:
 	return not devices.is_empty()
 

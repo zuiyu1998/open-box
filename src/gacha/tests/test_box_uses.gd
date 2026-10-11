@@ -108,7 +108,7 @@ func _setup() -> void:
 	GachaCatalog.register_module(_module(&"mod_ban_cr3", &"crystal_q3"))
 	# V2 / V5 的夹具：与 `mod_ban_sd1` 抢同一目标的 BOOST、以及一次排除 6 件的 BAN
 	GachaCatalog.register_module(_module(&"mod_boost_sd1", &"stardust_q1", ModuleDef.OpType.BOOST, 2.0))
-	GachaCatalog.register_module(_module(&"mod_ban_many6", &"stardust_q1", ModuleDef.OpType.BAN, 1.0, [],
+	GachaCatalog.register_module(_module(&"mod_ban_many6", &"stardust_q1", ModuleDef.OpType.BAN, 1.0, 0,
 		[], ModuleDef.RedistributeMode.AUTO, &"", [&"stardust_q2", &"stardust_q3", &"stardust_q4",
 			&"stardust_q5", &"crystal_q1"]))
 
@@ -127,7 +127,7 @@ func _mk(id: String, cat: StringName, quality: int) -> ItemDef:
 
 
 func _module(id: StringName, target: StringName, op: int = ModuleDef.OpType.BAN,
-		magnitude: float = 1.0, cost: Array = [], tags: Array = [],
+		magnitude: float = 1.0, gold_cost: int = 0, tags: Array = [],
 		mode: int = ModuleDef.RedistributeMode.AUTO, rtarget: StringName = &"",
 		extra_targets: Array = []) -> ModuleDef:
 	var m := ModuleDef.new()
@@ -138,15 +138,11 @@ func _module(id: StringName, target: StringName, op: int = ModuleDef.OpType.BAN,
 	m.magnitude = magnitude
 	m.redistribute_mode = mode
 	m.redistribute_target = rtarget
+	# ★ v0.19：成本 = 金币（`ModuleCost` 物品需求向量已整族删除）
+	m.gold_cost = gold_cost
 	m.targets.append(target)
 	for t in extra_targets:
 		m.targets.append(StringName(t))
-	for c in cost:
-		var e := ModuleCost.new()
-		e.category = StringName(c[0])
-		e.quality = int(c[1])
-		e.amount = int(c[2])
-		m.item_cost.append(e)
 	for t in tags:
 		m.exclusive_tags.append(StringName(t))
 	return m
@@ -287,20 +283,20 @@ func _test_three_draws_then_box_disappears() -> void:
 	eq(bx.uses_remaining, 3, "初始 3 次（夹具预算；真实曲线品质 2 = 15）")
 	var inst0 := ItemService.instances.size()
 
-	var r1 := GachaService.redeem(st, bx, 101)
+	var r1 := GachaService.redeem(st, bx, 0, 101)
 	ok(r1.ok and not r1.is_void, "第 1 次开出物品")
 	eq(bx.uses_remaining, 2, "第 1 次后：2")
 	eq(st.box_count(), 1, "盒子**仍在**清单里")
 	ok(st.has_box(bid), "仍可寻址")
 	eq(ItemService.instances.size(), inst0 + 1, "产生 1 个实例")
 
-	var r2 := GachaService.redeem(st, bx, 202)
+	var r2 := GachaService.redeem(st, bx, 0, 202)
 	ok(r2.ok, "第 2 次成功")
 	eq(bx.uses_remaining, 1, "第 2 次后：1")
 	eq(st.box_count(), 1, "盒子仍在清单里")
 	eq(ItemService.instances.size(), inst0 + 2, "两个实例")
 
-	var r3 := GachaService.redeem(st, bx, 303)
+	var r3 := GachaService.redeem(st, bx, 0, 303)
 	ok(r3.ok, "第 3 次成功")
 	eq(bx.uses_remaining, 0, "第 3 次后：0")
 	ok(bx.is_exhausted(), "is_exhausted() == true")
@@ -311,7 +307,7 @@ func _test_three_draws_then_box_disappears() -> void:
 	eq(st.total_remaining_uses(), 0, "清单剩余次数 0")
 
 	# 对已用尽/已移除的盒子再兑现 ⇒ 明确失败且不产生负值
-	var r4 := GachaService.redeem(st, bx, 404)
+	var r4 := GachaService.redeem(st, bx, 0, 404)
 	ok(not r4.ok, "已用尽的盒子再兑现 ⇒ 失败")
 	eq(r4.error, GachaService.R_BOX_NOT_FOUND, "错误码 box_not_found（它已不在清单里）")
 	eq(bx.uses_remaining, 0, "次数不产生负值")
@@ -321,7 +317,7 @@ func _test_three_draws_then_box_disappears() -> void:
 	zombie.uses_remaining = 0
 	var before_n := st.box_count()
 	var before_i := ItemService.instances.size()
-	var rz := GachaService.redeem(st, zombie, 505)
+	var rz := GachaService.redeem(st, zombie, 0, 505)
 	ok(not rz.ok, "次数为 0 ⇒ 拒绝")
 	eq(rz.error, GachaService.R_USES_EXHAUSTED, "错误码 uses_exhausted")
 	eq(st.box_count(), before_n, "清单不变")
@@ -392,7 +388,7 @@ func _test_snapshot_per_draw() -> void:
 	var ps0 := PoolService.get_pool_state(st, bx.box_id)
 	var w0 := ps0.weights_bp.duplicate(true)
 
-	var r1 := GachaService.redeem(st, bx, 11)
+	var r1 := GachaService.redeem(st, bx, 0, 11)
 	ok(r1.ok, "第 1 次成功")
 	var banned_before := ps0.weight_of(&"stardust_q1")
 	eq(r1.pool_snapshot.size(), 4, "快照有 4 个键（box_id / revision / void_mass_bp / weights_bp）")
@@ -409,7 +405,7 @@ func _test_snapshot_per_draw() -> void:
 	eq(ps1.void_mass_bp, int(floor(float(banned_before) * 0.4)),
 		"编辑后 void == 40% × 该物品释放的质量（%d bp）" % banned_before)
 
-	var r2 := GachaService.redeem(st, bx, 22)
+	var r2 := GachaService.redeem(st, bx, 0, 22)
 	ok(r2.ok, "第 2 次成功")
 	ok(not _same_weights(r2.pool_snapshot["weights_bp"], r1.pool_snapshot["weights_bp"]),
 		"**第二份快照与第一份不同**（绝不复用上一份）")
@@ -449,7 +445,7 @@ func _test_edit_applies_to_next_draw() -> void:
 	var ps_before := PoolService.get_pool_state(st, bx.box_id)
 	var w_sd1_before := ps_before.weight_of(&"stardust_q1")
 	var w_sd2_before := ps_before.weight_of(&"stardust_q2")
-	var r1 := GachaService.redeem(st, bx, 7)
+	var r1 := GachaService.redeem(st, bx, 0, 7)
 	ok(r1.ok, "第 1 次成功")
 	ok(PoolService.socket(st, bx.box_id, &"mod_ban_sd1", 0)["ok"], "第 1 次之后排除 stardust_q1")
 
@@ -478,7 +474,7 @@ func _test_edit_applies_to_next_draw() -> void:
 	ok(other_hits > 300, "未被排除的物品照常出现（%d 次 / 5000）" % other_hits)
 
 	# 真·第 2 次兑现（走完整路径）
-	var r2 := GachaService.redeem(st, bx, 8)
+	var r2 := GachaService.redeem(st, bx, 0, 8)
 	ok(r2.ok, "第 2 次兑现成功")
 	ok(r2.item_id != &"stardust_q1", "实际抽到的不是被排除的那件")
 	eq(int(r2.pool_snapshot["weights_bp"]["stardust_q1"]), 0, "第 2 份快照也记录了这次排除")
@@ -504,7 +500,7 @@ func _test_validation_failure_consumes_no_use() -> void:
 	# 让池子状态不可用：塞一个未注册的 module_id（载入路径的同一纪律）
 	bx.modules[0] = Module.make(&"mod_offline", 1, 0)
 	PoolService.drop_cached_state(bx.box_id)
-	var r := GachaService.redeem(st, bx, 1)
+	var r := GachaService.redeem(st, bx, 0, 1)
 	ok(not r.ok, "池子不可用 ⇒ 拒绝")
 	eq(r.error, GachaService.R_POOL_INVALID, "错误码 pool_invalid")
 	eq(bx.uses_remaining, uses_before, "**一次使用都没被消耗**")
@@ -517,7 +513,7 @@ func _test_validation_failure_consumes_no_use() -> void:
 	# 修好之后，同一次使用照常可用（次数没有被那次失败吃掉）
 	bx.modules[0] = null
 	PoolService.drop_cached_state(bx.box_id)
-	var r2 := GachaService.redeem(st, bx, 2)
+	var r2 := GachaService.redeem(st, bx, 0, 2)
 	ok(r2.ok, "修好后兑现成功")
 	eq(bx.uses_remaining, uses_before - 1, "此时才扣掉一次")
 
@@ -532,7 +528,7 @@ func _test_validation_failure_consumes_no_use() -> void:
 	tmp.uses_remaining = 3
 	st2.add_box(tmp)
 	var g_before := good.uses_remaining
-	var bad := GachaService.redeem(st2, tmp)
+	var bad := GachaService.redeem(st2, tmp, 0)
 	ok(not bad.ok, "未注册套系 ⇒ 失败")
 	eq(bad.error, GachaService.R_BAD_SERIES, "错误码 bad_series")
 	eq(good.uses_remaining, g_before, "**别的盒子的次数也没被牵动**")
@@ -587,7 +583,7 @@ func _test_modules_live_until_exhausted() -> void:
 	eq(bx.occupied_count(), 1, "1 个已占用位")
 	eq(bx.uses_remaining, 3, "镶嵌扣掉 1 次")
 
-	var r1 := GachaService.redeem(st, bx, 5)
+	var r1 := GachaService.redeem(st, bx, 0, 5)
 	ok(r1.ok, "第 1 次兑现成功（3 → 2）")
 	eq(_modules_sig(bx), sig, "**摧毁前 modules 逐项不变**（module_id / quality / socketed_at）")
 	eq(bx.occupied_count(), 1, "该模块仍在位")
@@ -604,7 +600,7 @@ func _test_modules_live_until_exhausted() -> void:
 	eq(bx.uses_remaining, 1, "**拆卸不消耗次数**（消耗点只有镶嵌与兑现）")
 	eq(_modules_sig(bx), sig, "拆掉后与最初逐项一致")
 
-	var r2 := GachaService.redeem(st, bx, 6)
+	var r2 := GachaService.redeem(st, bx, 0, 6)
 	ok(r2.ok, "第 2 次兑现成功（1 → 0）")
 	ok(bx.is_exhausted(), "次数归零")
 	ok(not st.has_box(bx.box_id), "**归零即摧毁：盒子已从清单移除 ⇒ 它的 modules 随之消失**")
@@ -629,7 +625,7 @@ func _test_batch_k_is_uses_not_boxes() -> void:
 	b.uses_remaining = 3
 	eq(st.total_remaining_uses(), 6, "两个盒子共 6 次可用（夹具：各 3 次）")
 
-	var results := GachaService.redeem_batch(st, boxes, 5, [1, 2, 3, 4, 5])
+	var results := GachaService.redeem_batch(st, boxes, [], 5, [1, 2, 3, 4, 5])
 	eq(results.size(), 5, "**k == 5**：返回 5 次结算（而盒子数只有 2）")
 	var all_ok := true
 	for r in results:
@@ -655,7 +651,7 @@ func _test_batch_k_is_uses_not_boxes() -> void:
 	var uses_before := st.total_remaining_uses()
 	var idx_before := st.draw_index
 	var inst_before := ItemService.instances.size()
-	var bad := GachaService.redeem_batch(st, [b], 3)
+	var bad := GachaService.redeem_batch(st, [b], [], 3)
 	eq(bad.size(), 3, "results.size() == k 恒成立（返回 3 条失败结果）")
 	ok(not bad[0].ok and bad[0].error == GachaService.R_USES_EXHAUSTED, "不足 ⇒ uses_exhausted")
 	eq(st.total_remaining_uses(), uses_before, "**没有消耗任何次数**")
@@ -665,13 +661,13 @@ func _test_batch_k_is_uses_not_boxes() -> void:
 	# 预校验失败（盒子不在清单里）⇒ 同样整批被拒
 	var other := GachaService.grant_box(st, &"series_q2", 1, &"test")[0]
 	st.remove_box(other.box_id)
-	var bad2 := GachaService.redeem_batch(st, [other], 2)
+	var bad2 := GachaService.redeem_batch(st, [other], [], 2)
 	eq(bad2.size(), 2, "2 条失败结果")
 	eq(bad2[0].error, GachaService.R_BOX_NOT_FOUND, "错误码 box_not_found")
 	eq(st.total_remaining_uses(), uses_before, "仍未消耗任何次数")
 
 	# k <= 0 ⇒ 空结果（合法 no-op）
-	eq(GachaService.redeem_batch(st, boxes, 0).size(), 0, "k == 0 ⇒ 空数组，不做任何事")
+	eq(GachaService.redeem_batch(st, boxes, [], 0).size(), 0, "k == 0 ⇒ 空数组，不做任何事")
 	eq(st.total_remaining_uses(), uses_before, "k == 0 不消耗次数")
 
 
@@ -699,7 +695,7 @@ func _test_conservation() -> void:
 	while st.box_count() > 0:
 		var target: Box = st.pending_boxes[0]
 		var before_uses := target.uses_remaining
-		var r := GachaService.redeem(st, target, draws + 1)
+		var r := GachaService.redeem(st, target, 0, draws + 1)
 		draws += 1
 		if not r.ok:
 			ok(false, "第 %d 次兑现失败：%s" % [draws, r.error])
@@ -728,8 +724,8 @@ func _test_conservation() -> void:
 	b2.uses_remaining = 2
 	eq(st2.box_count(), 2, "2 个盒子")
 	eq(st2.total_remaining_uses(), 4, "共 4 次（夹具：各 2 次）")
-	GachaService.redeem(st2, b1, 1)
-	GachaService.redeem(st2, b1, 2)
+	GachaService.redeem(st2, b1, 0, 1)
+	GachaService.redeem(st2, b1, 0, 2)
 	eq(b1.uses_remaining, 0, "b1 用尽")
 	eq(st2.box_count(), 1, "盒子数 2 − 1 = 1")
 	eq(st2.total_remaining_uses(), 2, "剩余 2 次（全在 b2 上）")
@@ -747,7 +743,7 @@ func _test_conservation() -> void:
 	sockets += 1
 	ok(PoolService.socket(st3, pair[0].box_id, &"mod_ban_cr3", 1)["ok"], "A 镶嵌 #2")
 	sockets += 1
-	ok(GachaService.redeem(st3, pair[0], 1).ok, "A 兑现 #1")
+	ok(GachaService.redeem(st3, pair[0], 0, 1).ok, "A 兑现 #1")
 	draws2 += 1
 	eq(pair[0].uses_remaining, 1, "A：4 − 2（镶嵌）− 1（兑现）= 1")
 	eq(pair[1].uses_remaining, 4, "B 一次都没被碰（4）")
@@ -768,7 +764,7 @@ func _test_uses_remaining_is_persisted() -> void:
 	var st: GameState = f["state"]
 	var bx: Box = f["box"]
 	ok(PoolService.socket(st, bx.box_id, &"mod_ban_sd1", 0)["ok"], "镶一个模块（3 → 2）")
-	ok(GachaService.redeem(st, bx, 42).ok, "再兑现一次（2 → 1）")
+	ok(GachaService.redeem(st, bx, 0, 42).ok, "再兑现一次（2 → 1）")
 
 	var d := bx.to_dict()
 	eq(int(d["uses_remaining"]), 1, "落盘里含 uses_remaining（镶嵌 −1、兑现 −1 ⇒ 3 → 1）")
@@ -833,7 +829,7 @@ func _test_two_spend_points_share_counter() -> void:
 	eq(bx.uses_remaining, 3, "**装模块 −1**（4 → 3）")
 	eq(s1["destroyed"], false, "还有 3 次 ⇒ 没有摧毁")
 
-	var r1 := GachaService.redeem(st, bx, 1)
+	var r1 := GachaService.redeem(st, bx, 0, 1)
 	ok(r1.ok, "兑现成功")
 	eq(bx.uses_remaining, 2, "**兑现 −1**（3 → 2）")
 
@@ -898,10 +894,10 @@ func _test_zero_by_socket_destroys_box() -> void:
 	bx2.uses_remaining = 3           # 夹具预算 3（真实曲线品质 2 = 15）
 	ok(PoolService.socket(st2, bx2.box_id, &"mod_ban_sd1", 0)["ok"], "装模块一次（3 → 2）")
 	var ids2_before := _instance_ids()
-	var r_a := GachaService.redeem(st2, bx2, 9)
+	var r_a := GachaService.redeem(st2, bx2, 0, 9)
 	ok(r_a.ok, "兑现一次（2 → 1）")
 	ok(st2.has_box(bx2.box_id), "还剩 1 次 ⇒ 还在清单里")
-	var r_b := GachaService.redeem(st2, bx2, 10)
+	var r_b := GachaService.redeem(st2, bx2, 0, 10)
 	ok(r_b.ok, "再兑现一次（1 → 0）")
 	eq(bx2.uses_remaining, 0, "归零")
 	ok(not st2.has_box(bx2.box_id), "**兑现至 0 也摧毁盒子**")
@@ -943,7 +939,7 @@ func _test_device_gate() -> void:
 	var ids_before := _instance_ids()
 	var idx_before := bare.draw_index
 
-	var r := GachaService.redeem(bare, bx, 1)
+	var r := GachaService.redeem(bare, bx, 0, 1)
 	ok(not r.ok, "**无设备 ⇒ 开盒被拒**")
 	eq(r.error, GachaService.R_NO_DEVICE, "原因码 no_device")
 	eq(bx.uses_remaining, uses_before, "**一次寿命都没消耗**")
@@ -958,7 +954,7 @@ func _test_device_gate() -> void:
 	eq(bx.occupied_count(), 0, "modules 没被写入")
 	eq(bx.item_pool.revision, 0, "revision 没被推进")
 
-	var batch := GachaService.redeem_batch(bare, [bx], 2)
+	var batch := GachaService.redeem_batch(bare, [bx], [], 2)
 	eq(batch.size(), 2, "批量同样被拒（`results.size() == k` 的不变量不变）")
 	ok(batch[0].error == GachaService.R_NO_DEVICE and batch[1].error == GachaService.R_NO_DEVICE,
 		"两条都是 no_device")
@@ -973,9 +969,10 @@ func _test_device_gate() -> void:
 	eq(bx2.uses_remaining, SeriesDef.expected_initial_uses(2), "新盒子拿到完整预算（15）")
 	ok(PoolService.socket(armed, bx2.box_id, &"mod_ban_sd1", 0)["ok"], "有设备 ⇒ **装模块放行**")
 	eq(bx2.uses_remaining, SeriesDef.expected_initial_uses(2) - 1, "放行后照常扣 1 次寿命")
-	var rd := GachaService.redeem(armed, bx2, 7)
+	var rd := GachaService.redeem(armed, bx2, 0, 7)
 	ok(rd.ok, "有设备 ⇒ **开盒放行**")
 	eq(bx2.uses_remaining, SeriesDef.expected_initial_uses(2) - 2, "兑现也照常扣 1 次")
-	# ★ **死锁路径在实测上不存在**：新游戏直接就能开盒
+	# ★ **"永远是 0 台"这条路径在实测上不存在**：新游戏直接就能开盒
 	ok(rd.ok and not rd.is_void and rd.item_id != &"",
-		"**新游戏初始化后即可开盒**：开局那台设备足以让「开盒 → 物品 → 造设备」跑起来")
+		"**新游戏初始化后即可开盒**：开局那台设备足以让「开盒 → 物品 → 交付任务」跑起来"
+		+ "（v0.17：装置不由物品制造——它只有开局发放 / 缺键补发这一个来源）")

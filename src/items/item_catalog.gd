@@ -17,6 +17,8 @@ var _by_id: Dictionary = {}
 var _by_count_key: Dictionary = {}
 ## category_id(StringName) -> ItemCategoryDef
 var _categories: Dictionary = {}
+## ★ v0.18 / v0.19：currency_id(String) -> CurrencyDef（资源 / 货币类）
+var _currencies: Dictionary = {}
 ## 被重复注册的 item_id（V4 用；register 本身不拦截，交给 validate() 统一裁决）
 var _duplicate_ids: Array[StringName] = []
 ## item_id(String) -> 首次注册时抓取的快照 {value, size}（V4 的错误信息要用它点名差异）
@@ -51,6 +53,40 @@ func register_category(cat: ItemCategoryDef) -> void:
 	_categories[cat.category_id] = cat
 
 
+## ★ v0.18：注册一种资源（货币类）。切片两种：`gem`（原石）/ `gold`（金币）。
+func register_currency(def: CurrencyDef) -> void:
+	if def == null or def.id == &"":
+		push_error("ItemCatalog.register_currency: 传入了 null 或 id 为空的 CurrencyDef")
+		return
+	_currencies[String(def.id)] = def
+
+
+func get_currency(kind: StringName) -> CurrencyDef:
+	return _currencies.get(String(kind), null) as CurrencyDef
+
+
+func has_currency(kind: StringName) -> bool:
+	return _currencies.has(String(kind))
+
+
+func all_currency_ids() -> Array[StringName]:
+	var out: Array[StringName] = []
+	for k in _currencies.keys():
+		out.append(StringName(k))
+	return out
+
+
+## ★ v0.19：**开局必发的两种货币必须已注册**（缺 `gem` 开不了盒、缺 `gold` 装不了模块）。
+## 这是 V6 的"定义级"那一半——它必须在**加载期**拦住，而不是等运行期报 `unknown_currency`。
+## 返回缺失的货币 id 列表（测试与配置校验器共用）。
+func missing_required_currencies() -> Array[StringName]:
+	var out: Array[StringName] = []
+	for kind in ItemConstants.ALL_CURRENCIES:
+		if not has_currency(kind):
+			out.append(kind)
+	return out
+
+
 func get_def(item_id: StringName) -> ItemDef:
 	return _by_id.get(String(item_id), null) as ItemDef
 
@@ -81,6 +117,7 @@ func clear() -> void:
 	_by_id.clear()
 	_by_count_key.clear()
 	_categories.clear()
+	_currencies.clear()
 	_duplicate_ids.clear()
 	_duplicate_first.clear()
 
@@ -145,5 +182,17 @@ func validate() -> Dictionary:
 		var def := _by_id[k] as ItemDef
 		if def.category != &"" and not _categories.has(def.category):
 			errors.append("类别未注册：`%s`.category = `%s`" % [def.item_id, def.category])
+
+	# V6（定义级那一半）：CurrencyDef 定义合法 + **开局必发的两种货币已注册**
+	for k in _currencies.keys():
+		var cdef := _currencies[k] as CurrencyDef
+		for p in cdef.validate():
+			errors.append("V6 非法：%s" % p)
+	for kind in missing_required_currencies():
+		errors.append(
+			"V6 缺失：资源 `%s` 未注册——开局必发它、且它是某个动作的入场费"
+			% kind
+			+ "（缺 gem 开不了盒、缺 gold 装不了模块：这是必炸的配置错误，必须在加载期拦住）"
+		)
 
 	return {"ok": errors.is_empty(), "errors": errors}

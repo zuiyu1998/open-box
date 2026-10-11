@@ -1,0 +1,32 @@
+[gd_resource type="Resource" script_class="DeviceDef" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://src/devices/defs/device_def.gd" id="1_def"]
+[ext_resource type="Script" path="res://src/devices/defs/device_level_spec.gd" id="2_lvl"]
+
+[sub_resource type="Resource" id="DeviceLevelSpec_lv1"]
+script = ExtResource("2_lvl")
+level = 1
+unlock_series_quality_max = 2
+open_cost_bp = 10000
+upgrade_cost_gems = 0
+
+[sub_resource type="Resource" id="DeviceLevelSpec_lv2"]
+script = ExtResource("2_lvl")
+level = 2
+unlock_series_quality_max = 3
+open_cost_bp = 6000
+upgrade_cost_gems = 40
+
+[sub_resource type="Resource" id="DeviceLevelSpec_lv3"]
+script = ExtResource("2_lvl")
+level = 3
+unlock_series_quality_max = 4
+open_cost_bp = 2000
+upgrade_cost_gems = 120
+
+[resource]
+script = ExtResource("1_def")
+id = &"dev_basic_q1"
+display_name = "基础装置"
+description = "开局发放的那一台。升级可以让开盒更便宜，并打开更高品质的套系。"
+levels = Array[Resource]([SubResource("DeviceLevelSpec_lv1"), SubResource("DeviceLevelSpec_lv2"), SubResource("DeviceLevelSpec_lv3")])

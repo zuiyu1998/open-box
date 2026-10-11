@@ -39,6 +39,15 @@ const USES_PER_SOCKET := 5
 ##   更坏的是有人为了让它通过而把默认值随手改成新数 ⇒ **曲线与默认值各说各话**。
 @export var unowned_weight_mult: float = 1.5     # 未拥有物品权重倍率（判定源 = 收藏口径 collected）
 
+## ★ v0.18：**开盒的原石基准成本**（每次兑现的基准价，折扣由设备等级曲线给）。
+##
+## ★ 口径：`gem_cost = floori(SeriesDef.gem_cost × 设备等级的 open_cost_bp / 10000)`
+##   ——**基准在本文件（01 的内容配置）**，**折扣在 04 的等级曲线**（`DeviceLevelSpec.open_cost_bp`）。
+## ★ **🔧 需切片实测标定**（核心 **D24**）：它是"开盒稀缺度"的主旋钮（R16 的闸门）。
+## ★ 契约：**开局那笔原石（`ItemConstants.INIT_GEM`）必须 ≥ 开局第一个盒子的 `gem_cost`**，
+##   否则开局第一步就走不动（`04-device.md` §1.2 的硬约束 / T13 ③）。
+@export var gem_cost: int = 30
+
 ## 前 4 位 = 前 2 项「位子/物品」比例必须落在核心 §4.1 / P7 的 25%–40% 区间，
 ## 否则高品质套系会被收敛（R2 从后门回来）；C6 的 ≥3 断言也将无从保证。
 const SOCKET_RATIO_MIN := 0.25
@@ -129,6 +138,8 @@ func validate() -> Array[String]:
 		)
 	if uses_per_box <= 0:
 		problems.append("bad_uses：uses_per_box 必须 >= 1（0 会让盒子一发放就被判定用尽）")
+	if gem_cost < 0:
+		problems.append("bad_gem_cost：gem_cost = %d，必须 >= 0（开放免费）" % gem_cost)
 	var seen := {}
 	for d in regular_items:
 		if d == null:

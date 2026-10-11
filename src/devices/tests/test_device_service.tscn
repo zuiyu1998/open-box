@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cob0testdevc1"]
+
+[ext_resource type="Script" path="res://src/devices/tests/test_device_service.gd" id="1_devsvc"]
+
+[node name="TestDeviceService" type="Node"]
+script = ExtResource("1_devsvc")

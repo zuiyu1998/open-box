@@ -10,7 +10,9 @@ extends RefCounted
 # 未知 kind 一律拒绝 grant（返回 null，状态不变）。
 const KIND_GACHA := &"gacha"      # 开盒产出（主来源）
 const KIND_CONVERT := &"convert"  # 类别间转化产出
-const KIND_REFUND := &"refund"    # 拆卸装置 / 模块的返还
+## **★ v0.19：`refund` 已失去调用方**——拆卸什么都不返还（核心 §15 D8）⇒ 不再有产出它的路径。
+## **保留为保留值**（`ALL_KINDS` 与 `ACTIVE_KINDS` 都不动）。
+const KIND_REFUND := &"refund"    # （保留值）曾经是"拆卸装置 / 模块的返还"
 const KIND_MAIL := &"mail"        # 保留值：系统补偿 / 邮件直投（切片内无调用方）
 const KIND_MIGRATE := &"migrate"  # 存档迁移产出（注意不是 migration）
 const KIND_UNLOCK := &"unlock"    # 里程碑 / 套系解锁发放
@@ -36,6 +38,8 @@ const ACTIVE_KINDS: Array[StringName] = [KIND_CONVERT, KIND_REFUND]
 
 # ── consume / discard 的出口标签（02-item.md §5.7 R-M9）─────────────────────────
 const TAG_FUEL := &"fuel"
+## **★ v0.19：`engine` 已失去调用方**——物品不再被"造装置 / 造模块"消耗（核心 §3 / §16.14）。
+## **保留为保留值**（不删域：删了会让旧档 / 旧测试无从解释），但**全库不得再有产出它的路径**。
 const TAG_ENGINE := &"engine"
 const TAG_CONVERT := &"convert"
 const TAG_DISCARD := &"discard"  # 保留值：只由 discard() 入口写入
@@ -58,20 +62,54 @@ const REASON_NO_SPACE := &"no_space"  # 空间问题的唯一原因码（transac
 const OP_GRANT := &"grant"
 const OP_CONSUME := &"consume"
 const OP_DISCARD := &"discard"
+## ★ v0.18 新增第四类：资源（货币类）的加减（02-item.md §4.7 / §5.13）。
+## `{ "op": &"currency", "kind": &"gem", "delta": -30 }` —— delta < 0 = 扣除、> 0 = 发放。
+const OP_CURRENCY := &"currency"
 
-const ALL_OPS: Array[StringName] = [OP_GRANT, OP_CONSUME, OP_DISCARD]
+const ALL_OPS: Array[StringName] = [OP_GRANT, OP_CONSUME, OP_DISCARD, OP_CURRENCY]
 
 # 事务 op 的合法键集（逐字；出现其它键或缺少必填键 → bad_op）
 const OP_KEYS := {
 	OP_GRANT: [&"op", &"item_id", &"source", &"overflow", &"instance_id"],
 	OP_CONSUME: [&"op", &"instance_ids", &"tag"],
 	OP_DISCARD: [&"op", &"instance_ids"],
+	OP_CURRENCY: [&"op", &"kind", &"delta"],
 }
 const OP_REQUIRED_KEYS := {
 	OP_GRANT: [&"op", &"item_id"],
 	OP_CONSUME: [&"op", &"instance_ids", &"tag"],
 	OP_DISCARD: [&"op", &"instance_ids"],
+	OP_CURRENCY: [&"op", &"kind", &"delta"],
 }
+
+# ── 资源（货币类）：切片两种（核心 §4.8 的币种表）────────────────────────────────
+## **原石**：消耗点 = ① 开盒（兑现）② 设备升级。
+const CURRENCY_GEM := &"gem"
+## **金币**：消耗点 = **镶嵌模块**（数额 = 该模块的 `ModuleDef.gold_cost`）。
+const CURRENCY_GOLD := &"gold"
+const ALL_CURRENCIES: Array[StringName] = [CURRENCY_GEM, CURRENCY_GOLD]
+
+## 资源发放的 `source`（与实例的 `source.kind` 同一纪律：发放不得来路不明）。
+const CURRENCY_SOURCE_TASK := &"task"
+const CURRENCY_SOURCE_MILESTONE := &"milestone"
+const CURRENCY_SOURCE_INIT := &"init"
+const ALL_CURRENCY_SOURCES: Array[StringName] = [
+	CURRENCY_SOURCE_TASK, CURRENCY_SOURCE_MILESTONE, CURRENCY_SOURCE_INIT,
+]
+
+## ★ v0.19：资源不足**统一用这一枚码**（币种由动作决定）——
+## 旧名 `gem_insufficient`（v0.18）已更名（核心 §15 D25 / §16.14）。
+const REASON_CURRENCY_INSUFFICIENT := &"currency_insufficient"
+const REASON_UNKNOWN_CURRENCY := &"unknown_currency"
+
+# ── 开局初始资源（★ v0.18 / v0.19；🔧 切片标定，归核心 D24 / D25）───────────────────
+## **新游戏初始化发多少**——**这是"开局初始值"的唯一来源**：
+##   · 它必须 **≥ 开第一个盒子所需**（否则第一个盒子开不了 ⇒ 开局死锁）；
+##   · 它必须 **≥ 装第一个模块所需**（否则中心机制的第一次体验被闸门挡住）。
+## ★ **v5 → v6 迁移的回填值也必须读这里**（`10-progression.md` §7.4 第 11 条）——
+##   **不得在两处各写一个数**。
+const INIT_GEM := 60   # 原石：够开 2 个品质 2 的盒子（默认单价 30）后再剩一点
+const INIT_GOLD := 30  # 金币：够装 1–2 个默认价（20）的模块
 
 
 static func is_valid_kind(kind: StringName) -> bool:

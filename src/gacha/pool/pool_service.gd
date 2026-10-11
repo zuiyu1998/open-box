@@ -16,7 +16,9 @@ extends RefCounted
 
 const TOTAL_BP := ItemPool.TOTAL_BP          # 10000：全部质量（含 void）
 const RECOVER_RATE := 0.60                   # 核心 D6：可回收比例；损耗 = 40%
-const UNSOCKET_REFUND_RATE := 0.5            # 核心 D8：拆卸只返还 50% 材料
+## ⚠️ **v0.19 作废**：`UNSOCKET_REFUND_RATE = 0.5`（核心 D8 的"拆卸只返还 50% 材料"）。
+##   **拆卸现在什么都不返还**（连金币也不退）⇒ 这个常量没有对象，已删除。
+##   **不要把它加回来**：加回来就等于复活一条已被裁定取消的产出路径（核心 §15 D8 / §16.14）。
 
 # ── 拒绝原因码（`[补充]`：文档只写"响亮地拒绝并指明冲突源"，未给码；这里集中定义便于测试）──
 const R_OK := &""
@@ -35,9 +37,10 @@ const R_BAN_LIMIT := &"ban_limit_exceeded"         # V5（派生自 C6）
 const R_TAG_CONFLICT := &"exclusive_tag_conflict"  # V6
 const R_RECOVER_UNSUPPORTED := &"recover_unsupported"
 const R_BELOW_C6 := &"below_c6_floor"              # 可产出物品数 < 3
-const R_COST_INSUFFICIENT := &"cost_insufficient"
-const R_NO_SPACE := &"no_space"                    # 拆卸返还装不下（裁决 17）
-const R_REFUND_UNRESOLVED := &"refund_unresolved"  # resolve_item_id 反查不到
+## ★ v0.19：镶嵌**不再消耗物品** ⇒ 三个旧码作废（保留为墓碑，不再有产出它们的路径）：
+##   `R_COST_INSUFFICIENT`（物品素材不足）/ `R_NO_SPACE`（拆卸返还装不下）/ `R_REFUND_UNRESOLVED`（返还反查失败）。
+##   **镶嵌的新失败码是 `currency_insufficient`**（金币不足）——与 02 / 04 同一枚码。
+const R_CURRENCY_INSUFFICIENT := &"currency_insufficient"   # ★ v0.19：金币不足（镶嵌的唯一花钱失败）
 const R_POOL_INVALID := &"pool_invalid"
 const R_BAD_SERIES := &"bad_series"
 
@@ -160,15 +163,25 @@ static func drop_all_cached_states() -> void:
 ## · 制造消耗 = **一次 `ItemService.transact()`**：任一 `item_cost` 条目实例不足即**整体失败**
 ##   （原子、全有或全无）；**制造侧不做空间预检**——它只消耗不产出，不因仓库满而失败；
 ## · **镶嵌即锁定进这个盒子**：配置**下一个盒子**需要**新的模块**（不存在"模块库存"）；
-## · **★ v0.14 裁决：设备是硬门槛**——`state.has_device() == false` ⇒ 拒绝 `no_device`，
+## · **★ 设备是硬门槛**（v0.14 裁决；v0.17：**玩家侧入口是 `DeviceService.socket()` / `replace()`——薄入口只做"校验 + 转发"**，
+##   本方法是**执行者**，这里的校验是**同一枚码的兜底**）——`state.has_device() == false` ⇒ 拒绝 `no_device`，
 ##   **一次寿命都不扣**（门槛检查排在所有消耗之前）；
 ## · **★ v0.14：装模块也消耗这个盒子的一次使用**（与兑现共用同一个计数器）——
 ##   归零即摧毁；**失败一律不扣次数**（校验失败、制造成本不足都在消耗之前返回）；
+## · ⚠️ **v0.19 待改（本方法当前还是 v0.18 的形态）**：① **成本从"销毁物品"改为"扣金币"**——
+##   改调 `ItemService.transact([{ op = &"currency", kind = &"gold", delta = -该模块的 gold_cost }])`
+##   （**金额来自 `ModuleDef.gold_cost`**；**旧字段 `item_cost` / `ModuleCost` 与 `consume_by_filter` 调用一并删除**，核心 §16.14）；
+##   ② 余额不足 ⇒ **`currency_insufficient`**（不扣生命、不写 `modules`）；③ 其余顺序不变（写 `modules` → 扣 1 次寿命）。
+## `unsocket`：**★ v0.19：什么都不返还**（旧口径"返还 `floor(cost × 0.5)` 材料的新实例"**整条作废**，核心 §15 D8）
+##   ⇒ **它不再产出任何实例、不再需要空间预检、也不必进事务**（`grant(kind = &"refund")` 失去调用方）。
 ## · 返回 `{ok, reason, state, errors, destroyed}`：`destroyed == true` 表示这次镶嵌把盒子扣到 0、
 ##   盒子已被摧毁（**即使它从未兑现过**，那是合法路径）。
 ##
-## `[登记·待定]` **04 设备系统是"装模块的入口 / 工具路径"，本方法仍是池子数据的唯一写入方**——
-##   **"唯一写入方"这条不变量不因装置成为工具而改变**。
+## `[登记]` **04 设备系统是"镶嵌（装模块）的入口 / 工具路径"，本方法仍是池子数据的唯一写入方**——
+##   **"唯一写入方"这条不变量不因装置成为工具而改变**（v0.17：`04` 负责"开启盲盒 + 镶嵌模块"两个入口；
+##   **v0.18 又加了第三件"设备升级"**）。
+##   **单独拆卸（只拆不装）不是 `04` 的动作** ⇒ `unsocket` **没有 `04` 侧的入口，也不受设备门槛约束**。
+##   ⚠️ **v0.18**：**镶嵌既不花原石、也不看设备等级**（等级门控只作用于"开盒"）⇒ **本方法的语义一字未改**。
 ##   **未定项**：「是否必须先有装置才能镶嵌」（即装置成为镶嵌的**前置门槛**，而不只是 UI 路径）
 ##   —— 用户原话"设备系统**用于**给盲盒添加模块"读起来像工具路径，但"必须先有装置"也说得通。
 ##   **本实现按"工具路径"落地：不设任何装置门槛**；该判定留给 **04 重写**那一轮。
@@ -199,16 +212,21 @@ static func socket(state: GameState, box_id: String, module_id: StringName, slot
 	if not plan_errors.is_empty():
 		return _reject(_code_of(plan_errors[0]), plan_errors)
 
-	# 制造消耗：按需求向量逐条挑选实例（选择顺序 = 02 §5.5：品质升序 → acquired_at → instance_id）
-	var cost_ids = _plan_cost_instances(mdef)
-	if cost_ids == null:
-		return _reject(R_COST_INSUFFICIENT)
-	if not cost_ids.is_empty():
-		var res := ItemService.transact([
-			{"op": ItemConstants.OP_CONSUME, "instance_ids": cost_ids, "tag": ItemConstants.TAG_ENGINE},
+	# ★★ v0.19：**镶嵌的成本 = 该模块的金币**（`ModuleDef.gold_cost`，用户裁决）。
+	#   · **金额完全由模块字段决定**——不在这里算任何折扣、也不引入第二个价格来源；
+	#   · 经 `02` 的一次 `transact` 扣除（**本函数不是余额的写入方**，只有 `ItemService` 是）；
+	#   · **不足 ⇒ `currency_insufficient` 且什么都不改**（在写 `modules` / 扣寿命之前返回）；
+	#   · **模块不再消耗任何物品**（旧口径 `item_cost` / `consume_by_filter` 已作废，核心 §16.14）。
+	if mdef.gold_cost > 0:
+		var pay := ItemService.transact([
+			{
+				"op": ItemConstants.OP_CURRENCY,
+				"kind": ItemConstants.CURRENCY_GOLD,
+				"delta": -mdef.gold_cost,
+			},
 		])
-		if not res["ok"]:
-			return _reject(StringName(res["reason"]))
+		if not pay["ok"]:
+			return _reject(StringName(pay["reason"]))
 
 	b.modules[slot] = Module.make(module_id, mdef.quality, _now())
 	b.item_pool.revision += 1                     # ★ 每次写入 +1（revision 是缓存与失效的唯一依据）
@@ -233,17 +251,20 @@ static func socket(state: GameState, box_id: String, module_id: StringName, slot
 	}
 
 
-## 拆卸：把该盒 `modules` 的第 `slot` 位**置空**（**定长长度不变**）+ 返还 50% 材料。
+## 拆卸：把该盒 `modules` 的第 `slot` 位**置空**（**定长长度不变**）。
 ##
 ## ★ **拆卸不要求设备**：v0.14 裁决把设备门槛只摆在**两个消耗寿命的动作**上（开盒、装模块），
 ##   拆卸既不消耗寿命、也不消耗设备。
 ##
-## · 返还量 = **逐条 `floor(amount × 0.5)`**（余数不累加——与 04 §5.3 同一口径，保证与操作顺序无关）；
-## · 返还走 `grant(item_id, { kind = &"refund" })` **新建实例**（新 UUID）——"可逆"说的是
-##   **池子状态与物品数量**，不是**实例身份**（§10.1 T6 ③）；
-## · **返还装不下 → 拒绝整个拆卸**（裁决 17）：空间预检**必须在事务之前**（先查再动），
-##   禁止"先拆、先 grant，发现装不下再靠回滚补救"；
-## · 只能拆**未兑现盒子**的池子（兑现后盒子连同 `modules` 一同消耗，没有拆卸路径）。
+## ★★ **v0.19（用户裁决）：拆卸什么都不返还。**
+##   · 旧口径"返还 `floor(item_cost × 0.5)` 材料"**整条作废**（核心 §15 **D8**）——
+##     模块的成本现在是**金币**，而**金币也不退**；
+##   · ⇒ **本方法不再产出任何实例** ⇒ **不需要空间预检、也不必进事务**（裁决 17 在拆卸这一半
+##     失去对象；"主动操作放不下就整笔拒绝"现在只剩转化一个适用对象）；
+##   · `source.kind = &"refund"` 因此**失去调用方**（保留为保留值，墓碑见 `02-item.md` §5.7）。
+##
+## ★ **拆卸不退还寿命次数**（D20② 不变）：它根本不碰 `uses_remaining`
+##   ⇒ **替换（拆 + 装）净扣 1 次寿命 ＋ 再付一次新模块的金币**。
 static func unsocket(state: GameState, box_id: String, slot: int) -> Dictionary:
 	var b := _find(state, box_id)
 	if b == null:
@@ -258,49 +279,13 @@ static func unsocket(state: GameState, box_id: String, slot: int) -> Dictionary:
 		# 该模块已下线：不静默当基础池（那会静默吃掉玩家投入的模块成本）
 		return _reject(R_UNKNOWN_MODULE)
 
-	# 返还计划（逐条 floor，按 item_id 汇总）
-	var refund: Dictionary = {}          # item_id(StringName) -> 件数
-	var refund_size := 0
-	for entry in mdef.item_cost:
-		if entry == null:
-			continue
-		var item_id := ItemService.resolve_item_id(entry.category, entry.quality)
-		if item_id == &"":
-			return _reject(R_REFUND_UNRESOLVED)
-		var def := ItemCatalog.get_def(item_id)
-		if def == null:
-			return _reject(R_REFUND_UNRESOLVED)
-		var n := int(floor(float(entry.amount) * UNSOCKET_REFUND_RATE))
-		if n <= 0:
-			continue
-		refund[item_id] = int(refund.get(item_id, 0)) + n
-		refund_size += def.size * n
-
-	# 空间预检（事务之前；主动操作放不下 = 拒绝整个操作）
-	var usage := ItemService.warehouse_usage()
-	if int(usage["used"]) + refund_size > int(usage["capacity"]):
-		return _reject(R_NO_SPACE)
-
-	# 一次 transact：全部返还在同一事务里（`kind = refund` ⇒ 主动操作 ⇒ 放不下整笔被拒）
-	var ops: Array = []
-	for item_id in refund.keys():
-		for _i in int(refund[item_id]):
-			ops.append({
-				"op": ItemConstants.OP_GRANT,
-				"item_id": item_id,
-				"source": {"kind": ItemConstants.KIND_REFUND},
-			})
-	if not ops.is_empty():
-		var res := ItemService.transact(ops)
-		if not res["ok"]:
-			return _reject(StringName(res["reason"]))
-
 	b.modules[slot] = null                        # 置空；**长度不变**
 	b.item_pool.revision += 1
 	var s := _compute(b, b.item_pool.revision)
 	_states[box_id] = s
 	# ★ v0.14：**拆卸不消耗使用次数**（消耗点只有"装模块"与"兑现"两个）；
 	#   因此 `destroyed` 恒为 false——盒子的寿命只由那两个动作决定。
+	# ★ v0.19：也**没有任何物品 / 资源变动**（零返还）。
 	bus.pool_changed.emit(box_id, b.item_pool.revision)
 	return {
 		"ok": true, "reason": R_OK, "state": s, "errors": [] as Array[String],
@@ -565,20 +550,12 @@ static func _plan_errors(pool: ItemPool, modules: Array[Module]) -> Array[String
 	return out
 
 
-## 为一条需求向量选出要销毁的实例 id（**只读挑选**；真正销毁在那一次 `transact` 里）。
-## 任一 entry 的合格实例不足 ⇒ 返回 `null`（**整体失败，不做部分消耗**）。
-## 挑选顺序 = 02 §5.5（品质升序 → acquired_at → instance_id），与 `consume_by_filter` 同序。
-static func _plan_cost_instances(mdef: ModuleDef) -> Variant:
-	var ids: Array[String] = []
-	for entry in mdef.item_cost:
-		if entry == null or entry.amount <= 0:
-			continue
-		var candidates := ItemService.query(entry.category, entry.quality)
-		if candidates.size() < entry.amount:
-			return null
-		for i in entry.amount:
-			ids.append(candidates[i])
-	return ids
+## ⚠️ **v0.19 已删除**：`_plan_cost_instances(mdef)`（为"按物品需求向量挑素材"而设）。
+##
+## 模块不再消耗物品（成本 = `ModuleDef.gold_cost` 的金币，核心 §4.5 / §16.14）
+## ⇒ 这个函数**没有调用方**，整段删除；`ItemService.consume_by_filter()` 也随之失去调用方
+## （API 与 tag `engine` 都保留为墓碑，见 `02-item.md` §5.7）。
+## **不要把它加回来**：加回来就等于复活"物品 → 模块"这条已被裁定删除的路径（核心 §3）。
 
 
 # ══════════════════════════════════════════════════════════════════════════════

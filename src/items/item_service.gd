@@ -37,6 +37,19 @@ var mail_count_index: Dictionary = {}
 ## 派生值 Σ(仓库内实例的 size)。与 count_index **由同一次写入一起更新**（§4.4 ④）。
 var warehouse_used: int = 0
 
+## ★ v0.18 / v0.19：**资源（货币类）的余额**（02-item.md §4.7 / §5.13；核心 §4.8）。
+##
+## `StringName -> int`（切片两种：`&"gem"` 原石、`&"gold"` 金币）。**缺键 = 0**。
+##
+## ★ **它是"无实例的持有"**：不占仓库、不进邮件、不计入 `count()`、**不进物品守恒等式**
+##   （守恒式只覆盖 `instances`）——因此它单独一份账，放在本服务里与实例列表并列。
+## ★ **唯一写入方就是本类**：发放走 `grant_currency()`、扣除走 `transact()` 的 `currency` op；
+##   **任何其它系统都不得自行加减、也不得缓存副本**（README §3 铁律 2）。
+## ★ **不变量**：余额**恒为整数、恒 ≥ 0**（任何路径都不得扣成负数——见 `transact` 的净额预检）。
+## ★ **存档布局归 10**：本类只把它放进 `to_save_dict()`（键 `currencies`），由存档层落到
+##   `progression.resources`（`10-progression.md` §4.1 / §7.4 第 11 条）。
+var currencies: Dictionary = {}
+
 ## instance_id -> ItemInstance 的索引。
 ## [!] 实现补充：文档未列，但 consume/claim/grant 幂等都需要 O(1) 按 id 查找；
 ##     没有它每次调用都是 O(n)。
@@ -377,6 +390,9 @@ func transact(ops: Array) -> Dictionary:
 	var remove_tags: Array[StringName] = []  # 与 remove_ids 一一对应（用于区分 consumed / discarded）
 	var grant_plans: Array[Dictionary] = []
 	var seen_remove: Dictionary = {}
+	# ★ v0.18：本批的**资源净额**（String(kind) -> int）。按币种汇总后再一次性判定，
+	#   因此"同一批里先花后得"是合法的（判据是净额，不是中间余额）。
+	var currency_deltas: Dictionary = {}
 
 	for raw in ops:
 		if not (raw is Dictionary):
@@ -441,11 +457,35 @@ func transact(ops: Array) -> Dictionary:
 					remove_ids.append(sid)
 					remove_tags.append(tag)
 
+			ItemConstants.OP_CURRENCY:
+				# ★ v0.18：`{ op: currency, kind: <货币 id>, delta: <整数> }`
+				#   `delta < 0` = 扣除、`> 0` = 发放。**未注册的 kind 是配置错误**
+				#   （V6 应在加载期拦住 `gem` / `gold` 缺失；此处只是兜底）。
+				var kind: StringName = op.get("kind", &"")
+				if not ItemCatalog.has_currency(kind):
+					return fail.call(ItemConstants.REASON_UNKNOWN_CURRENCY)
+				var raw_delta = op.get("delta", 0)
+				if not (raw_delta is int or raw_delta is float):
+					return fail.call(ItemConstants.REASON_BAD_OP)
+				var delta := int(raw_delta)
+				var ckey := String(kind)
+				currency_deltas[ckey] = int(currency_deltas.get(ckey, 0)) + delta
+
 	# ── 阶段二：预演落位（按 ops 书写顺序消费容量：先创建先占地方）────────────────
 	# 先算出销毁会腾出多少空间
 	var projected_used := warehouse_used
 	for id in remove_ids:
 		projected_used -= _size_of(_by_id[id] as ItemInstance)
+
+	# ★ v0.18：**资源净额预检**——任何币种的净额都不得把余额扣成负数。
+	#   这一条必须在**任何写入之前**（与"主动操作放不下就整笔拒绝"同一纪律）：
+	#   开盒的"扣原石 + 产实例"因此是同生共死的一笔，不存在"扣了却没给"的中间态。
+	for ckey in currency_deltas.keys():
+		var net := int(currency_deltas[ckey])
+		if net >= 0:
+			continue
+		if currency_balance(StringName(ckey)) + net < 0:
+			return fail.call(ItemConstants.REASON_CURRENCY_INSUFFICIENT)
 
 	var mailed_plan: Array[bool] = []
 	for plan in grant_plans:
@@ -458,6 +498,9 @@ func transact(ops: Array) -> Dictionary:
 		mailed_plan.append(not fits)
 
 	# ── 阶段三：生效（到这里不会再失败）────────────────────────────────────────
+	for ckey in currency_deltas.keys():
+		_apply_currency_delta(StringName(ckey), int(currency_deltas[ckey]))
+
 	var consumed_out: Array[String] = []
 	var discarded_out: Array[String] = []
 	for i in remove_ids.size():
@@ -493,6 +536,67 @@ func transact(ops: Array) -> Dictionary:
 		"consumed": consumed_out, "granted": granted_out,
 		"discarded": discarded_out, "mailed": mailed_out,
 	}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  资源（货币类）：余额 / 发放 / 扣除（02-item.md §5.13；核心 §4.8）
+# ══════════════════════════════════════════════════════════════════════════════
+
+## 只读余额（**缺键 = 0**）。**04 / 03 / 08 只许读它做预检与呈现，不得缓存副本。**
+func currency_balance(kind: StringName) -> int:
+	return int(currencies.get(String(kind), 0))
+
+
+## 发放资源（**唯一发放入口**——它内部就是一次单 op 事务，不存在第二套实现）。
+##
+## `source` 必须来自 `ItemConstants.ALL_CURRENCY_SOURCES`
+## （`task` 任务奖励 / `milestone` 里程碑 / `init` 开局初始化）——
+## **与实例的 `source.kind` 同一纪律：发放不得来路不明**（否则统计与对账无从下手）。
+##
+## 返回 `{ ok, reason, granted }`。`amount <= 0` 是合法 no-op（`ok == true`）。
+func grant_currency(
+	kind: StringName,
+	amount: int,
+	source: StringName = ItemConstants.CURRENCY_SOURCE_INIT
+) -> Dictionary:
+	if not ItemCatalog.has_currency(kind):
+		return {"ok": false, "reason": ItemConstants.REASON_UNKNOWN_CURRENCY, "granted": 0}
+	if not ItemConstants.ALL_CURRENCY_SOURCES.has(source):
+		return {"ok": false, "reason": ItemConstants.REASON_BAD_OP, "granted": 0}
+	if amount <= 0:
+		return {"ok": true, "reason": ItemConstants.REASON_OK, "granted": 0}
+	var res := transact([{"op": ItemConstants.OP_CURRENCY, "kind": kind, "delta": amount}])
+	if not res["ok"]:
+		return {"ok": false, "reason": StringName(res["reason"]), "granted": 0}
+	return {"ok": true, "reason": ItemConstants.REASON_OK, "granted": amount}
+
+
+## 资源余额的**唯一写入实现**（`transact` 的 `currency` op 只经它落地）。
+## `delta` 可正可负；**不足时返回 false 且不做任何改动**（因此永远不会出现负余额）。
+## canonical 写法：**余额归零即删除该键**（不为 0 保留条目）。
+func _apply_currency_delta(kind: StringName, delta: int) -> bool:
+	if delta == 0:
+		return true
+	var key := String(kind)
+	var bal := int(currencies.get(key, 0)) + delta
+	if bal < 0:
+		return false
+	if bal == 0:
+		currencies.erase(key)
+	else:
+		currencies[key] = bal
+	return true
+
+
+## 资源侧自检：**余额恒为整数、恒 ≥ 0、且每个 kind 都已注册**。
+## 与物品守恒式（`check_conservation`）**分开**——资源不进那个等式（§14.2 铁律 11）。
+func check_currencies() -> bool:
+	for k in currencies.keys():
+		if not ItemCatalog.has_currency(StringName(k)):
+			return false
+		if int(currencies[k]) < 0:
+			return false
+	return true
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -693,6 +797,7 @@ func to_save_dict() -> Dictionary:
 		"serial_counters": serial_counters.duplicate(),
 		"total_granted": total_granted,
 		"total_consumed": total_consumed,
+		"currencies": currencies.duplicate(),   # ★ v0.18：资源余额（落点归 10：`progression.resources`）
 	}
 
 
@@ -712,6 +817,15 @@ func from_save_dict(d: Dictionary) -> void:
 			serial_counters[k] = ItemInstance._normalize_dynamic((sc as Dictionary)[k])
 	total_granted = int(d.get("total_granted", 0))
 	total_consumed = int(d.get("total_consumed", 0))
+	# ★ v0.18：资源余额**读回原值、不重算、不补零**（缺键 = 0 是"没有余额"，不是"要补发"——
+	#   补发是 10 的迁移职责：v5 → v6 回填"开局那两笔"，见 `10-progression.md` §7.4 第 11 条）
+	currencies = {}
+	var cur = d.get("currencies", {})
+	if cur is Dictionary:
+		for k in (cur as Dictionary).keys():
+			var v: int = int(ItemInstance._normalize_dynamic((cur as Dictionary)[k]))
+			if v != 0:
+				currencies[String(k)] = v
 	rebuild_all()
 
 
@@ -724,6 +838,9 @@ func validate_config() -> Dictionary:
 			% warehouse_capacity
 			+ "一切主动操作被拒，游戏当场不可玩"
 		)
+	# ★ v0.18：资源余额的运行期不变量（定义级那一半在 ItemCatalog.validate 的 V6）
+	if not check_currencies():
+		errors.append("资源余额非法：存在未注册的币种或负余额（余额恒 ≥ 0、且 kind 必须已注册）")
 	return {"ok": errors.is_empty(), "errors": errors}
 
 
@@ -736,3 +853,4 @@ func reset() -> void:
 	serial_counters.clear()
 	total_granted = 0
 	total_consumed = 0
+	currencies.clear()

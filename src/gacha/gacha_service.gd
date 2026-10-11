@@ -28,6 +28,9 @@ const R_GRANT_FAILED := &"grant_failed"
 const R_USES_EXHAUSTED := &"uses_exhausted"
 ## v0.14 裁决：**没有设备就不能开盒**（设备是硬门槛；与 01 的装配侧同一个码）
 const R_NO_DEVICE := &"no_device"
+## ★ v0.18 / v0.19：**资源不足**（开盒要付原石）——与 `02` / `04` 同一枚码，
+## **币种由动作决定**（开盒 / 升级 ⇒ 原石 `gem`；镶嵌 ⇒ 金币 `gold`）。
+const R_CURRENCY_INSUFFICIENT := &"currency_insufficient"
 
 ## 兑现种子的发生器。**seed 在兑现时刻生成并记录**（不预生成于盒子获得时：
 ## "盒子先拿到手、池子之后才配置"要求 seed 与**兑现那一刻的池子快照**成对生成）。
@@ -151,8 +154,15 @@ static func roll(evaluation: EvalService.PoolEvaluation, seed: int) -> GachaResu
 
 ## 兑现**一次使用**：求该盒当前状态 → 07 求值 → `roll()` → 产出实例 → 扣一次 `uses_remaining`。
 ##
-## · **★ v0.14 裁决：设备是硬门槛**——`state.has_device() == false` ⇒ 拒绝 `no_device`，
+## · **★ 设备是硬门槛**（v0.14 裁决；v0.17：**玩家侧入口是 `DeviceService.redeem()`——薄入口只做"校验 + 计价 + 转发"**，
+##   本方法是**执行入口**，这里的校验是**同一枚码的兜底**）——`state.has_device() == false` ⇒ 拒绝 `no_device`，
 ##   **不消耗任何一次寿命、不推进 `draw_index`**；
+## · ⚠️ **v0.18 待改（本文件当前还是 v0.16 的形态）**：① `redeem` 要**多一个"本次原石成本"入参**
+##   （`redeem(state, box, gem_cost, seed_override)`——**成本由 04 算、本方法只负责扣**，**不给默认值**）；
+##   ② 提交段要改成**一次 `ItemService.transact([{ op=&"currency", kind=&"gem", delta=-gem_cost },
+##   { op=&"grant", … }])`**（`void` 时只有第一项）——**付费动作的两半必须同生共死**；
+##   ③ **寿命扣减仍排在事务成功之后**；④ 上层还有两道拒绝：`device_level_low` / `currency_insufficient`（**v0.19：资源不足统一用这一枚码**，币种由动作决定）。
+##   （口径见 `04-device.md` §5.1–§5.2 与 `01-gacha.md` §5.6 的职责链；**本注释只登记待改点**。）
 ## · **每次调用只扣 1 次使用**（v0.14：与"装模块"**共用同一个计数器**）；
 ##   `uses_remaining` 归 0 ⇒ **归零即摧毁**（盒子连同 `modules` 一起从 `pending_boxes` 移除，
 ##   **不存在"用尽才消耗"的缓冲**）；
@@ -163,10 +173,16 @@ static func roll(evaluation: EvalService.PoolEvaluation, seed: int) -> GachaResu
 ## · 抽中 `void` 仍然消耗一次使用，只是不产生任何实例。
 ##
 ## `[补充]` `seed_override`：文档没有这个参数，是测试与重放需要的确定性入口（`-1` = 自行生成）。
+## ★★ **v0.18（用户裁决）：开盒要付原石** —— 第三个入参 `gem_cost` 由 `04` 的入口**算好**再传进来
+##   （`01` **不读设备、不算折扣**）；**不给默认值**，因此不存在"忘了传"的静默路径。
+##   · **扣款与实例产出必须在同一次 `ItemService.transact()` 里**（付费动作的两半同生共死）：
+##     `[{currency, kind=&"gem", delta=-gem_cost}, {grant, …}]`；**抽中 `void` 时只有第一项**；
+##   · **余额不足在链首就被拒**（`currency_insufficient`，**不消耗寿命、不推进 `draw_index`**）；
+##   · **寿命扣减仍排在事务成功之后**（既有纪律：校验失败不扣次数；裁决 13 不承诺跨系统原子性）。
 ## `[补充]` 提交阶段若 `grant` 意外失败（正常路径不可能），`draw_index` 已经推进且不回退——
 ## 序号**不复用**（与 02 的 `serial` 同一纪律：宁可跳号，不可复用）。
-static func redeem(state: GameState, box: Box, seed_override: int = -1) -> GachaResult:
-	# ── 校验阶段：任何失败都**不得消耗使用次数、不得推进 draw_index** ──────────────
+static func redeem(state: GameState, box: Box, gem_cost: int, seed_override: int = -1) -> GachaResult:
+	# ── 校验阶段：任何失败都**不得消耗使用次数、不得扣资源、不得推进 draw_index** ──────
 	if state == null or box == null:
 		return GachaResult.failure(R_BOX_NOT_FOUND)
 	if not state.has_box(box.box_id):
@@ -174,6 +190,11 @@ static func redeem(state: GameState, box: Box, seed_override: int = -1) -> Gacha
 	if not state.has_device():
 		# ★ v0.14 裁决：**设备是硬门槛**——没有设备就不能开盒（也不消耗任何一次寿命）
 		return GachaResult.failure(R_NO_DEVICE)
+	if gem_cost < 0:
+		return GachaResult.failure(R_BAD_EVALUATION)
+	if ItemService.currency_balance(ItemConstants.CURRENCY_GEM) < gem_cost:
+		# ★ v0.18：**入场费不够 ⇒ 响亮拒绝**（链首，事务之前）
+		return GachaResult.failure(R_CURRENCY_INSUFFICIENT)
 	if box.uses_remaining <= 0:
 		return GachaResult.failure(R_USES_EXHAUSTED)
 	var series := GachaCatalog.get_series(box.series_id)
@@ -202,15 +223,34 @@ static func redeem(state: GameState, box: Box, seed_override: int = -1) -> Gacha
 	# ★ 快照取自**这一次**的池子状态（两次之间可能已被编辑 ⇒ 每次各一份）
 	r.pool_snapshot = snapshot_of(ps)
 
+	# ★★ v0.18：**一次事务**同时完成"扣原石"与"产实例"（void 时只有前者）。
+	#   · 本系统**不是余额的写入方**（唯一写入方是 02）；这里只是发起那一笔；
+	#   · 任一半失败 ⇒ **整批不生效**（原石一分未扣、无实例），且**寿命也不扣**（下面的 spend_use 还没跑）。
+	var ops: Array = []
+	if gem_cost > 0:
+		ops.append({
+			"op": ItemConstants.OP_CURRENCY,
+			"kind": ItemConstants.CURRENCY_GEM,
+			"delta": -gem_cost,
+		})
+	var src := r.to_source()
+	src["kind"] = ItemConstants.KIND_GACHA    # 02 §5.2：source.kind 必填（01 §10.2 断言这条形状）
 	if not r.is_void:
 		# `is_new` = 收藏口径（**不驱动任何计数器**）
 		r.is_new = not EvalService.is_collected(r.item_id)
-		# 产出实例：**恰好一次** `grant`；`kind = &"gacha"` ⇒ 被动产出 ⇒ 放不下进邮件
-		var src := r.to_source()
-		src["kind"] = ItemConstants.KIND_GACHA    # 02 §5.2：source.kind 必填（01 §10.2 断言这条形状）
-		var inst := ItemService.grant(r.item_id, src)
-		if inst == null:
-			return GachaResult.failure(R_GRANT_FAILED)
+		ops.append({
+			"op": ItemConstants.OP_GRANT,
+			"item_id": r.item_id,
+			"source": src,
+		})
+	if not ops.is_empty():
+		var res := ItemService.transact(ops)
+		if not res["ok"]:
+			var reason := StringName(res["reason"])
+			if reason == ItemConstants.REASON_CURRENCY_INSUFFICIENT:
+				return GachaResult.failure(R_CURRENCY_INSUFFICIENT)
+			return GachaResult.failure(R_ITEM_NOT_REGISTERED if reason == ItemConstants.REASON_BAD_OP
+				else R_GRANT_FAILED)
 
 	# ★ v0.14：**成功兑现消耗一次使用**（与装模块**共用同一个计数器**）；**归零即摧毁盒子**
 	var destroyed := state.spend_use(box)
@@ -225,9 +265,20 @@ static func redeem(state: GameState, box: Box, seed_override: int = -1) -> Gacha
 ## 因此**一次批量兑现可以跨多个盒子**（`k == 5` 完全可能是 2 个盒子）。
 ##
 ## `[补充]` **全部预校验后再逐个提交**（03 §5.2 的同一纪律：不做"半批已开、后面失败"）：
-## 预校验不通过（**无设备** / 盒子不在清单 / 套系不可解析 / **可用次数 < k**）⇒ 返回 **k 条失败结果**，
-## **不消耗任何次数、不推进 `draw_index`**。`results.size() == k` 恒成立，便于对账。
-static func redeem_batch(state: GameState, boxes: Array, k: int, seed_overrides: Array = []) -> Array[GachaResult]:
+## 预校验不通过（**无设备** / 盒子不在清单 / 套系不可解析 / **可用次数 < k** / **整批原石不够**）⇒
+## 返回 **k 条失败结果**，**不消耗任何次数、不推进 `draw_index`、不扣原石**。
+## `results.size() == k` 恒成立，便于对账。
+##
+## ★★ v0.18：`gem_costs` 与 `boxes` **一一对应**（每盒的原石单价，由 `04` 算好）。
+##   整批的总成本按"提交顺序要开的那些次数"求和：盒子按给定顺序逐个消耗，
+##   某盒用尽后自动接到下一个 ⇒ 预检必须**复刻这个顺序**（否则会系统性地低估成本）。
+static func redeem_batch(
+	state: GameState,
+	boxes: Array,
+	gem_costs: Array,
+	k: int,
+	seed_overrides: Array = []
+) -> Array[GachaResult]:
 	var out: Array[GachaResult] = []
 	if k <= 0:
 		return out
@@ -239,16 +290,31 @@ static func redeem_batch(state: GameState, boxes: Array, k: int, seed_overrides:
 		reason = R_NO_DEVICE
 	else:
 		var available := 0
-		for b in boxes:
-			var bx := b as Box
-			if bx == null or not state.has_box(bx.box_id):
+		for i in boxes.size():
+			var b := boxes[i] as Box
+			if b == null or not state.has_box(b.box_id):
 				reason = R_BOX_NOT_FOUND
-			elif GachaCatalog.get_series(bx.series_id) == null:
+			elif GachaCatalog.get_series(b.series_id) == null:
 				reason = R_BAD_SERIES
 			else:
-				available += maxi(bx.uses_remaining, 0)
+				available += maxi(b.uses_remaining, 0)
 		if reason == R_OK and available < k:
 			reason = R_USES_EXHAUSTED
+		# ★ v0.18：整批原石预检——按提交顺序（逐盒消耗、用尽即接下一盒）算出要开的 k 次的总价
+		if reason == R_OK:
+			var total_cost := 0
+			var left := k
+			for i in boxes.size():
+				if left <= 0:
+					break
+				var b := boxes[i] as Box
+				var take := mini(maxi(b.uses_remaining, 0), left)
+				if take <= 0:
+					continue
+				total_cost += _cost_at(gem_costs, i) * take
+				left -= take
+			if ItemService.currency_balance(ItemConstants.CURRENCY_GEM) < total_cost:
+				reason = R_CURRENCY_INSUFFICIENT
 	if reason != R_OK:
 		for _i in k:
 			out.append(GachaResult.failure(reason))
@@ -257,15 +323,15 @@ static func redeem_batch(state: GameState, boxes: Array, k: int, seed_overrides:
 	# 提交：按盒子顺序逐次消耗，直到结算完 k 次
 	var remaining := k
 	var i := 0
-	for b in boxes:
+	for bi in boxes.size():
 		if remaining <= 0:
 			break
-		var bx := b as Box
+		var bx := boxes[bi] as Box
 		while remaining > 0 and bx.uses_remaining > 0:
 			var override := -1
 			if i < seed_overrides.size():
 				override = int(seed_overrides[i])
-			var r := redeem(state, bx, override)
+			var r := redeem(state, bx, _cost_at(gem_costs, bi), override)
 			out.append(r)
 			i += 1
 			remaining -= 1
@@ -276,6 +342,14 @@ static func redeem_batch(state: GameState, boxes: Array, k: int, seed_overrides:
 	while out.size() < k:
 		out.append(GachaResult.failure(R_USES_EXHAUSTED))
 	return out
+
+
+## `gem_costs[i]`（缺项 = 0）。索引越界一律当 0：批量入口不臆造价格，
+## **价格是 `04` 的职责**——这里只做"照单收钱"。
+static func _cost_at(gem_costs: Array, i: int) -> int:
+	if i < 0 or i >= gem_costs.size():
+		return 0
+	return maxi(int(gem_costs[i]), 0)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

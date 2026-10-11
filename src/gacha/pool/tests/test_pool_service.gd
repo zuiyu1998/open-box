@@ -26,9 +26,9 @@ func _ready() -> void:
 	_test_plan_gates()
 	_test_per_box_independence()
 	_test_preview_is_read_only()
-	_test_unsocket_refund_and_reversibility()
-	_test_cost_insufficient_consumes_nothing()
-	_test_unsocket_no_space_rejects_whole_operation()
+	_test_socket_gold_cost_and_unsocket_zero_refund()
+	_test_gold_insufficient_consumes_nothing()
+	_test_unsocket_works_when_warehouse_full()
 	_test_explicit_replace_path()
 	_test_broken_modules_are_reported()
 
@@ -72,6 +72,14 @@ func _setup() -> void:
 	PoolService.drop_all_cached_states()
 	EvalService.is_collected_provider = Callable()
 
+	# ★ v0.18 / v0.19：资源（货币类）必须先注册（V6：缺 gold 就装不了模块）
+	for kind in ItemConstants.ALL_CURRENCIES:
+		var cur := CurrencyDef.new()
+		cur.id = kind
+		cur.display_name = String(kind)
+		cur.description = "夹具"
+		ItemCatalog.register_currency(cur)
+
 	_defs = []
 	var cats: Array[StringName] = [&"stardust", &"stardust", &"stardust", &"stardust",
 		&"stardust", &"crystal", &"crystal", &"crystal"]
@@ -105,13 +113,13 @@ func _setup() -> void:
 	GachaCatalog.register_module(_module(&"mod_recover", ModuleDef.OpType.RECOVER, [&"s01_05"]))
 	GachaCatalog.register_module(_module(&"mod_ban_many", ModuleDef.OpType.BAN,
 		[&"s01_01", &"s01_02", &"s01_03", &"s01_04", &"s01_05", &"s01_06"]))
-	# 有物品成本的模块：需求向量 = (stardust, 品质下限 2, 4 件)
+	# 有金币成本的模块（★ v0.19：模块的成本 = 金币，写在 `ModuleDef.gold_cost` 上）
 	GachaCatalog.register_module(_module(&"mod_ban_costly", ModuleDef.OpType.BAN, [&"s01_05"], 1.0,
-		[[&"stardust", 2, 4]]))
+		25))
 	# 互斥标记（V6）
-	GachaCatalog.register_module(_module(&"mod_tag_a", ModuleDef.OpType.BAN, [&"s01_04"], 1.0, [],
+	GachaCatalog.register_module(_module(&"mod_tag_a", ModuleDef.OpType.BAN, [&"s01_04"], 1.0, 0,
 		[&"exclusive_x"]))
-	GachaCatalog.register_module(_module(&"mod_tag_b", ModuleDef.OpType.BAN, [&"s01_06"], 1.0, [],
+	GachaCatalog.register_module(_module(&"mod_tag_b", ModuleDef.OpType.BAN, [&"s01_06"], 1.0, 0,
 		[&"exclusive_x"]))
 
 
@@ -120,7 +128,7 @@ func _module(
 	op: int,
 	targets: Array,
 	magnitude: float = 1.0,
-	cost: Array = [],
+	gold_cost: int = 0,
 	tags: Array = [],
 	mode: int = ModuleDef.RedistributeMode.AUTO,
 	rtarget: StringName = &""
@@ -133,23 +141,23 @@ func _module(
 	m.magnitude = magnitude
 	m.redistribute_mode = mode
 	m.redistribute_target = rtarget
+	# ★ v0.19：成本 = 金币（`ModuleCost` 物品需求向量已整族删除）
+	m.gold_cost = gold_cost
 	for t in targets:
 		m.targets.append(StringName(t))
-	for c in cost:
-		var e := ModuleCost.new()
-		e.category = StringName(c[0])
-		e.quality = int(c[1])
-		e.amount = int(c[2])
-		m.item_cost.append(e)
 	for t in tags:
 		m.exclusive_tags.append(StringName(t))
 	return m
 
 
 ## 新档 + 发 `n` 个盒子。
+## ★ 开局给足金币（成本测试自己会把余额压到阈值两侧）。
 func _new_state(n: int = 1) -> Dictionary:
 	_setup()
 	var st := GameState.new_game()   # v0.14：镶嵌需要设备（开局送一台基础装置）
+	ItemService.grant_currency(
+		ItemConstants.CURRENCY_GOLD, 1000, ItemConstants.CURRENCY_SOURCE_INIT
+	)
 	var boxes := GachaService.grant_box(st, &"series_01", n, &"test")
 	return {"state": st, "boxes": boxes}
 
@@ -326,28 +334,33 @@ func _test_preview_is_read_only() -> void:
 	ok(ps != real, "候选状态与真实状态是两个对象")
 
 
-func _test_unsocket_refund_and_reversibility() -> void:
-	print("— 拆卸（§5.8 / §10.1 T6）：返还 floor(cost × 0.5) 的**新实例**，池子回到基础态")
+func _test_socket_gold_cost_and_unsocket_zero_refund() -> void:
+	print("— ★ v0.19：镶嵌的成本 = 该模块的金币；**拆卸什么都不返还**（核心 §15 D8）")
 	var f := _new_state(1)
 	var st: GameState = f["state"]
 	var bx: Box = f["boxes"][0]
-	# 备好制造成本：需求向量 (stardust, 品质下限 2, 4 件) ⇒ 4 件 `s01_02`（category stardust / quality 2 / size 2）
-	var made: Array[String] = []
-	for _i in 4:
-		var inst := ItemService.grant(&"s01_02", {"kind": ItemConstants.KIND_UNLOCK})
-		made.append(inst.instance_id)
-	eq(ItemService.count(&"stardust", 2), 4, "仓库里有 4 件满足需求的实例")
-	eq(ItemService.warehouse_usage()["used"], 8, "占 4 × size 2 = 8")
+	var gold_before := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
+	var inst_before := ItemService.instances.size()
 
 	var r := PoolService.socket(st, bx.box_id, &"mod_ban_costly", 0)
-	ok(r["ok"], "镶嵌成功（制造消耗在同一事务里原子完成）")
-	eq(ItemService.count(&"stardust", 2), 0, "4 件成本被销毁")
+	ok(r["ok"], "镶嵌成功（成本在同一次 02 事务里扣掉）")
+	eq(
+		ItemService.currency_balance(ItemConstants.CURRENCY_GOLD),
+		gold_before - 25,
+		"**金币恰好减少该模块的 `gold_cost`（25）**"
+	)
+	eq(ItemService.instances.size(), inst_before, "**一件物品都没有被消耗**（模块不再吃物品）")
 	var ps_socketed: PoolState = r["state"]
 	eq(ps_socketed.void_mass_bp, 800, "已生效：void 800")
 
 	var u := PoolService.unsocket(st, bx.box_id, 0)
 	ok(u["ok"], "拆卸成功")
-	eq(ItemService.count(&"stardust", 2), 2, "返还 floor(4 × 0.5) = 2 件")
+	eq(
+		ItemService.currency_balance(ItemConstants.CURRENCY_GOLD),
+		gold_before - 25,
+		"**拆卸不返还金币**（余额不回升）"
+	)
+	eq(ItemService.instances.size(), inst_before, "**拆卸不产生任何新实例**（零返还）")
 	ok(ItemService.check_conservation(), "守恒等式仍成立（total_granted − total_consumed == 实例数）")
 	var ps_after: PoolState = u["state"]
 	eq(ps_after.void_mass_bp, 0, "**PoolState 回到基础态且 void == 0**（T6 ①）")
@@ -356,70 +369,52 @@ func _test_unsocket_refund_and_reversibility() -> void:
 	eq(bx.occupied_count(), 0, "该位被置空")
 	eq(bx.modules.size(), 3, "**定长长度不变**")
 	eq(bx.item_pool.revision, 2, "revision = 2（镶嵌 +1、拆卸 +1）")
-	# 返还的是**新实例**：UUID 与制造时被销毁的那批不相交（T6 ③）
-	var new_ids: Array[String] = []
-	for inst in ItemService.instances:
-		if inst.item_id == &"s01_02":
-			new_ids.append(inst.instance_id)
-	eq(new_ids.size(), 2, "仓库里恰好 2 件返还实例")
-	var disjoint := true
-	for id in new_ids:
-		if made.has(id):
-			disjoint = false
-	ok(disjoint, "返还实例的 UUID 与制造时销毁的**交集为空**（可逆说的是数量与状态，不是实例身份）")
-	var serial_zero := true
-	for inst in ItemService.instances:
-		if inst.item_id == &"s01_02" and inst.serial != 0:
-			serial_zero = false
-	ok(serial_zero, "返还实例的 serial == 0（非开盒来源，02 内部置位）")
 
 
-func _test_cost_insufficient_consumes_nothing() -> void:
-	print("— 制造成本不足 ⇒ **整体失败**，且一个实例都不消耗（§5.8 原子性）")
+func _test_gold_insufficient_consumes_nothing() -> void:
+	print("— 金币不足 ⇒ **整体拒绝**，且什么都不改（§5.3 / 核心 §16.14）")
 	var f := _new_state(1)
 	var st: GameState = f["state"]
 	var bx: Box = f["boxes"][0]
-	for _i in 2:
-		ItemService.grant(&"s01_02", {"kind": ItemConstants.KIND_UNLOCK})
-	var granted_before := ItemService.total_granted
-	var consumed_before := ItemService.total_consumed
+	# 把余额压到"差 1 点"：模块价 25
+	ItemService.currencies.clear()
+	ItemService.grant_currency(
+		ItemConstants.CURRENCY_GOLD, 24, ItemConstants.CURRENCY_SOURCE_INIT
+	)
+	var inst_before := ItemService.instances.size()
 	var r := PoolService.socket(st, bx.box_id, &"mod_ban_costly", 0)
-	ok(not r["ok"], "只备了 2 件、需求 4 件 ⇒ 拒绝")
-	eq(r["reason"], PoolService.R_COST_INSUFFICIENT, "原因码 = cost_insufficient")
-	eq(ItemService.count(&"stardust", 2), 2, "**一件都没被销毁**")
-	eq(ItemService.total_granted, granted_before, "total_granted 不变")
-	eq(ItemService.total_consumed, consumed_before, "total_consumed 不变")
+	ok(not r["ok"], "余额 24 < 25 ⇒ 拒绝")
+	eq(r["reason"], PoolService.R_CURRENCY_INSUFFICIENT, "原因码 = currency_insufficient")
+	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD), 24, "**一分钱都没扣**")
+	eq(ItemService.instances.size(), inst_before, "实例列表逐项不变")
 	eq(bx.occupied_count(), 0, "modules 没被写入")
 	eq(bx.item_pool.revision, 0, "revision 没被推进")
 
 
-func _test_unsocket_no_space_rejects_whole_operation() -> void:
-	print("— 返还装不下 ⇒ **拒绝整个拆卸**（裁决 17：主动操作不产生净损失）")
+func _test_unsocket_works_when_warehouse_full() -> void:
+	print("— ★ v0.19：仓库满时**拆卸照样成功**（它不产出任何实例 ⇒ 没有『放不下』这回事）")
 	var f := _new_state(1)
 	var st: GameState = f["state"]
 	var bx: Box = f["boxes"][0]
 	ItemService.warehouse_capacity = 10
-	for _i in 4:
-		ItemService.grant(&"s01_02", {"kind": ItemConstants.KIND_UNLOCK})
-	ok(PoolService.socket(st, bx.box_id, &"mod_ban_costly", 0)["ok"], "先镶嵌（消耗 4 件，腾空仓库）")
+	ok(PoolService.socket(st, bx.box_id, &"mod_ban_costly", 0)["ok"], "先镶嵌（金币扣款）")
 	for _i in 5:
 		ItemService.grant(&"s01_02", {"kind": ItemConstants.KIND_UNLOCK})
 	eq(ItemService.warehouse_usage()["used"], 10, "仓库恰好占满（5 件 × size 2）")
 	var inst_before := ItemService.instances.size()
-	var ps_before := PoolService.get_pool_state(st, bx.box_id)
-	var ps_weights_before := ps_before.weights_bp.duplicate()
+	var gold_before := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
 
 	var u := PoolService.unsocket(st, bx.box_id, 0)
-	ok(not u["ok"], "返还 2 件 × size 2 = 4 装不下 ⇒ 拒绝")
-	eq(u["reason"], PoolService.R_NO_SPACE, "原因码 = no_space")
-	eq(bx.occupied_count(), 1, "**该位仍含那一项**（没有先拆再补救）")
-	eq(ItemService.instances.size(), inst_before, "实例列表逐项不变")
-	var same := true
-	for k in ps_weights_before.keys():
-		if int(ps_weights_before[k]) != PoolService.get_pool_state(st, bx.box_id).weight_of(StringName(k)):
-			same = false
-	ok(same, "PoolState 逐项不变")
-	eq(bx.item_pool.revision, 1, "revision 没有推进")
+	ok(u["ok"], "**仓库满也能拆卸**（旧口径的 no_space 拒绝已随零返还作废）")
+	eq(bx.occupied_count(), 0, "该位被置空")
+	eq(ItemService.instances.size(), inst_before, "实例列表逐项不变（没有返还实例）")
+	eq(ItemService.warehouse_usage()["used"], 10, "占用不变")
+	eq(
+		ItemService.currency_balance(ItemConstants.CURRENCY_GOLD),
+		gold_before,
+		"金币不变（零返还）"
+	)
+	eq(bx.item_pool.revision, 2, "revision = 2（镶嵌 +1、拆卸 +1）")
 
 
 func _test_explicit_replace_path() -> void:
@@ -429,7 +424,7 @@ func _test_explicit_replace_path() -> void:
 	var bx: Box = f["boxes"][0]
 	ok(PoolService.socket(st, bx.box_id, &"mod_ban_05", 0)["ok"], "第 0 位装上排除模块")
 	ok(not PoolService.socket(st, bx.box_id, &"mod_ban_08", 0)["ok"], "往占用位放 ⇒ 拒绝")
-	ok(PoolService.unsocket(st, bx.box_id, 0)["ok"], "显式拆卸第 0 位（该模块无成本 ⇒ 无返还）")
+	ok(PoolService.unsocket(st, bx.box_id, 0)["ok"], "显式拆卸第 0 位（零返还）")
 	ok(PoolService.socket(st, bx.box_id, &"mod_ban_08", 0)["ok"], "现在可以装另一个模块")
 	var ps := PoolService.get_pool_state(st, bx.box_id)
 	eq(ps.weight_of(&"s01_08"), 0, "新模块生效（s01_08 被排除）")
