@@ -11,6 +11,11 @@
 ##      拼错只能等到运行时才暴露。
 extends Node
 
+## ★ v0.21：**物品类别的内容目录**——`ItemCategoryDef` 的 `.tres` 放这里，
+## `_ready()`（以及 `load_category_content()`）会**自动载入并注册**。
+## **加一类 = 加一个 `.tres`，不改代码**（核心 §14.3 / R11 的直接落地）。
+const CATEGORY_CONTENT_DIR := "res://src/items/content/categories"
+
 ## item_id(String) -> ItemDef
 var _by_id: Dictionary = {}
 ## 派生索引键 "<category>:<quality>"(String) -> item_id(StringName)
@@ -53,6 +58,38 @@ func register_category(cat: ItemCategoryDef) -> void:
 	_categories[cat.category_id] = cat
 
 
+## ★ v0.21：**从内容目录载入全部 `ItemCategoryDef`**（幂等；同 id 覆盖）。
+##
+## 返回载入成功的条数。目录不存在 / 载入失败**只告警、不崩**——
+## 类别缺失会在 `validate()` 里被"物品引用了未注册类别"点名（那是配置错误，必须报出来），
+## 而在没有任何物品引用它时，缺类别并不致命（空内容的切片仍能跑）。
+func load_category_content() -> int:
+	var n := 0
+	var dir := DirAccess.open(CATEGORY_CONTENT_DIR)
+	if dir == null:
+		push_warning(
+			"ItemCatalog: 打不开类别内容目录 `%s`（没有类别内容时是正常的）" % CATEGORY_CONTENT_DIR
+		)
+		return 0
+	dir.list_dir_begin()
+	var fname := dir.get_next()
+	while fname != "":
+		if not dir.current_is_dir() and fname.ends_with(".tres"):
+			var path := CATEGORY_CONTENT_DIR + "/" + fname
+			if ResourceLoader.exists(path):
+				var res = load(path)
+				if res is ItemCategoryDef:
+					register_category(res as ItemCategoryDef)
+					n += 1
+		fname = dir.get_next()
+	dir.list_dir_end()
+	return n
+
+
+func _ready() -> void:
+	load_category_content()
+
+
 ## ★ v0.18：注册一种资源（货币类）。切片两种：`gem`（原石）/ `gold`（金币）。
 func register_currency(def: CurrencyDef) -> void:
 	if def == null or def.id == &"":
@@ -93,6 +130,19 @@ func get_def(item_id: StringName) -> ItemDef:
 
 func get_category(category: StringName) -> ItemCategoryDef:
 	return _categories.get(category, null) as ItemCategoryDef
+
+
+## ★ v0.21：全部已注册类别，**按 `sort_order` 升序**（同序按 id 字典序，保证确定性）。
+## UI（08）与任务需求（03）都用它枚举类别，**不得各自维护一份类别清单**。
+func all_categories() -> Array[ItemCategoryDef]:
+	var out: Array[ItemCategoryDef] = []
+	for k in _categories.keys():
+		out.append(_categories[k] as ItemCategoryDef)
+	out.sort_custom(func(a: ItemCategoryDef, b: ItemCategoryDef) -> bool:
+		if a.sort_order != b.sort_order:
+			return a.sort_order < b.sort_order
+		return String(a.category_id) < String(b.category_id))
+	return out
 
 
 func has_item(item_id: StringName) -> bool:
@@ -183,6 +233,22 @@ func validate() -> Dictionary:
 		if def.category != &"" and not _categories.has(def.category):
 			errors.append("类别未注册：`%s`.category = `%s`" % [def.item_id, def.category])
 
+	# ★ v0.21：类别自身的定义校验 + **`sort_order` 不得重复**（重复的排序值 = 面板顺序不确定）
+	var seen_order: Dictionary = {}
+	for k in _categories.keys():
+		var cat := _categories[k] as ItemCategoryDef
+		for p in cat.validate():
+			errors.append("类别非法：%s" % p)
+		if cat.sort_order <= 0:
+			continue
+		if seen_order.has(cat.sort_order):
+			errors.append(
+				"类别排序冲突：`%s` 与 `%s` 的 sort_order 都是 %d（面板顺序会不确定）"
+				% [seen_order[cat.sort_order], cat.category_id, cat.sort_order]
+			)
+		else:
+			seen_order[cat.sort_order] = cat.category_id
+
 	# V6（定义级那一半）：CurrencyDef 定义合法 + **开局必发的两种货币已注册**
 	for k in _currencies.keys():
 		var cdef := _currencies[k] as CurrencyDef
@@ -194,5 +260,16 @@ func validate() -> Dictionary:
 			% kind
 			+ "（缺 gem 开不了盒、缺 gold 装不了模块：这是必炸的配置错误，必须在加载期拦住）"
 		)
+
+	# V7（v0.20）：售出价格必须是**非负整数**（单位：金币）。
+	# `0` 是合法值 = **不可售**（不是"免费送"）；负值会让售卖凭空销毁金币，
+	# 而 07 只读派生量、**无从察觉**这类配置错误。
+	for k in _by_id.keys():
+		var def := _by_id[k] as ItemDef
+		if def.sell_gold < 0:
+			errors.append(
+				"V7 非法：`%s`.sell_gold = %d，必须 >= 0（0 = 不可售；负值会让售卖销毁金币）"
+				% [def.item_id, def.sell_gold]
+			)
 
 	return {"ok": errors.is_empty(), "errors": errors}

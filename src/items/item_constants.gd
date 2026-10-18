@@ -42,10 +42,14 @@ const TAG_FUEL := &"fuel"
 ## **保留为保留值**（不删域：删了会让旧档 / 旧测试无从解释），但**全库不得再有产出它的路径**。
 const TAG_ENGINE := &"engine"
 const TAG_CONVERT := &"convert"
+## ★ v0.20（用户裁决）：**售卖**——把物品卖给系统换**金币**（`ItemService.sell()` 专用）。
+## 它是**与"交付任务"并列的独立出口**（核心 §3 的出口表 / `02-item.md` §5.7）。
+## **只能由 `sell()` 入口写入**（与 `discard` 同一纪律：别的入口不得冒用这个标签）。
+const TAG_SELL := &"sell"
 const TAG_DISCARD := &"discard"  # 保留值：只由 discard() 入口写入
 const TAG_UNKNOWN := &"unknown"  # 仅为签名兼容保留；真实调用不传即失败
 
-# 允许调用方显式传入的标签（discard 不在内——它只能走 discard()）
+# 允许调用方显式传入的标签（discard / sell 不在内——它们各只能走自己的入口）
 const CALLER_TAGS: Array[StringName] = [TAG_FUEL, TAG_ENGINE, TAG_CONVERT]
 
 # ── reason 取值域（02-item.md §5.10 / §5.11）────────────────────────────────────
@@ -56,6 +60,8 @@ const REASON_MISSING_INSTANCE := &"missing_instance"
 const REASON_DUPLICATE_ID := &"duplicate_id"
 const REASON_NOT_IN_WAREHOUSE := &"not_in_warehouse"
 const REASON_NOT_IN_MAIL := &"not_in_mail"
+## ★ v0.20：该物品**不可售**（`ItemDef.sell_gold == 0`）——售卖入口专用
+const REASON_NOT_SELLABLE := &"not_sellable"
 const REASON_NO_SPACE := &"no_space"  # 空间问题的唯一原因码（transact 与 claim 共用）
 
 # ── 事务 op 类型（02-item.md §5.11）────────────────────────────────────────────
@@ -65,8 +71,12 @@ const OP_DISCARD := &"discard"
 ## ★ v0.18 新增第四类：资源（货币类）的加减（02-item.md §4.7 / §5.13）。
 ## `{ "op": &"currency", "kind": &"gem", "delta": -30 }` —— delta < 0 = 扣除、> 0 = 发放。
 const OP_CURRENCY := &"currency"
+## ★ v0.20 新增第五类：**售卖**（`ItemService.sell()` 专用）——`{ "op": &"sell", "instance_ids": [...] }`。
+## 与 `discard` 同一形状，但**会计入 `sold` 而不是 `discarded`**，且它通常与一条
+## `currency(+金币)` op 同处一次事务（"销毁 + 得钱"同生共死，02-item.md §5.14）。
+const OP_SELL := &"sell"
 
-const ALL_OPS: Array[StringName] = [OP_GRANT, OP_CONSUME, OP_DISCARD, OP_CURRENCY]
+const ALL_OPS: Array[StringName] = [OP_GRANT, OP_CONSUME, OP_DISCARD, OP_CURRENCY, OP_SELL]
 
 # 事务 op 的合法键集（逐字；出现其它键或缺少必填键 → bad_op）
 const OP_KEYS := {
@@ -74,12 +84,14 @@ const OP_KEYS := {
 	OP_CONSUME: [&"op", &"instance_ids", &"tag"],
 	OP_DISCARD: [&"op", &"instance_ids"],
 	OP_CURRENCY: [&"op", &"kind", &"delta"],
+	OP_SELL: [&"op", &"instance_ids"],
 }
 const OP_REQUIRED_KEYS := {
 	OP_GRANT: [&"op", &"item_id"],
 	OP_CONSUME: [&"op", &"instance_ids", &"tag"],
 	OP_DISCARD: [&"op", &"instance_ids"],
 	OP_CURRENCY: [&"op", &"kind", &"delta"],
+	OP_SELL: [&"op", &"instance_ids"],
 }
 
 # ── 资源（货币类）：切片两种（核心 §4.8 的币种表）────────────────────────────────

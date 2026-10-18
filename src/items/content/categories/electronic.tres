@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="ItemCategoryDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/items/defs/item_category_def.gd" id="1_cat"]
+
+[resource]
+script = ExtResource("1_cat")
+category_id = &"electronic"
+display_name = "电子物品"
+description = "芯片、模组与整机 —— 技术类高附加物。"
+sort_order = 7

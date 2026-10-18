@@ -375,6 +375,7 @@ func transact(ops: Array) -> Dictionary:
 		return {
 			"ok": false, "reason": reason,
 			"consumed": empty, "granted": empty, "discarded": empty, "mailed": empty,
+			"sold": empty,
 		}
 
 	if read_only:
@@ -383,6 +384,7 @@ func transact(ops: Array) -> Dictionary:
 		return {
 			"ok": true, "reason": ItemConstants.REASON_OK,
 			"consumed": empty, "granted": empty, "discarded": empty, "mailed": empty,
+			"sold": empty,
 		}
 
 	# ── 阶段一：逐 op 预校验（类型 / 键集 / 标签 / item_id / kind / overflow）──────
@@ -434,10 +436,11 @@ func transact(ops: Array) -> Dictionary:
 					"overflow": eff, "size": def.size, "instance_id": req_id,
 				})
 
-			ItemConstants.OP_CONSUME, ItemConstants.OP_DISCARD:
+			ItemConstants.OP_CONSUME, ItemConstants.OP_DISCARD, ItemConstants.OP_SELL:
 				var tag: StringName = (
 					ItemConstants.TAG_DISCARD if op_type == ItemConstants.OP_DISCARD
-					else op.get("tag", ItemConstants.TAG_UNKNOWN)
+					else (ItemConstants.TAG_SELL if op_type == ItemConstants.OP_SELL
+					else op.get("tag", ItemConstants.TAG_UNKNOWN))
 				)
 				if op_type == ItemConstants.OP_CONSUME and not ItemConstants.CALLER_TAGS.has(tag):
 					return fail.call(ItemConstants.REASON_BAD_TAG)
@@ -503,12 +506,15 @@ func transact(ops: Array) -> Dictionary:
 
 	var consumed_out: Array[String] = []
 	var discarded_out: Array[String] = []
+	var sold_out: Array[String] = []
 	for i in remove_ids.size():
 		var inst := _by_id[remove_ids[i]] as ItemInstance
 		_detach(inst)
 		total_consumed += 1
 		if remove_tags[i] == ItemConstants.TAG_DISCARD:
 			discarded_out.append(remove_ids[i])
+		elif remove_tags[i] == ItemConstants.TAG_SELL:
+			sold_out.append(remove_ids[i])
 		else:
 			consumed_out.append(remove_ids[i])
 
@@ -535,6 +541,7 @@ func transact(ops: Array) -> Dictionary:
 		"ok": true, "reason": ItemConstants.REASON_OK,
 		"consumed": consumed_out, "granted": granted_out,
 		"discarded": discarded_out, "mailed": mailed_out,
+		"sold": sold_out,
 	}
 
 
@@ -597,6 +604,69 @@ func check_currencies() -> bool:
 		if int(currencies[k]) < 0:
 			return false
 	return true
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  售卖（★ v0.20；02-item.md §5.14）——物品的第二条出口：卖成金币
+# ══════════════════════════════════════════════════════════════════════════════
+
+## **售卖**：把仓库里的若干实例**销毁**，并按 `ItemDef.sell_gold`（单位：金币）**发放金币**。
+##
+## ★ **一次事务完成两件事**：`transact([{consume, tag=&"sell"}, {currency, +金币}])`
+##   ⇒ **要么"销毁 + 得钱"都发生，要么什么都不发生**（不会出现"东西没了钱没到"的坏账）。
+## ★ **价格完全由 `ItemDef.sell_gold` 决定**（每件一份）；`0` = **不可售**（报 `not_sellable`，
+##   **不是**免费送）。**售价的标定归核心 D26**，本类不算法、不打折。
+## ★ **只对仓库实例生效**（邮件实例不可售——它们本来就不是"可用持有"，§5.10）。
+## ★ **与 `discard` 的区别**：丢弃**不给任何回报**；售卖**按定义发金币**。
+##   两者都走同一套事务原语，但**各走自己的入口、各用自己的标签**（归因可区分）。
+##
+## 返回 `{ ok, reason, gold, sold: Array[String] }`。
+func sell(instance_ids: Array[String]) -> Dictionary:
+	var empty: Array[String] = []
+	var fail := func(reason: StringName) -> Dictionary:
+		return {"ok": false, "reason": reason, "gold": 0, "sold": empty}
+	if read_only:
+		return fail.call(ItemConstants.REASON_BAD_OP)
+	if instance_ids.is_empty():
+		return fail.call(ItemConstants.REASON_BAD_OP)
+
+	# 预校验（事务之前）：每件都必须存在、在仓库、且**可售**
+	var seen: Dictionary = {}
+	var gold := 0
+	for id in instance_ids:
+		var sid := String(id)
+		if seen.has(sid):
+			return fail.call(ItemConstants.REASON_DUPLICATE_ID)
+		var inst := _by_id.get(sid, null) as ItemInstance
+		if inst == null:
+			return fail.call(ItemConstants.REASON_MISSING_INSTANCE)
+		if not inst.is_in_warehouse():
+			return fail.call(ItemConstants.REASON_NOT_IN_WAREHOUSE)
+		var def := ItemCatalog.get_def(inst.item_id)
+		if def == null:
+			return fail.call(ItemConstants.REASON_BAD_OP)
+		if def.sell_gold <= 0:
+			return fail.call(ItemConstants.REASON_NOT_SELLABLE)
+		seen[sid] = true
+		gold += def.sell_gold
+
+	var res := transact([
+		{"op": ItemConstants.OP_SELL, "instance_ids": instance_ids},
+		{"op": ItemConstants.OP_CURRENCY, "kind": ItemConstants.CURRENCY_GOLD, "delta": gold},
+	])
+	if not res["ok"]:
+		return fail.call(StringName(res["reason"]))
+	return {
+		"ok": true, "reason": ItemConstants.REASON_OK, "gold": gold,
+		"sold": (res["sold"] as Array[String]).duplicate(),
+	}
+
+
+## 某物品的**售出单价**（只读；`0` = 不可售）。
+## 08 渲染"卖一件能得多少金币"用它，**不得自行解释或折算**。
+func sell_price(item_id: StringName) -> int:
+	var def := ItemCatalog.get_def(item_id)
+	return def.sell_gold if def != null else 0
 
 
 # ══════════════════════════════════════════════════════════════════════════════

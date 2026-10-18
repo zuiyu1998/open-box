@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="ItemCategoryDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/items/defs/item_category_def.gd" id="1_cat"]
+
+[resource]
+script = ExtResource("1_cat")
+category_id = &"medical"
+display_name = "医疗物品"
+description = "药品、器械与护理用品 —— 生存与恢复类物资。"
+sort_order = 5

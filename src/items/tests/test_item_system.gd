@@ -22,6 +22,10 @@ func _ready() -> void:
 
 	_setup_catalog()
 
+	_section = "§4.1 / §10.11 物品种类（v0.21）：7 个类别由内容配置注册"
+	_test_category_content()
+	_setup_catalog()
+
 	_section = "§10.1 实例与幂等"
 	_test_idempotent_grant()
 	_test_uuid_uniqueness()
@@ -55,6 +59,11 @@ func _ready() -> void:
 	_test_claim_only_location()
 	_test_claim_partial()
 	_test_transact_atomic()
+
+	_section = "§5.14 售卖（v0.20）：sell_gold → 金币"
+	_test_sell_grants_gold_and_destroys()
+	_test_sell_rejects_and_is_atomic()
+	_test_sell_config_validation()
 	_test_transact_no_space()
 	_test_overflow_loosening_rejected()
 	_test_no_partial_containment()
@@ -118,6 +127,8 @@ func _setup_catalog() -> void:
 			d.quality = q
 			d.value = values[q]
 			d.size = sizes[q]
+			# ★ v0.20：售出单价（金币）= 品质 × 2；另留一件 `sell_gold = 0`（不可售）用于负测试
+			d.sell_gold = q * 2
 			ItemCatalog.register(d)
 
 
@@ -138,6 +149,70 @@ func _grant_q1(n: int, item := &"stardust_q1") -> Array[String]:
 # ══════════════════════════════════════════════════════════════════════════════
 #  §10.1
 # ══════════════════════════════════════════════════════════════════════════════
+
+func _test_category_content() -> void:
+	# ★ v0.21：类别是**内容**（`src/items/content/categories/*.tres`）——
+	#   加一类 = 加一个 .tres，不改代码（核心 §14.3 / R11）。
+	ItemCatalog.clear()
+	var n := ItemCatalog.load_category_content()
+	eq(n, 7, "内容目录里恰好 7 个 ItemCategoryDef")
+	# 校验器还要求两种货币已注册（V6）——这里只测类别，故补上货币
+	for kind in ItemConstants.ALL_CURRENCIES:
+		var cur := CurrencyDef.new()
+		cur.id = kind
+		cur.display_name = String(kind)
+		ItemCatalog.register_currency(cur)
+	var cats := ItemCatalog.all_categories()
+	eq(cats.size(), 7, "注册表里 = 7 个类别")
+	var expect := [
+		[&"home", "家居物品"],
+		[&"art", "艺术藏品"],
+		[&"tool_material", "工具材料"],
+		[&"energy", "能源物品"],
+		[&"medical", "医疗物品"],
+		[&"information", "资料信息"],
+		[&"electronic", "电子物品"],
+	]
+	for i in expect.size():
+		var c := cats[i]
+		eq(c.category_id, expect[i][0], "第 %d 类 id = %s" % [i + 1, expect[i][0]])
+		eq(c.display_name, expect[i][1], "第 %d 类的展示名 = %s" % [i + 1, expect[i][1]])
+		eq(c.sort_order, i + 1, "sort_order 与展示顺序一致（%s）" % expect[i][1])
+		ok(c.description != "", "%s 有 description（UI 悬浮提示要用）" % expect[i][1])
+	ok(ItemCatalog.validate()["ok"], "7 个类别自身通过校验（无空 id / 无排序冲突）")
+
+	# 负测试：排序冲突必须报出来
+	var dup := ItemCategoryDef.new()
+	dup.category_id = &"dup_probe"
+	dup.display_name = "重复排序探针"
+	dup.sort_order = 1                 # 与 home 冲突
+	ItemCatalog.register_category(dup)
+	var rep := ItemCatalog.validate()
+	ok(not rep["ok"], "sort_order 重复 ⇒ 校验失败")
+	var hit := false
+	for e in rep["errors"]:
+		if String(e).find("类别排序冲突") >= 0:
+			hit = true
+	ok(hit, "错误信息点名『类别排序冲突』")
+
+	# 负测试：物品引用了未注册的类别必须报出来
+	var orphan := ItemDef.new()
+	orphan.item_id = &"orphan_q1"
+	orphan.display_name = "孤儿"
+	orphan.category = &"no_such_category"
+	orphan.quality = 1
+	orphan.value = 1
+	orphan.size = 1
+	orphan.rarity = 10
+	ItemCatalog.register(orphan)
+	var rep2 := ItemCatalog.validate()
+	var hit2 := false
+	for e in rep2["errors"]:
+		if String(e).find("类别未注册") >= 0:
+			hit2 = true
+	ok(hit2, "物品引用未注册类别 ⇒ 校验报『类别未注册』")
+	ItemCatalog.clear()
+
 
 func _test_idempotent_grant() -> void:
 	_reset()
@@ -785,7 +860,118 @@ func _state_snapshot() -> Dictionary:
 		"total_granted": ItemService.total_granted,
 		"total_consumed": ItemService.total_consumed,
 		"serial_counters": ItemService.serial_counters.duplicate(),
+		"currencies": ItemService.currencies.duplicate(),
 	}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  §5.14 售卖（★ v0.20）：物品的第二条出口 —— 按 `ItemDef.sell_gold` 换金币
+# ══════════════════════════════════════════════════════════════════════════════
+
+func _test_sell_grants_gold_and_destroys() -> void:
+	_reset()
+	ItemService.currencies.clear()
+	var ids := _grant_q1(3)                     # 3 件 stardust_q1（sell_gold = 2）
+	var gold_before := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
+	var used_before := ItemService.warehouse_used
+	var res := ItemService.sell(ids)
+	ok(res["ok"], "售卖成功")
+	eq(res["gold"], 6, "**金币 = Σ `sell_gold`（3 × 2 = 6）**")
+	eq(
+		ItemService.currency_balance(ItemConstants.CURRENCY_GOLD),
+		gold_before + 6,
+		"金币余额恰好 +6"
+	)
+	eq(res["sold"].size(), 3, "回执列出被卖掉的 3 件")
+	eq(ItemService.instances.size(), 0, "**实例被销毁**（不是挪到别处）")
+	eq(ItemService.warehouse_used, used_before - 3 * 1, "占用随之下降（q1 的 size = 1）")
+	eq(ItemService.total_consumed, 3, "计入 total_consumed（它不是凭空消失）")
+	ok(ItemService.check_conservation(), "守恒等式仍成立（售卖只销毁、不产出实例）")
+	ok(ItemService.check_currencies(), "资源侧不变量仍成立（余额 ≥ 0、币种已注册）")
+
+	# 与丢弃的区别：丢弃**不给任何回报**
+	var ids2 := _grant_q1(1)
+	var gold2 := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
+	var d := ItemService.discard(ids2)
+	ok(d["ok"], "丢弃成功")
+	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD), gold2, "**丢弃不给金币**（与售卖区分）")
+
+
+func _test_sell_rejects_and_is_atomic() -> void:
+	_reset()
+	ItemService.currencies.clear()
+	# ① 卖不可售物品（sell_gold == 0）⇒ not_sellable
+	var zero := ItemDef.new()
+	zero.item_id = &"stardust_q9"
+	zero.display_name = "不可售"
+	zero.category = &"stardust"
+	zero.quality = 1
+	zero.value = 1
+	zero.size = 1
+	zero.rarity = 10
+	zero.sell_gold = 0
+	ItemCatalog.register(zero)
+	var z := ItemService.grant(&"stardust_q9", {"kind": ItemConstants.KIND_UNLOCK})
+	var r0 := ItemService.sell([z.instance_id])
+	ok(not r0["ok"], "sell_gold == 0 ⇒ 拒绝")
+	eq(r0["reason"], ItemConstants.REASON_NOT_SELLABLE, "原因码 = not_sellable（不是免费送）")
+	eq(ItemService.instances.size(), 1, "该实例还在")
+
+	# ② 整批里混入一件不可售 ⇒ **一件都不卖**（原子）
+	var ids := _grant_q1(2)
+	var snap := _state_snapshot()
+	var mixed: Array[String] = ids.duplicate()
+	mixed.append(z.instance_id)
+	var r1 := ItemService.sell(mixed)
+	ok(not r1["ok"], "混入不可售物品 ⇒ 整批拒绝")
+	eq(r1["reason"], ItemConstants.REASON_NOT_SELLABLE, "原因码仍是 not_sellable")
+	eq(_state_snapshot(), snap, "**逐项回到售卖前**（实例 / 计数 / 金币全不变）")
+
+	# ③ 邮件实例不可售
+	ItemService.warehouse_capacity = 1
+	var mall := ItemService.grant(&"stardust_q2", {"kind": ItemConstants.KIND_GACHA})
+	ItemService.warehouse_capacity = 1000
+	eq(mall.location, ItemConstants.LOC_MAIL, "该实例落在邮件（仓库已满）")
+	var r2 := ItemService.sell([mall.instance_id])
+	eq(r2["reason"], ItemConstants.REASON_NOT_IN_WAREHOUSE, "邮件实例 ⇒ not_in_warehouse")
+
+	# ④ 空列表 / 重复 id / 不存在的 id
+	eq(ItemService.sell([])["reason"], ItemConstants.REASON_BAD_OP, "空列表 ⇒ bad_op")
+	var twice: Array[String] = [ids[0], ids[0]]
+	eq(ItemService.sell(twice)["reason"], ItemConstants.REASON_DUPLICATE_ID, "重复 id ⇒ duplicate_id")
+	eq(
+		ItemService.sell(["no-such-id"])["reason"],
+		ItemConstants.REASON_MISSING_INSTANCE,
+		"不存在的 id ⇒ missing_instance"
+	)
+
+
+func _test_sell_config_validation() -> void:
+	_reset()
+	# V7：sell_gold 必须 >= 0
+	var bad := ItemDef.new()
+	bad.item_id = &"stardust_qbad"
+	bad.display_name = "负价"
+	bad.category = &"stardust"
+	bad.quality = 1
+	bad.value = 1
+	bad.size = 1
+	bad.rarity = 10
+	bad.sell_gold = -5
+	ItemCatalog.register(bad)
+	var rep := ItemCatalog.validate()
+	ok(not rep["ok"], "负售价 ⇒ 校验失败（V7）")
+	var hit := false
+	for e in rep["errors"]:
+		if String(e).begins_with("V7"):
+			hit = true
+	ok(hit, "错误信息点名 V7")
+	# 清理：把负价物品移除，避免影响后续用例
+	ItemCatalog.clear()
+	_setup_catalog()
+	ok(ItemCatalog.validate()["ok"], "修正后校验通过")
+	eq(ItemService.sell_price(&"stardust_q2"), 4, "只读单价 = 定义里的 sell_gold（品质 2 ⇒ 4）")
+	eq(ItemService.sell_price(&"not_registered"), 0, "未注册 ⇒ 0（不可售）")
 
 
 func _errors_contain(errors: Array, needle: String) -> bool:

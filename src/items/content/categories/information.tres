@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="ItemCategoryDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/items/defs/item_category_def.gd" id="1_cat"]
+
+[resource]
+script = ExtResource("1_cat")
+category_id = &"information"
+display_name = "资料信息"
+description = "档案、图纸、数据载体 —— 知识类资产，常在任务里被点名。"
+sort_order = 6
