@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="ItemDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/items/defs/item_def.gd" id="1_s06cs"]
+
+[resource]
+script = ExtResource("1_s06cs")
+item_id = &"medical_q2"
+display_name = "退烧药片"
+category = &"medical"
+quality = 2
+value = 3
+size = 2
+rarity = 30
+sell_gold = 4

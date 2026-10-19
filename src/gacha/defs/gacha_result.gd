@@ -10,7 +10,7 @@ extends Resource
 @export var series_id: StringName = &""
 @export var box_id: String = ""           # 本次兑现的盒子身份（= Box.box_id，同类型、无转换）
 @export var item_id: StringName = &""     # 抽中 void 时为空串哨兵（不产出任何物品）
-@export var quality: int = 1              # 物品品质 1..5；void 时为 0
+@export var quality: int = 1              # 物品品质 1..6（白/绿/蓝/紫/金/红，v0.22）；void 时为 0
 @export var is_void: bool = false         # 本次抽中空洞：仍消耗一个 Box
 @export var is_new: bool = false          # 是否新物品（收藏口径 collected）；void 时恒 false
 @export var probability: float = 0.0      # 本次所用分布中该结果的概率（void 时为 void_prob）

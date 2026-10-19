@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="ItemDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/items/defs/item_def.gd" id="1_687mf"]
+
+[resource]
+script = ExtResource("1_687mf")
+item_id = &"home_q6"
+display_name = "传世茶案"
+category = &"home"
+quality = 6
+value = 243
+size = 40
+rarity = 1
+sell_gold = 64

@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="ItemDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/items/defs/item_def.gd" id="1_elou2"]
+
+[resource]
+script = ExtResource("1_elou2")
+item_id = &"energy_q6"
+display_name = "聚变芯体"
+category = &"energy"
+quality = 6
+value = 243
+size = 40
+rarity = 1
+sell_gold = 64

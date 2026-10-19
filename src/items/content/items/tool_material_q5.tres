@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="ItemDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/items/defs/item_def.gd" id="1_r7cit"]
+
+[resource]
+script = ExtResource("1_r7cit")
+item_id = &"tool_material_q5"
+display_name = "合金工具组"
+category = &"tool_material"
+quality = 5
+value = 81
+size = 20
+rarity = 2
+sell_gold = 32

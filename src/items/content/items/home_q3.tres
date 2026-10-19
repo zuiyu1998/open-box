@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="ItemDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/items/defs/item_def.gd" id="1_2xgar"]
+
+[resource]
+script = ExtResource("1_2xgar")
+item_id = &"home_q3"
+display_name = "铜制水壶"
+category = &"home"
+quality = 3
+value = 9
+size = 5
+sell_gold = 8

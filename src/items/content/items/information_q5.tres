@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="ItemDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/items/defs/item_def.gd" id="1_l3dgo"]
+
+[resource]
+script = ExtResource("1_l3dgo")
+item_id = &"information_q5"
+display_name = "原始图纸"
+category = &"information"
+quality = 5
+value = 81
+size = 20
+rarity = 2
+sell_gold = 32

@@ -21,3 +21,8 @@ ItemCatalog="*res://src/items/item_catalog.gd"
 ItemService="*res://src/items/item_service.gd"
 GachaCatalog="*res://src/gacha/gacha_catalog.gd"
 DeviceCatalog="*res://src/devices/device_catalog.gd"
+_mcp_game_helper="*res://addons/godot_ai/runtime/game_helper.gd"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/godot_ai/plugin.cfg")

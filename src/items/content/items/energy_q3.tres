@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="ItemDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/items/defs/item_def.gd" id="1_mnyys"]
+
+[resource]
+script = ExtResource("1_mnyys")
+item_id = &"energy_q3"
+display_name = "蓄电池组"
+category = &"energy"
+quality = 3
+value = 9
+size = 5
+sell_gold = 8

@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="ItemDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/items/defs/item_def.gd" id="1_wr62l"]
+
+[resource]
+script = ExtResource("1_wr62l")
+item_id = &"electronic_q3"
+display_name = "集成电路"
+category = &"electronic"
+quality = 3
+value = 9
+size = 5
+sell_gold = 8

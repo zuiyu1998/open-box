@@ -57,7 +57,7 @@
 | 排除 / 提升 | `ban` / `boost` | 概率归零 ／ 概率 ×N（增量从其他物品按比例扣除） |
 | 释放质量 / 回收率 / 空洞 | `freed_mass` / `recover_rate` / `void` | 排除某物品释放的质量 ／ 其中可重新分配的比例 **0.60** ／ 不可回收的那 **40%**，落为零价值结果（§5.2.2） |
 | 重分配模式 / 替换 | `redistribute_mode` / `replace` | `AUTO`（按基础 `rarity`）／ `TARGETED`（全给指定目标） ／ **镶嵌位满时的唯一操作——没有"再装一个"**（**且每次替换都要从该盒寿命里再扣 1 次、拆卸不退还**）——**替换的代价 = 一次开盒机会**：**装满位子后剩下的 `d = k − 位数`（8 / 12 / 16 / 20）要在"替换"与"开盒"之间分账**（**不变式 `镶嵌总次数（含替换） + 兑现次数 + uses_remaining == k`**；**上界 `k − 位数` / `k − 1`（后者是**推论 + 前提，见 §5.8**）见 §5.8**） |
-| 品质（两个含义） | `quality` / `series_quality` | **物品品质** `quality`（1–5，物品的等级维度）／**套系品质** `series_quality`（该套系的规模等级 1–4）。**凡文中出现"品质"必须能分辨是哪一种**；`ModuleDef.quality` 是**第三条独立轴**（模块品质梯度 D13），三者不得混用 |
+| 品质（两个含义） | `quality` / `series_quality` | **物品品质** `quality`（★ v0.22：**六档 1–6 = 白 / 绿 / 蓝 / 紫 / 金 / 红**，物品的等级维度）／**套系品质** `series_quality`（该套系的规模等级 1–4）。**凡文中出现"品质"必须能分辨是哪一种**；`ModuleDef.quality` 是**第三条独立轴**（模块品质梯度 D13），三者不得混用 |
 | 兑现 / 囤积 / 期望 | `redeem` / `pending_boxes` / `ev`·`headline` | **消费"一次使用"**结算一次抽取（`uses_remaining -= 1`；**归零即摧毁盒子**）／ 已获得未兑现清单（**归零即从清单消失——镶嵌也扣同一个预算**）／ **选中那个盒子**的池子的数学期望（算归 07；**本系统不产出 `headline`**）。**★ 硬门槛（裁决，§5.10）**：**`redeem` / `redeem_batch` 链首校验"已有一台设备"**（**v0.17：玩家侧那层入口由 `04` 提供；本系统这一层是同一枚码的兜底校验**）——**无设备 ⇒ `no_device`、不消耗任何寿命、状态逐项不变**。**★ 入口分层（㉕）**：**有状态入口 `redeem(state, box, seed_override: int = -1) -> GachaResult` / `redeem_batch(state, boxes, k, seed_overrides) -> Array[GachaResult]`** → 调 **纯函数 `roll(evaluation, seed)`**（**只抽样**；§5.6） |
 
 ## 4. 数据结构（GDScript Resource 字段定义）
@@ -79,7 +79,7 @@ class_name SeriesDef extends Resource
 
 ### 4.2 `ItemDef`（**字段定义归 02**；本文只引用）
 
-本文依赖的字段（**引用性说明，不是定义**）：`item_id`（`roll()` 产出的就是这个）／`display_name`／`category`（不参与抽取）／`quality`（1–5，演出分级）／`value`（`v`，EV / ρ 的输入，01 只传递）／**`rarity`（权重，≥1）**／`size`（仓库占用，本文不读）。`ItemDef` 是**静态定义、不含玩家状态**（`instance_id` / `acquired_at` / `source` / `serial` 全在 `ItemInstance`，`count` 是派生值）；**"开出一个物品" = 产生一个新实例**。`[补充]` `category` 用 `StringName` 引用 `ItemCategoryDef`、不用 `enum`（R11：新类别必须可纯配置产出）。
+本文依赖的字段（**引用性说明，不是定义**）：`item_id`（`roll()` 产出的就是这个）／`display_name`／`category`（不参与抽取）／`quality`（★ v0.22 六档 1–6，演出分级）／`value`（`v`，EV / ρ 的输入，01 只传递）／**`rarity`（权重，≥1；★ v0.23：**与品质挂钩**——同类别内品质越高权重必须越低，V9 归 `02-item.md`）**／`size`（仓库占用，本文不读）。`ItemDef` 是**静态定义、不含玩家状态**（`instance_id` / `acquired_at` / `source` / `serial` 全在 `ItemInstance`，`count` 是派生值）；**"开出一个物品" = 产生一个新实例**。`[补充]` `category` 用 `StringName` 引用 `ItemCategoryDef`、不用 `enum`（R11：新类别必须可纯配置产出）。
 
 ### 4.3 `Box` / `ItemPool` / `Module` / `ModuleDef` / `ModuleCost` / `PoolState`
 
@@ -158,7 +158,7 @@ class_name GachaResult extends Resource   # [补充] Resource 承载，便于按
 @export var series_id: StringName = &""
 @export var box_id: String = ""           # 本次兑现的盒子身份（= Box.box_id，同类型、无转换）
 @export var item_id: StringName = &""     # 抽中 void 时为空串哨兵（不产出任何物品）
-@export var quality: int = 1              # 物品品质 1..5；void 时为 0
+@export var quality: int = 1              # 物品品质 1..6（白/绿/蓝/紫/金/红，v0.22）；void 时为 0
 @export var is_void: bool = false         # 本次抽中空洞：仍**消耗一次使用**（`uses_remaining -= 1`——它就是"兑现一次"；**若因此归零，盒子随即被摧毁**）
 @export var is_new: bool = false          # 是否新物品（**收藏口径 `collected`**）；void 时恒 false；**不驱动任何计数器**
 @export var probability: float = 0.0      # 本次所用分布中该结果的概率（void 时为 void_prob）

@@ -16,6 +16,11 @@ extends Node
 ## **加一类 = 加一个 `.tres`，不改代码**（核心 §14.3 / R11 的直接落地）。
 const CATEGORY_CONTENT_DIR := "res://src/items/content/categories"
 
+## ★ v0.22：**物品的内容目录**——42 个 `ItemDef` 的 `.tres`（7 类别 × 6 档品质）放这里，
+## `load_item_content()` 自动载入并注册。**内容由 `tools/gen_item_content.gd` 从
+## `ItemConstants` 的六档阶梯生成**（改数值 = 改常量后重跑生成器，不要手改 `.tres`）。
+const ITEM_CONTENT_DIR := "res://src/items/content/items"
+
 ## item_id(String) -> ItemDef
 var _by_id: Dictionary = {}
 ## 派生索引键 "<category>:<quality>"(String) -> item_id(StringName)
@@ -86,8 +91,37 @@ func load_category_content() -> int:
 	return n
 
 
+## ★ v0.22：**从内容目录载入全部 `ItemDef`**（幂等；同 id 覆盖）。
+##
+## 返回载入成功的条数。**类别必须先载入**（`_ready()` 已保证顺序）：物品引用未注册的类别
+## 会被 `validate()` 点名，那是配置错误。
+func load_item_content() -> int:
+	var n := 0
+	var dir := DirAccess.open(ITEM_CONTENT_DIR)
+	if dir == null:
+		push_warning(
+			"ItemCatalog: 打不开物品内容目录 `%s`（没有物品内容时是正常的）" % ITEM_CONTENT_DIR
+		)
+		return 0
+	dir.list_dir_begin()
+	var fname := dir.get_next()
+	while fname != "":
+		if not dir.current_is_dir() and fname.ends_with(".tres"):
+			var path := ITEM_CONTENT_DIR + "/" + fname
+			if ResourceLoader.exists(path):
+				var res = load(path)
+				if res is ItemDef:
+					register(res as ItemDef)
+					n += 1
+		fname = dir.get_next()
+	dir.list_dir_end()
+	return n
+
+
 func _ready() -> void:
+	# 顺序有意义：类别先于物品（物品引用类别），货币最后不依赖顺序（V6 只查是否注册）。
 	load_category_content()
+	load_item_content()
 
 
 ## ★ v0.18：注册一种资源（货币类）。切片两种：`gem`（原石）/ `gold`（金币）。
@@ -179,6 +213,11 @@ func clear() -> void:
 ## V2：`ItemDef.size > 0`
 ## V3：`ItemDef.value > 0`
 ## V4：同一 `item_id` 不得重复注册
+## V8（★ v0.22）：`ItemDef.quality` ∈ 1..6（白 / 绿 / 蓝 / 紫 / 金 / 红）——越界的品质会让
+##   派生索引键落到"不存在的档位"上（UI 取不到颜色、任务需求永远匹配不上），而它对
+##   `M̄` 的影响是沉默的，所以必须在加载期拦。
+## V9（★ v0.23）：**同一类别内，品质越高权重（`rarity`）必须越低**（严格单调）——权重与品质
+##   挂钩；反过来的话"高品质反而更容易抽到"，品质轴当场失效（§5.1 / §5.12）。
 ## （容量 `warehouse_capacity >= 1` 由 ItemService.validate_config 一并检查）
 func validate() -> Dictionary:
 	var errors: Array[String] = []
@@ -226,6 +265,45 @@ func validate() -> Dictionary:
 			+ "。同一 item_id 只允许一个定义：后者会静默覆盖前者，而实例按 item_id 取值，"
 			+ "于是全部现存实例的价值随之改变——**同类物品的价值必须确定**"
 		)
+
+	# ★ v0.22 新增 V8：quality ∈ 1..6（六档：白 / 绿 / 蓝 / 紫 / 金 / 红）
+	# 越界的品质会让派生索引键落到"不存在的档位"上：UI 取不到品质色、任务需求永远
+	# 匹配不上，而它对 `M̄` 的影响是沉默的（`value` 照常进求和）——必须在加载期拦。
+	for k in _by_id.keys():
+		var def := _by_id[k] as ItemDef
+		if not ItemConstants.is_valid_quality(def.quality):
+			errors.append(
+				"V8 非法：`%s`.quality = %d，必须落在 %d..%d（六档：白/绿/蓝/紫/金/红）"
+				% [def.item_id, def.quality, ItemConstants.QUALITY_MIN, ItemConstants.QUALITY_MAX]
+			)
+
+	# ★ v0.23 新增 V9：**权重与品质挂钩——同一类别内，品质越高权重必须越低**（严格单调）。
+	# `rarity` 是**权重**（越大越常见，`p_i = rarity_i / Σ rarity`）。若"高品质反而更容易出"，
+	# 品质轴当场失效：开盒的稀缺感没了、任务的高品质需求也随之变便宜——而 07 只消费归一化
+	# 后的分布，**看不出这是配置错误**。这里只强制"类别内"单调（类别之间的绝对量级属于内容
+	# 设计，见 `02-item.md` §5.1 / `01-gacha.md` 的池子级约定）。
+	var by_category: Dictionary = {}
+	for k in _by_id.keys():
+		var def := _by_id[k] as ItemDef
+		if not by_category.has(def.category):
+			by_category[def.category] = []
+		(by_category[def.category] as Array).append(def)
+	for cat in by_category.keys():
+		var defs: Array = by_category[cat]
+		for i in defs.size():
+			for j in range(i + 1, defs.size()):
+				var a: ItemDef = defs[i]
+				var b: ItemDef = defs[j]
+				if a.quality == b.quality:
+					continue
+				var hi: ItemDef = a if a.quality > b.quality else b
+				var lo: ItemDef = b if a.quality > b.quality else a
+				if hi.rarity >= lo.rarity:
+					errors.append(
+						"V9 冲突：类别 `%s` 里品质 %d 的 `%s`.rarity = %d 不低于品质 %d 的 `%s`.rarity = %d"
+						% [cat, hi.quality, hi.item_id, hi.rarity, lo.quality, lo.item_id, lo.rarity]
+						+ "——**品质越高权重必须越低**（严格单调；否则高品质反而更容易出，品质轴失效）"
+					)
 
 	# 类别必须已注册（否则 UI 与任务侧拿不到类别信息）
 	for k in _by_id.keys():

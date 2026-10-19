@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="ItemDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/items/defs/item_def.gd" id="1_nmfrk"]
+
+[resource]
+script = ExtResource("1_nmfrk")
+item_id = &"energy_q4"
+display_name = "动力核心"
+category = &"energy"
+quality = 4
+value = 27
+size = 10
+rarity = 5
+sell_gold = 16

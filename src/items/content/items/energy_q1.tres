@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="ItemDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/items/defs/item_def.gd" id="1_u3dyb"]
+
+[resource]
+script = ExtResource("1_u3dyb")
+item_id = &"energy_q1"
+display_name = "干电池"
+category = &"energy"
+rarity = 60
+sell_gold = 2

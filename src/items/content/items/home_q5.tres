@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="ItemDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/items/defs/item_def.gd" id="1_o7wp4"]
+
+[resource]
+script = ExtResource("1_o7wp4")
+item_id = &"home_q5"
+display_name = "古董屏风"
+category = &"home"
+quality = 5
+value = 81
+size = 20
+rarity = 2
+sell_gold = 32

@@ -22,8 +22,20 @@ func _ready() -> void:
 
 	_setup_catalog()
 
-	_section = "§4.1 / §10.11 物品种类（v0.21）：7 个类别由内容配置注册"
+	_section = "§4.1 / §10.10 物品种类（v0.21）：7 个类别由内容配置注册"
 	_test_category_content()
+	_setup_catalog()
+
+	_section = "§5.1 / §10.11 品质六档（v0.22）：白 / 绿 / 蓝 / 紫 / 金 / 红"
+	_test_quality_tiers()
+	_setup_catalog()
+
+	_section = "§4.1 / §10.10 物品内容（v0.22）：7 类别 × 6 档 = 42 个 ItemDef"
+	_test_item_content()
+	_setup_catalog()
+
+	_section = "§5.1 / §10.12 权重与品质挂钩（v0.23）：品质越高权重越低（V9）"
+	_test_rarity_tied_to_quality()
 	_setup_catalog()
 
 	_section = "§10.1 实例与幂等"
@@ -118,6 +130,9 @@ func _setup_catalog() -> void:
 	# 2 类别 × 3 品质 = 6 个键（切片范围）
 	var sizes := {1: 1, 2: 2, 3: 5}
 	var values := {1: 1, 2: 3, 3: 9}
+	# ★ v0.23：权重与品质挂钩（品质越高越难出，V9 严格单调）——夹具也必须满足，
+	#   否则"合法配置一律通过"这条断言会被自己的夹具打回。
+	var rarities := {1: 60, 2: 30, 3: 10}
 	for cat in [&"stardust", &"crystal"]:
 		for q in [1, 2, 3]:
 			var d := ItemDef.new()
@@ -127,6 +142,7 @@ func _setup_catalog() -> void:
 			d.quality = q
 			d.value = values[q]
 			d.size = sizes[q]
+			d.rarity = rarities[q]
 			# ★ v0.20：售出单价（金币）= 品质 × 2；另留一件 `sell_gold = 0`（不可售）用于负测试
 			d.sell_gold = q * 2
 			ItemCatalog.register(d)
@@ -211,6 +227,170 @@ func _test_category_content() -> void:
 		if String(e).find("类别未注册") >= 0:
 			hit2 = true
 	ok(hit2, "物品引用未注册类别 ⇒ 校验报『类别未注册』")
+	ItemCatalog.clear()
+
+
+func _test_quality_tiers() -> void:
+	# ★ v0.22：**物品品质 = 6 档**（白 / 绿 / 蓝 / 紫 / 金 / 红，`02-item.md` §5.1 / §10.11）。
+	#   它与「套系品质 `series_quality`」（1..4，归 01 的 `SeriesDef`）是两条不同的轴。
+	eq(ItemConstants.QUALITY_MIN, 1, "档位从 1 开始（序数）")
+	eq(ItemConstants.QUALITY_MAX, 6, "档位上限 = 6（白绿蓝紫金红）")
+	var names := ["白", "绿", "蓝", "紫", "金", "红"]
+	var tiers := ["普通", "精良", "稀有", "史诗", "传说", "神话"]
+	var colors: Array[Color] = []
+	for i in names.size():
+		var q := i + 1
+		eq(ItemConstants.quality_name(q), names[i], "第 %d 档的颜色名 = %s" % [q, names[i]])
+		eq(ItemConstants.quality_tier_name(q), tiers[i], "第 %d 档的档位名 = %s" % [q, tiers[i]])
+		ok(ItemConstants.is_valid_quality(q), "第 %d 档在值域内" % q)
+		colors.append(ItemConstants.quality_color(q))
+		eq(ItemConstants.quality_color(q), ItemConstants.QUALITY_COLORS[q],
+			"品质色取自常量表（%s）" % names[i])
+	# 六色两两不同：颜色是品质的第一识别通道，重色 = 玩家当场分不清（§10.7 第一条失败信号）
+	for a in colors.size():
+		for b in range(a + 1, colors.size()):
+			ok(colors[a] != colors[b], "第 %d 档与第 %d 档的颜色不同" % [a + 1, b + 1])
+	# 值域外一律非法：0 = 未定义档位、7 = 溢出六档
+	ok(not ItemConstants.is_valid_quality(0), "quality = 0 非法")
+	ok(not ItemConstants.is_valid_quality(7), "quality = 7 非法（六档上限）")
+
+	# V8：越界品质必须在**加载期**被拦（@export_range 只约束检查器，测试/代码路径绕得过去）
+	ItemCatalog.clear()
+	var d := ItemDef.new()
+	d.item_id = &"bad_quality_probe"
+	d.display_name = "越界品质探针"
+	d.category = &""          # 留空 ⇒ 不触发"类别未注册"，专测 V8
+	d.quality = 7
+	d.value = 1
+	d.size = 1
+	d.rarity = 10
+	ItemCatalog.register(d)
+	var rep := ItemCatalog.validate()
+	ok(not rep["ok"], "quality = 7 ⇒ 校验失败")
+	var hit := false
+	for e in rep["errors"]:
+		if String(e).find("V8") >= 0:
+			hit = true
+	ok(hit, "错误信息点名 V8（六档值域）")
+	ItemCatalog.clear()
+
+
+func _test_item_content() -> void:
+	# ★ v0.22：**内容 = 7 类别 × 6 档品质 = 42 个 `ItemDef`**（`src/items/content/items/`，
+	#   由 `tools/gen_item_content.gd` 从 `ItemConstants` 的六档阶梯生成）。
+	#   这里逐格核对"内容 == 阶梯"，而不是只数个数：漏配 / 抄错一格都必须被点名。
+	ItemCatalog.clear()
+	eq(ItemCatalog.load_category_content(), 7, "先载入 7 个类别")
+	for kind in ItemConstants.ALL_CURRENCIES:
+		var cur := CurrencyDef.new()
+		cur.id = kind
+		cur.display_name = String(kind)
+		ItemCatalog.register_currency(cur)
+	eq(ItemCatalog.load_item_content(), 42, "物品内容 = 42 个（7 类别 × 6 档）")
+
+	var cats := ItemCatalog.all_categories()
+	var checked := 0
+	for cat in cats:
+		for q in range(ItemConstants.QUALITY_MIN, ItemConstants.QUALITY_MAX + 1):
+			var id := ItemCatalog.resolve_item_id(cat.category_id, q)
+			ok(id != &"", "(%s, %d) 能反查到 item_id" % [cat.category_id, q])
+			var def := ItemCatalog.get_def(id)
+			if def == null:
+				ok(false, "(%s, %d) 的 ItemDef 存在" % [cat.category_id, q])
+				continue
+			var got := {
+				"id": String(def.item_id),
+				"name": def.display_name,
+				"category": String(def.category),
+				"quality": def.quality,
+				"value": def.value,
+				"size": def.size,
+				"rarity": def.rarity,
+				"sell_gold": def.sell_gold,
+			}
+			var want := {
+				"id": "%s_q%d" % [cat.category_id, q],
+				"name": ItemConstants.item_name(cat.category_id, q),
+				"category": String(cat.category_id),
+				"quality": q,
+				"value": ItemConstants.quality_value(q),
+				"size": ItemConstants.quality_size(q),
+				"rarity": ItemConstants.quality_rarity(q),
+				"sell_gold": ItemConstants.quality_sell_gold(q),
+			}
+			eq(got, want, "`%s` 的六档阶梯逐项正确（名 / 值 / 大小 / 权重 / 售价）" % want["id"])
+			checked += 1
+	eq(checked, 42, "42 格全部核过（没有空格、没有重复）")
+	eq(ItemCatalog.all_item_ids().size(), 42, "注册表里 = 42 个定义")
+	var rep := ItemCatalog.validate()
+	ok(rep["ok"], "42 个定义全部通过 V1–V8%s" % ("" if rep["ok"] else "：%s" % str(rep["errors"])))
+	ItemCatalog.clear()
+
+
+func _test_rarity_tied_to_quality() -> void:
+	# ★ v0.23：**权重与品质挂钩——同一类别内品质越高权重必须越低**（严格单调，V9）。
+	#   规则的意义：`rarity` 是权重（越大越常见），若高品质反而常见，品质轴当场失效。
+	# 1) 真实内容（42 格）必须满足它，且阶梯就是 ItemConstants 的六档表
+	ItemCatalog.clear()
+	ItemCatalog.load_category_content()
+	for kind in ItemConstants.ALL_CURRENCIES:
+		var cur := CurrencyDef.new()
+		cur.id = kind
+		cur.display_name = String(kind)
+		ItemCatalog.register_currency(cur)
+	ItemCatalog.load_item_content()
+	ok(ItemCatalog.validate()["ok"], "42 个真实内容的权重全部满足 V9（越高品质越难出）")
+	var rats: Array[int] = []
+	for q in range(ItemConstants.QUALITY_MIN, ItemConstants.QUALITY_MAX + 1):
+		rats.append(ItemConstants.quality_rarity(q))
+		ok(ItemConstants.quality_rarity(q) > 0, "品质 %d 的权重 > 0（=0 即永不产出）" % q)
+	for i in range(1, rats.size()):
+		ok(rats[i] < rats[i - 1], "六档阶梯严格递减：品质 %d 的权重 < 品质 %d" % [i + 1, i])
+
+	# 2) 负测试 A：把低档写得更稀有（高品质反而更容易出）⇒ V9 拒绝
+	ItemCatalog.clear()
+	ItemCatalog.load_category_content()
+	var low := ItemDef.new()
+	low.item_id = &"home_q1"
+	low.category = &"home"
+	low.quality = 1
+	low.value = 1
+	low.size = 1
+	low.rarity = 5          # 白档比绿档还稀有 ⇒ 违反 V9
+	ItemCatalog.register(low)
+	var high := ItemDef.new()
+	high.item_id = &"home_q2"
+	high.category = &"home"
+	high.quality = 2
+	high.value = 3
+	high.size = 2
+	high.rarity = 40        # 绿档反而更常见
+	ItemCatalog.register(high)
+	var rep := ItemCatalog.validate()
+	ok(not rep["ok"], "高品质权重不低于低品质 ⇒ 校验失败")
+	var hit := false
+	for e in rep["errors"]:
+		if String(e).find("V9") >= 0:
+			hit = true
+	ok(hit, "错误信息点名 V9")
+
+	# 3) 负测试 B：**相等也不行**（必须是严格递减：低档 40 / 高档 40）
+	high.rarity = 5
+	var rep2 := ItemCatalog.validate()
+	var hit2 := false
+	for e in rep2["errors"]:
+		if String(e).find("V9") >= 0:
+			hit2 = true
+	ok(hit2, "两档权重相等 ⇒ 仍违反 V9（严格单调）")
+
+	# 4) 正例：低档 60 / 高档 5 ⇒ 通过（且**类别之间**不互相比：`art` 的档位量级可以不同）
+	low.rarity = 60
+	var rep3 := ItemCatalog.validate()
+	var hit3 := false
+	for e in rep3["errors"]:
+		if String(e).find("V9") >= 0:
+			hit3 = true
+	ok(not hit3, "低档 60 / 高档 5 ⇒ 满足 V9（类别内单调即可）")
 	ItemCatalog.clear()
 
 
@@ -386,7 +566,7 @@ func _test_key_count_bound() -> void:
 	_reset()
 	for i in 10000:
 		ItemService.grant(&"crystal_q3", {"kind": &"gacha"})
-	ok(ItemService.count_index.size() <= 6, "键数 ≤ 类别数 × 品质数（切片 6），与实例数无关")
+	ok(ItemService.count_index.size() <= 6, "键数 ≤ 类别数 × 品质数（夹具 2 × 3 = 6），与实例数无关")
 	eq(ItemService.count_index.size(), 1, "10000 个实例只占 1 个键")
 
 

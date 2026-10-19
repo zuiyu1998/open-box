@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="ItemDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/items/defs/item_def.gd" id="1_njv2d"]
+
+[resource]
+script = ExtResource("1_njv2d")
+item_id = &"electronic_q6"
+display_name = "奇点回路"
+category = &"electronic"
+quality = 6
+value = 243
+size = 40
+rarity = 1
+sell_gold = 64

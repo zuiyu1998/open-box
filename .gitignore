@@ -4,3 +4,5 @@
 
 # 测试运行时产物（沙箱下 Godot 需要的可写目录与日志，见 src/tests/run_tests.ps1）
 _runtime/
+# 插件
+/addons/

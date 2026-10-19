@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="ItemDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/items/defs/item_def.gd" id="1_n4w7h"]
+
+[resource]
+script = ExtResource("1_n4w7h")
+item_id = &"information_q2"
+display_name = "手抄笔记"
+category = &"information"
+quality = 2
+value = 3
+size = 2
+rarity = 30
+sell_gold = 4

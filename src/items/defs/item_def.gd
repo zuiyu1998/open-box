@@ -14,7 +14,10 @@ extends Resource
 @export var item_id: StringName = &""       # 唯一 id，推荐 = "<category>_<quality>"
 @export var display_name: String = ""       # 展示名，如"星尘·精良"
 @export var category: StringName = &""      # 类别，指向 ItemCategoryDef.category_id
-@export_range(1, 5) var quality: int = 1    # 物品品质 quality（≠ 套系品质 series_quality）
+## 物品品质 `quality`（≠ 套系品质 `series_quality`）。★ v0.22：**6 档**——
+## 白 1 / 绿 2 / 蓝 3 / 紫 4 / 金 5 / 红 6（`ItemConstants.QUALITY_*`，02-item.md §5.1）。
+## 越界由校验器 **V8** 拦下（`ItemCatalog.validate()`），不是靠 `@export_range`（它只约束检查器）。
+@export_range(1, 6) var quality: int = 1
 @export var value: int = 1                  # 该物品的 TVU 价值 v（本系统定义，07 使用）
 @export var size: int = 1                   # 占仓库多少空间；必须 > 0（§5.12 V2）
 @export_range(1, 100000) var rarity: int = 10
@@ -23,6 +26,9 @@ extends Resource
 ##   p_i = rarity_i / Σ rarity——**全部物品共分 100%**（v0.13 起隐藏款已删除）。
 ## 所以「越稀有的物品」应当把 `rarity` 写得**越小**。必须 ≥ 1：`rarity == 0` 的物品
 ## 出率为 0（永不产出），那是配置错误而不是设计意图。
+## ★ v0.23（用户裁决）：**权重与品质挂钩——同一类别内，品质越高权重必须越低**。
+## 这条由校验器 **V9** 在加载期强制（严格单调）；`ItemConstants.QUALITY_RARITY` 给出
+## 六档的默认阶梯，生成器按它写内容。**"品质高反而更容易出"是配置错误，不是风格选择**。
 @export var icon: Texture2D                 # 面板 / 条目图标
 @export var tags: Array[StringName] = []    # 预留：场景约束 / 特殊需求标记（见 03）
 
