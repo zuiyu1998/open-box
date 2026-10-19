@@ -67,7 +67,7 @@ static func grant_box(
 		return out
 	for _i in maxi(count, 0):
 		var b := Box.new()
-		b.box_id = Uuid.v4()                      # 身份：Uuid.v4()，String，与 instance_id 同类型
+		b.box_id = IUuid.v4()                      # 身份：IUuid.v4()，String，与 instance_id 同类型
 		b.series_id = series_id
 		b.item_pool = PoolService.init_pool(state, b.box_id, series_id)
 		if b.item_pool == null:

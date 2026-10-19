@@ -187,7 +187,7 @@ func _test_box_creation() -> void:
 	ok(a.modules[0] == null and a.modules[2] == null, "空位为空项（不是缺字段、不是 []）")
 	eq(a.item_pool.revision, 0, "新盒子 revision = 0")
 	ok(a.item_pool != b.item_pool, "**同套系两盒的 item_pool 不是同一个对象**（池子随盒子走）")
-	eq(a.box_id.length(), 36, "box_id 是 UUIDv4（36 字符）")
+	ok(IUuid.is_valid(a.box_id), "box_id 是插件产出的 id（8-4-4-12 / 31 字符，★ v0.25 起不再是 36 字符 UUIDv4）")
 	ok(a.box_id != b.box_id, "两个盒子的 box_id 不同")
 	eq(st.box_count(), 2, "两个盒子都进了囤积清单")
 

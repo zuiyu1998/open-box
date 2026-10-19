@@ -1,54 +1,67 @@
-## UUIDv4 生成器（02-item.md §4.5）。
+## UUID 生成（02-item.md §4.5）。
 ##
-## Godot **没有**内置 UUID：ResourceUID.create_id() 返回 int64 的 uid:// 串，
-## **不是 UUID**，也不符合本项目的幂等键需求。因此必须自己实现。
+## ★ v0.24 / v0.25（用户裁决）：**改用已安装的插件**
+## `addons/minos_uuid_generator`（`minos-UUID-generator-for-godot` by Minoqi，MIT；
+## 全局类 `MinosUUIDGenerator`）——id 的**布局与熵全部由插件产出**，本项目不再自己
+## 拼字节、不再自己设置 version / variant 位、也不再自己格式化。
 ##
-## 三条硬约束（§4.5 实现要点）：
-##   1. 随机源必须是 Crypto（OS CSPRNG），且只持有一个静态实例；
-##      version / variant 两位必须手工设置，否则字节流只是"看起来像 UUID"。
-##   2. 格式 8-4-4-4-12、32 位**小写**十六进制——比较一律按小写，
-##      大小写不统一会让同一个 id 出现两种写法，幂等键当场失效。
-##   3. **禁止** randi() / RandomNumberGenerator / 任何可复现种子流。
-##      池子与保底用的是"给定 seed 完全可复现"的随机流，实例身份必须与它**无关**；
-##      否则同一次重放会产出同一个 UUID，幂等键立刻失去意义（§10.1 第 3 条）。
-class_name Uuid
+## ★ **形态变了，必须知道**：插件产出 **`8-4-4-12`（31 字符、3 个 `-`、小写字母数字
+##   `a–z0–9`，即 base36）**，**不是 RFC 4122 的 UUIDv4**（没有 version nibble `4`、
+##   也没有 variant `10` 位，而且**不是十六进制**）。
+##   方法名仍叫 `v4()`，只是为了不让 01/02/10 的调用点与存档字段名跟着改；
+##   **形状的唯一权威是插件的 `MinosUUIDGenerator.generate_new_UUID()`**。
+##
+## 两个代价（已登记，不许"忘了就没事"）：
+##   1. **熵来自全局 `randi()` 流**（插件内部用 `Array.pick_random()`）⇒ 若任何代码对
+##      **全局** RNG 调 `seed()`，同一段重放会产出同一串 id，幂等键就会把"新实例"
+##      误判成"重放"而静默丢弃。**因此全库禁止对全局 RNG `seed()`**——v0.24 曾用一条
+##      测试守着"seed 两次仍不同"，v0.25 起它守不住了（插件不给熵入口），只能靠纪律
+##      （`02-item.md` §10.1 已把这条降级为"已知限制"）。
+##   2. 插件把生成过的 id 记在**静态** `usedUUID` 数组里（进程内去重）。它随进程增长、
+##      不落盘；**存档读回的老 id 不在其中**，所以跨档的唯一性仍只靠随机性（约 112 bit）。
+class_name IUuid
 extends RefCounted
 
-static var _crypto := Crypto.new()
+## 插件默认把每条新 id `print` 出来——本项目在 `grant` 路径上批量生成，
+## 必须一次性关掉它的调试输出（否则 2 万条用例会刷屏）。
+static var _silenced := false
 
 
-## 返回一个 36 字符的小写 UUIDv4 字符串。
+## 返回一个插件产出的 id 字符串（`8-4-4-12`，小写字母数字 base36）。
 static func v4() -> String:
-	var b: PackedByteArray = _crypto.generate_random_bytes(16)
-	b[6] = (b[6] & 0x0F) | 0x40  # version = 4（第 7 字节高 4 位 = 0100）
-	b[8] = (b[8] & 0x3F) | 0x80  # variant = RFC 4122（第 9 字节高 2 位 = 10）
-	var h := b.hex_encode()      # 32 个小写十六进制字符
-	return "%s-%s-%s-%s-%s" % [
-		h.substr(0, 8), h.substr(8, 4), h.substr(12, 4), h.substr(16, 4), h.substr(20, 12),
-	]
+	_silence_plugin_debug()
+	return MinosUUIDGenerator.generate_new_UUID()
 
 
-## 校验一个字符串是否是本生成器产出形态的 UUIDv4（§10.1 第 2 条）。
+## 校验一个字符串是否是本生成器产出形态（§10.1 第 2 条）。
+## 插件只负责"生产"，**读档 / 测试仍需要一个形态校验**（坏 id 进档 = 幂等键失效），
+## 所以这条留在本文件；它只描述契约，不参与生成。
 static func is_valid(s: String) -> bool:
-	if s.length() != 36:
+	if s.length() != 31:
 		return false
 	if s != s.to_lower():
 		return false
-	var hex_only := s.replace("-", "")
-	if hex_only.length() != 32:
+	var parts := s.split("-")
+	if parts.size() != 4:
 		return false
-	for i in hex_only.length():
-		var c := hex_only[i]
-		var ok := (c >= "0" and c <= "9") or (c >= "a" and c <= "f")
-		if not ok:
-			return false
-	if s[8] != "-" or s[13] != "-" or s[18] != "-" or s[23] != "-":
+	if parts[0].length() != 8 or parts[1].length() != 4 \
+			or parts[2].length() != 4 or parts[3].length() != 12:
 		return false
-	# version nibble == 4
-	if s[14] != "4":
-		return false
-	# variant 高 2 位 == 10b → 首字符落在 8 / 9 / a / b
-	var v := s[19]
-	if v != "8" and v != "9" and v != "a" and v != "b":
-		return false
+	for p in parts:
+		for i in String(p).length():
+			var c := String(p)[i]
+			# 插件用的是 a–z0–9（base36），**不是十六进制**——别按 hex 收紧它
+			var ok := (c >= "0" and c <= "9") or (c >= "a" and c <= "z")
+			if not ok:
+				return false
 	return true
+
+
+static func _silence_plugin_debug() -> void:
+	if _silenced:
+		return
+	_silenced = true
+	MinosUUIDGenerator.printNewUUID = false
+	MinosUUIDGenerator.printNewUUIDNode = false
+	MinosUUIDGenerator.printSuccessfulRemoval = false
+	MinosUUIDGenerator.printFailedRemoval = false

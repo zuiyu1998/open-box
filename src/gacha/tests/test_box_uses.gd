@@ -521,7 +521,7 @@ func _test_validation_failure_consumes_no_use() -> void:
 	var st2 := GameState.new_game()
 	var good := GachaService.grant_box(st2, &"series_q2", 1, &"test")[0]
 	var tmp := Box.new()
-	tmp.box_id = Uuid.v4()
+	tmp.box_id = IUuid.v4()
 	tmp.series_id = &"series_offline"
 	tmp.item_pool = PoolService.init_pool(st2, tmp.box_id, &"series_q2")
 	tmp.modules = PoolService.empty_slots(3)

@@ -6,7 +6,7 @@
 ##   （核心已否决 `PoolState.socketed` 这种形状）。
 ##
 ## ★ `box_id` 是**身份、不是输入**：不参与权重与抽样；**稳定性来自持久化**，不来自派生。
-##   `Uuid.v4()` 生成（`String`，与 `instance_id` 同源同类型，**无转换点**）。
+##   `IUuid.v4()` 生成（`String`，与 `instance_id` 同源同类型，**无转换点**）。
 ##
 ## ★ `modules` 是**定长**数组（长度恒 == `item_pool.socket_count`，**空位为空项**）；
 ##   **槽位号 = 数组下标**（**不另设 `slot` 字段**）。
@@ -14,7 +14,7 @@
 class_name Box
 extends Resource
 
-@export var box_id: String = ""                          # Uuid.v4()；与 instance_id 同类型、无转换
+@export var box_id: String = ""                          # IUuid.v4()；与 instance_id 同类型、无转换
 @export var series_id: StringName = &""
 @export var item_pool: ItemPool                          # 【生成数据的凭证】——roll() 消费它
 @export var modules: Array[Module] = []                  # 定长，长度恒 == item_pool.socket_count，空位为空项

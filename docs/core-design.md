@@ -1,6 +1,6 @@
 # 《Open Box》核心设计书
 
-- 版本：**v0.23（物品权重与品质挂钩：品质越高权重越低，校验器 V9 强制）**
+- 版本：**v0.25（UUID 插件换成 `addons/minos_uuid_generator`：id 形态变为 8-4-4-12 / 31 字符）**
 - 历史版本：`docs/archive/core-design-v0.1.md` ~ `v0.5.md`
 - 引擎：Godot 4.5（Forward+）
 - 已定前提：**纯单人** / **纯游戏内货币，无数值付费** / 社交**留接口不实现**
@@ -331,7 +331,7 @@
 > **类型名**：`item_pool : ItemPool`、`modules : Array[Module]`——**核心只固定这两个字段名与"并列"关系，两个类型的字段定义归 01**（01 §4）。
 > **完整字段集（v0.10 定稿；v0.14 增一个字段）**：`box_id : String`、`series_id : StringName`、`item_pool : ItemPool`、`modules : Array[Module]`、**`uses_remaining : int`**。
 > **载入时的取值口径（v0.16 裁决，§15 D20③）**：**只有缺键才补**——旧档（v0.14 之前）没有 `uses_remaining` 这个键 ⇒ **按该盒所属套系品质补齐（品质 1→10、2→15、3→20、4→25）**；**键存在时一律用存档值，哪怕它是 `0`**（`0` 是"该盒已用尽、归零即摧毁"的合法状态，**不许"好心补满"**）。理由：`0` 在新语义下等于摧毁，**取 `0` 会让旧档的全部盒子在载入瞬间消失**——这是不可接受的迁移后果。
-> `box_id` 用 **`String`** 而不是 `StringName`——它与 `ItemInstance.instance_id` **同为 `Uuid.v4()` 产出**，两个身份字段的类型必须一致，**不得引入 `StringName(...)` 转换点**（否则"同一身份逐位相等"的断言会被一个隐式转换破坏）。
+> `box_id` 用 **`String`** 而不是 `StringName`——它与 `ItemInstance.instance_id` **同为 `IUuid.v4()` 产出**，两个身份字段的类型必须一致，**不得引入 `StringName(...)` 转换点**（否则"同一身份逐位相等"的断言会被一个隐式转换破坏）。
 > **`modules` 的形状**：长度恒为 `item_pool.socket_count` 的**定长数组**，每个下标就是一个镶嵌位（空位为空项）。这让 C4"位子恒定"**在数据结构上直接可见**，UI 的"位子占用 x / N"也无需推导。**玩家可以指定任意空位镶嵌；往占用位放必须显式替换，不做隐式覆盖。**落盘形态是"已占用**镶嵌位**的稀疏序列（`module_id` + `slot`）"，归 10。
 > **规范表示用整数万分比**：派生状态的权重一律是 **`weights_bp`（整数，Σ == 10000）**，`void_mass_bp` 同单位同精度。**只有整数才能让 C1 的零和等式被精确断言**、并让存档往返字节级稳定；浮点 `probs` 只由 07 在归一化时出现一次（README §6.1 已有此约定）。
 > **01 / 07 / 08 / 10 一律用这两个名字**，且**不得**再把模块塞进池子自己的字段里——
@@ -419,7 +419,7 @@
 
 | 字段 | 类型 | 作用 |
 |---|---|---|
-| `instance_id` | `String` | **UUIDv4，全局唯一**。同时是**幂等键** |
+| `instance_id` | `String` | **UUID，全局唯一**。同时是**幂等键**。★ v0.25：形态由插件决定 = **`8-4-4-12` / 31 字符 / 小写 base36**（**不是 RFC 4122 的 v4**；`02-item.md` §4.5） |
 | `item_id` | `StringName` | 指向 `ItemDef`（种类） |
 | `acquired_at` | `int` | 开出时刻（Unix 秒）。用于排序与溯源 |
 | `source` | `Dictionary` | 溯源：`{ series_id, box_seed, draw_index }` |
@@ -437,7 +437,7 @@
 
 #### 4.2.2 工程约束（v0.8）
 
-1. **UUIDv4 必须自己实现** —— Godot **没有**内置 UUID。`ResourceUID.create_id()` 返回 int64 的 `uid://` 串，**不是 UUID**，不符合要求。
+1. **UUID 由插件生成**（★ v0.24 起；**v0.25 换了插件**，原文"必须自己实现"作废）—— Godot **没有**内置 UUID，所以早期是自己实现；**现在改用已安装的插件 `addons/minos_uuid_generator`**（`minos-UUID-generator-for-godot`，MIT；全局类 `MinosUUIDGenerator`）生成 **id 的布局与熵**。**形态随之变化（v0.25）**：**`8-4-4-12` / 31 字符 / 小写 base36（`a–z0–9`）**，**不是 RFC 4122 的 v4**（无 version nibble、无 variant 位、也不是十六进制）。**`ResourceUID.create_id()` 仍被禁止**（返回 int64 的 `uid://` 串，**不是 UUID**）。`02-item.md` §4.5 / §10.1 是这条的实现与验收权威。
 2. **`count` 是派生值，必须缓存**：逐帧遍历实例列表数数量不可接受。维护一份 `(category, quality) → count` 的派生索引，随实例增删失效。
 3. **只持久化现存实例**：已消耗的实例不保留历史——审计由开箱日志承担，它已记录 `seed` + `pool_snapshot`。
 4. **存档体积是真实代价**：每个实例约 120 字节 JSON，5000 个实例约 **600KB**，其中 `source` 是大头。这一点必须在切片阶段就实测。
@@ -1108,6 +1108,11 @@ R2 已由 **C2 的 void 自限**接管（v0.6：不再依赖固定位数）；R9
 
 ```
 res://
+  addons/
+    minos_uuid_generator/ # ★ v0.25：UUID 生成插件（minos-UUID-generator-for-godot，MIT，
+                          #   全局类 `MinosUUIDGenerator` / `UUIDManager`）
+                          #   **不入版本库**（.gitignore 有 /addons/）：新环境必须自行安装
+                          #   `src/core/uuid.gd` 只是它的适配层（关掉调试输出 + 契约校验，§16.20）
   autoload/
     game_state.gd         # 运行时状态（物品、装置、模块、任务、囤积盲盒【v0.14：每盒各带 `uses_remaining`】）
     pool_service.gd       # ★ 池子状态的唯一变更入口：socket(box, module) / unsocket(box, slot)（v0.10：按盒子写入）
@@ -1174,7 +1179,7 @@ res://
    **字段集以本行为唯一权威**——`02-item.md` / `10-progression.md` 引用日志字段时必须与本行逐项一致，**不得各自增删**。）
    （**不矛盾说明**：日志里的 `pool_snapshot` 是**审计副本**——兑现那一刻的冻结记录，用于复现与对账；它不是池子状态的"事实来源"。事实来源**始终**是 `item_pool` + `modules`，重建由本系统的 `PoolService` 逐盒负责。）
    （v0.7 修订：日志记录统一用 `quality`；v0.4 遗留的 `star` 已在 v0.6 → v0.7 的术语合并中取消，不再有第二个分级字段。见 `README.md` 术语表。）
-8. **物品实例必须带 `instance_id`（UUIDv4），且发放必须幂等**（同一 `instance_id` 重复发放不得产生第二个实例）。
+8. **物品实例必须带 `instance_id`（UUID），且发放必须幂等**（同一 `instance_id` 重复发放不得产生第二个实例）。
    **`count` 一律为派生值**（由实例列表数出并缓存），**不得作为独立存储字段**。这是 v0.8 的核心不变量，必须有回归测试守护。
 9. **仓库与邮件是同一个实例列表的两个位置，不是两份数据**（v0.9）：
    - 实例字段加 `location`（`warehouse` / `mail`）；
@@ -1302,7 +1307,7 @@ res://
 | 项 | v0.7 | v0.8 |
 |---|---|---|
 | 持有模型 | `(category, quality) → count` 计数 | **`ItemInstance` 实例列表**；数量为**派生值** |
-| 个体身份 | 无 | **`instance_id`（UUIDv4，全局唯一）**，兼作幂等键 |
+| 个体身份 | 无 | **`instance_id`（UUID，全局唯一）**，兼作幂等键 |
 | 溯源 | 只有开箱日志记 `seed` | **每个实例自带** `acquired_at` + `source{series_id, box_seed, draw_index}` |
 | 收藏编号 | 无 | **`serial` = 该玩家开出的第 N 个此物品** |
 | 任务需求匹配 | 扣 `count -= 3` | **挑选 3 个实例销毁**；同品质内按 `acquired_at` 升序 |
@@ -1315,7 +1320,7 @@ res://
 
 **已知代价（切片阶段必须实测）**：**存档体积**。5000 个实例约 600 KB JSON，其中 `source` 是大头。对策：**只持久化现存实例**，已消耗的不留历史——审计由开箱日志承担，它已记录 `seed` + `pool_snapshot`。
 
-**Godot 实现提醒**：**没有内置 UUID**。`ResourceUID.create_id()` 返回 int64 的 `uid://` 串，**不是 UUID**，需自行实现 UUIDv4（`Crypto.generate_random_bytes(16)` + RFC 4122 格式化）。
+**Godot 实现提醒**：**没有内置 UUID**。`ResourceUID.create_id()` 返回 int64 的 `uid://` 串，**不是 UUID**。〔原文："需自行实现 UUID（`Crypto.generate_random_bytes(16)` + RFC 4122 格式化）"——**★ v0.24 改述：由已安装插件生成**；**★ v0.25 再改述：插件换成 `addons/minos_uuid_generator`，id 形态变为 `8-4-4-12` / 31 字符 / 小写 base36**（§16.19 / §16.20）〕
 
 **修订范围**：§4.2 全节重写、新增 §4.2.1–§4.2.3、§14.1 目录树加 `item_instance.gd`、§14.2 新增铁律 8。
 
@@ -1834,6 +1839,72 @@ res://
 > - **"`rarity` 完全自由配置"作废**；**"全部 rarity 相等 = 退化为均等"**这条口子在**内容侧**也被关掉（相等即违反 V9）——`ItemPool` 的**归一化算法**本身不变（它能处理任意权重，包括相等）。
 > - **新增 `V9`**（`02-item.md` §5.12）；**D19 从"待标定方向"转为"已裁决方向 + 待标定量级"**。
 > - **内容**：42 个 `.tres` 的 `rarity` 已按阶梯写入（`tools/gen_item_content.gd` 生成时会先自检 V9，避免产出被校验器拒绝的内容）。
+
+---
+
+### 16.19 v0.23 → v0.24
+
+> **〔★ v0.25 补记：本条里的 `godot-uuid` 插件已被替换为 `addons/minos_uuid_generator`，id 形态随之变化；本节的"36 字符 / RFC 4122"口径只适用于 v0.24 那一版，现行口径见 §16.20〕**
+
+**工程变更：UUID 生成改用已安装的插件 `addons/uuid`（`godot-uuid` v3.0.0）。**
+
+用户裁决原话："**将当前项目的 uuid 设计更改为安装的插件**"。
+
+**它的三条含义：**
+1. **生成器换人**：`instance_id` / `box_id` 的 UUID **不再由本项目自己拼字节**——`addons/uuid/uuid.gd`（全局类 `UUID`）负责**布局**：version 位、variant 位、`8-4-4-4-12` 分段、小写十六进制。`src/core/uuid.gd` 退化为**一层适配**，类名 = **`IUuid`**（★ 用户裁决：加 `I` 前缀——它与插件的 `UUID` 只差大小写、极易混，加前缀后两个标识符一眼可分，也点明它是**接口 / 适配层**而不是生成器本体）；**对外仍只有 `v4()` 与 `is_valid()` 两个入口、产出形态一字未变**，调用点只改了类名。
+2. **熵入口保留（这是唯一没有交出去的部分）**：插件有两个入口，`UUID.v4()` 用**全局** `randi()` 流，`UUID.v4_rng(rng)` 用调用方传入的 RNG。本项目走**后者**，并且**每次调用用 `Crypto`（OS CSPRNG）抽 64 位种子播种一个私有 RNG**。理由（与 v0.24 之前的规则同源，不是洁癖）：①全局流被任何一次 `seed()` 钉死 ⇒ 同一段重放会产出同一串 UUID ⇒ 幂等键把**新实例误判成重放**、静默丢弃（"抽到了但东西没了"）；②全局流是**共享**的，别的系统多消耗一次 `randi()` 就改变 id 序列。
+3. **依赖是硬的**：`addons/` **不入版本库**（`.gitignore` 里有 `/addons/`）⇒ **新环境必须自己安装 `godot-uuid`**，否则 `UUID` 类不存在、**项目直接加载失败**（没有回退实现）。**不启用它的 editor plugin**：`plugin.cfg` 指向的脚本是 `uuid.gd` 的副本、不是 `EditorPlugin`，本项目只把该目录当**库**用。
+
+| 项 | v0.23 | v0.24 |
+|---|---|---|
+| **UUID 布局由谁产出** | 本项目自己实现（`Crypto` 16 字节 + 手工设 version/variant + 手工分段） | **插件 `addons/uuid` 的 `UUID`**（`UUID.v4_rng(rng)`） |
+| **`src/core/uuid.gd` 的职责** | 生成器（唯一实现） | **适配层**：给插件供熵（Crypto 播种的私有 RNG）+ `is_valid()` 契约校验 |
+| **对外签名 / 形态** | `IUuid.v4() -> String`，36 字符小写 | **不变**（01/02/10 的引用零改动） |
+| **禁止项** | `ResourceUID.create_id()`；`randi()` / 可复现种子流 | **`ResourceUID.create_id()` 仍禁**；**`UUID.v4()`（全局流入口）在本项目内也禁**——只用 `UUID.v4_rng()` |
+| **不变** | — | **`instance_id` / `box_id` 的类型（`String`）、幂等键语义、存档形态、C1–C6、P1–P7** |
+
+> **为什么接受**：自己维护 UTF/UUID 这类"标准件"没有收益——它是纯机械的格式拼装，出错方式（version 位漏设、大小写不一致）却正好是幂等键的致命伤；交给成熟插件能把这类风险外置。
+> **代价（两处，已登记）**：
+> 1. **多一个硬依赖**：`addons/` 不入版本库 ⇒ 换机器 / CI 必须显式安装，否则**加载期就失败**（不是运行期降级）。这一条写进了 `02-item.md` §4.5 与 `README.md` 的依赖清单。
+> 2. **不能用插件最省事的那个入口**：`UUID.v4()` 看起来更简单，但它把熵绑在全局 `randi()` 流上，与"实例身份与抽取随机流无关"直接冲突 ⇒ 本项目**只用 `UUID.v4_rng()`**，并由一条测试守住（`seed()` 钉死两次仍必须得到不同 id）。
+
+> **本版被推翻或关闭的登记项（一眼表）**
+> - **"UUID 必须自己实现"作废**（§4.2.2 第 1 条已改述，保留行号）；**`Crypto.generate_random_bytes(16)` 直接拼装的写法删除**。
+> - **新增一条禁令**：项目内**不得调用 `UUID.v4()`**（全局流入口）；只允许 `UUID.v4_rng()`。
+> - **测试新增**（`02-item.md` §10.1 第 3 条追加）：全局 `seed()` 钉死两次仍必须得到不同 id——这条守的就是"别图省事改回 `UUID.v4()`"。
+
+---
+
+### 16.20 v0.24 → v0.25
+
+**工程变更：UUID 插件换成 `addons/minos_uuid_generator` —— id 的形态也随之改变。**
+
+用户裁决：把项目里"安装的插件"换成 `minos-UUID-generator-for-godot`（MIT，by Minoqi），并让 `IUuid` 不再报错。
+
+**它的四条含义：**
+1. **唯一的生成入口 = `MinosUUIDGenerator.generate_new_UUID()`**。`src/core/uuid.gd`（`IUuid`）只做两件事：**关掉插件的调试输出**（它默认每条 id 都 `print`，而我们在 `grant` 路径上批量生成）、**提供 `is_valid()` 契约校验**。
+2. **形态变了（这条最要紧）**：插件产出 **`8-4-4-12` / 31 字符 / 3 个 `-` / 小写 base36（`a–z0–9`）**，**不再是 RFC 4122 的 UUIDv4**——没有 version nibble `4`、没有 variant `10` 位、**也不是十六进制**。⇒ `instance_id` / `box_id` 从 36 字符变成 31 字符（**每实例省约 5 B**，`02-item.md` §4.6 的体积估算据此修正）。
+3. **熵入口没了（一处让步，必须登记）**：上一版插件有 `v4_rng(rng)` 能喂私有 RNG；**这一版没有**，内部用 `Array.pick_random()` ⇒ **id 来自全局 `randi()` 流**。后果：**任何代码对全局 RNG 调 `seed()`，同一段重放就会产出同一串 id**，幂等键便会把"新实例"误判成"重放"而静默丢弃。⇒ **全库禁止对全局 RNG `seed()`**；v0.24 那条"seed 两次仍须不同"的守护测试已**删除**（守不住了），`02-item.md` §10.1 把它降级为**已知限制**。
+4. **`addons/` 仍不入版本库**（`.gitignore` 有 `/addons/`）⇒ 新环境必须自行安装该插件，否则 `MinosUUIDGenerator` 不存在、**项目加载失败**（无回退实现）。
+
+| 项 | v0.24 | v0.25 |
+|---|---|---|
+| **插件** | `addons/uuid`（godot-uuid v3.0.0，类 `UUID`） | **`addons/minos_uuid_generator`**（类 `MinosUUIDGenerator` / `UUIDManager`） |
+| **id 形态** | 36 字符、RFC 4122 v4、小写十六进制 | **31 字符、`8-4-4-12`、小写 base36**（**不是 v4**） |
+| **熵来源** | `Crypto` → 私有 RNG → `UUID.v4_rng()` | **全局 `randi()`**（插件内部 `pick_random()`）——**已知限制** |
+| **`IUuid` 的职责** | 供熵 + 契约校验 | **关调试输出 + 契约校验**（生成全归插件） |
+| **守护测试** | `seed()` 钉死两次仍须不同 | **已删除**（改为"形态 = 8-4-4-12"的固定测试） |
+| **不变** | — | **`instance_id` / `box_id` 的类型（`String`）、幂等键语义（同一 id 重复发放不得产生第二个实例）、存档形态、`ResourceUID.create_id()` 仍禁、C1–C6、P1–P7** |
+
+> **为什么接受**：用户指定了要用的插件；且 id 只要"全局唯一 + 可比较"就够用，`8-4-4-12` 的 base36 串同样能当幂等键。
+> **代价（两处，已登记）**：
+> 1. **失去"与全局随机流无关"这条保证**——它曾经是 v0.24 的主要卖点；现在只能靠**全库纪律：不 `seed()` 全局 RNG** 来守。
+> 2. **不再是 RFC 4122**：外部工具（若将来要做 id 校验 / 导出）不能假设 version/variant 位存在；`IUuid.is_valid()` 是唯一口径。
+>
+> **本版被推翻或关闭的登记项（一眼表）**
+> - **"36 字符 / version 4 / variant RFC 4122"的口径作废**（`01` / `02` / `07` / `08` / `09` / `10` / `README` 的措辞已同步为"插件产出的 UUID"）。
+> - **v0.24 的 `UUID.v4_rng()` 禁令失效**（那个入口已不存在）；**新增禁令 = 不得对全局 RNG `seed()`**。
+> - **`addons/uuid` 整个目录已移除**（它在编辑器里留下 `Class "UUID" hides a global script class` 的报错，根因是旧插件的两个脚本都声明 `class_name UUID`，并且被打开成了编辑器标签页——已清理）。
 
 ---
 

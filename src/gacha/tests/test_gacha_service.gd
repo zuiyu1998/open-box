@@ -246,14 +246,14 @@ func _test_gacha_service_has_no_uuid_or_serial_math() -> void:
 		return
 	var text := f.get_as_text()
 	f.close()
-	# ★ 01 §1 第 2 条要求 `grant_box` 用 `Uuid.v4()` 生成 **box_id**（盒子身份）；
+	# ★ 01 §1 第 2 条要求 `grant_box` 用 `IUuid.v4()` 生成 **box_id**（盒子身份）；
 	#   §10.2 的静态检查针对的是**抽取侧**：`roll()` / `redeem()` 不得生成实例 UUID、不得算 serial。
-	#   因此这里断言的是"`Uuid.v4` 只出现在 box_id 那一行"，而不是"文件里没有这个词"。
+	#   因此这里断言的是"`IUuid.v4` 只出现在 box_id 那一行"，而不是"文件里没有这个词"。
 	var uuid_lines: Array[String] = []
 	for line in text.split("\n"):
-		if String(line).contains("Uuid.v4"):
+		if String(line).contains("IUuid.v4"):
 			uuid_lines.append(String(line))
-	eq(uuid_lines.size(), 1, "`Uuid.v4` 只出现 1 次")
+	eq(uuid_lines.size(), 1, "`IUuid.v4` 只出现 1 次")
 	ok(uuid_lines.size() == 1 and uuid_lines[0].contains("box_id"),
 		"那一次是盒子身份（box_id），不是实例身份")
 	ok(not text.contains("serial ="), "文件里没有对 `serial` 赋值")
@@ -381,7 +381,7 @@ func _test_redeem_rejects_unregistered_series() -> void:
 	var f := _new_state()
 	var st: GameState = f["state"]
 	var tmp := Box.new()
-	tmp.box_id = Uuid.v4()
+	tmp.box_id = IUuid.v4()
 	tmp.series_id = &"series_offline"
 	tmp.item_pool = PoolService.init_pool(st, tmp.box_id, &"series_01")
 	tmp.modules = PoolService.empty_slots(3)

@@ -42,6 +42,7 @@ func _ready() -> void:
 	_test_idempotent_grant()
 	_test_uuid_uniqueness()
 	_test_uuid_not_from_seed()
+	_test_uuid_shape_from_plugin()
 	_test_serial_semantics()
 
 	_section = "§4.1/§5.2 价值字段（每个物品一个固定 value）"
@@ -422,16 +423,16 @@ func _test_uuid_uniqueness() -> void:
 	var bad_format := 0
 	var n := 20000
 	for i in n:
-		var u := Uuid.v4()
+		var u := IUuid.v4()
 		if seen.has(u):
 			_fail += 1
 			print("  [FAIL] UUID 碰撞：%s" % u)
 			return
 		seen[u] = true
-		if not Uuid.is_valid(u):
+		if not IUuid.is_valid(u):
 			bad_format += 1
 	ok(true, "UUID 唯一性：%d 个零碰撞" % n)
-	eq(bad_format, 0, "UUID 格式：36 字符 / version 4 / variant RFC 4122 / 全小写")
+	eq(bad_format, 0, "id 形态：8-4-4-12（31 字符）/ 小写 base36 / 3 个 `-`（插件口径）")
 
 
 func _test_uuid_not_from_seed() -> void:
@@ -443,6 +444,25 @@ func _test_uuid_not_from_seed() -> void:
 	var b := ItemService.grant(&"stardust_q1", src)
 	ok(a.instance_id != b.instance_id, "同 source 两次开盒得到不同 instance_id（身份与种子无关）")
 	ok(a.serial != b.serial, "同 source 两次开盒的 serial 递增（编号不复用）")
+
+
+func _test_uuid_shape_from_plugin() -> void:
+	# ★ v0.25：id 由已安装插件 `addons/minos_uuid_generator` 产出。
+	#   它的形态是 **8-4-4-12（31 字符、小写字母数字 a–z0–9）**，**不是 RFC 4122 的 UUIDv4**
+	#   （没有 version nibble 4 / variant 10 位，也不是十六进制）——这条测试固定住这个口径，
+	#   免得实现者按"UUIDv4"的老印象写死 36 字符 / 十六进制。
+	var a := IUuid.v4()
+	var b := IUuid.v4()
+	eq(a.length(), 31, "长度 31（插件口径；旧口径 36 字符作废）")
+	eq(a.split("-").size(), 4, "4 段：8-4-4-12")
+	ok(IUuid.is_valid(a), "is_valid 认插件口径")
+	ok(IUuid.is_valid(b), "连续第二个也认")
+	ok(a != b, "连续两次不同（插件进程内去重）")
+	# 已知限制（v0.25）：插件不给熵入口 ⇒ id 来自全局 randi() 流。
+	# 这里**刻意不去碰全局 seed()**：那会污染其它用例，而且已经守不住这条了
+	# （`02-item.md` §10.1 已把"与 seed 无关"降级为已知限制）。
+	ok(not IUuid.is_valid("01234567-89ab-cdef-0123-456789abcdef"),
+		"旧的 36 字符 UUIDv4 形态不再被接受（口径已经换掉）")
 
 
 func _test_serial_semantics() -> void:

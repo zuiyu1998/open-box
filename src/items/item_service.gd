@@ -223,7 +223,7 @@ func grant(
 		return null  # 主动操作：拒绝整个操作，状态完全不变
 
 	var loc := ItemConstants.LOC_WAREHOUSE if fits else ItemConstants.LOC_MAIL
-	var new_id := instance_id if instance_id != "" else Uuid.v4()
+	var new_id := instance_id if instance_id != "" else IUuid.v4()
 
 	var inst := ItemInstance.new()
 	inst.instance_id = new_id
@@ -524,7 +524,7 @@ func transact(ops: Array) -> Dictionary:
 		var plan: Dictionary = grant_plans[i]
 		var kind: StringName = (plan["source"] as Dictionary).get("kind", &"")
 		var inst := ItemInstance.new()
-		inst.instance_id = String(plan["instance_id"]) if String(plan["instance_id"]) != "" else Uuid.v4()
+		inst.instance_id = String(plan["instance_id"]) if String(plan["instance_id"]) != "" else IUuid.v4()
 		inst.item_id = StringName(plan["item_id"])
 		inst.acquired_at = int(Time.get_unix_time_from_system())
 		inst.source = plan["source"]

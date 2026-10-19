@@ -5,7 +5,7 @@
 - 被依赖：01、03、04、06、07、08、10
 
 > **本文档当前有效的三条背景**（更早的版本沿革见核心 **§16**，本文件不复述）：
-> 1. **持有模型 = 实例列表**：每个实例一个 **UUIDv4**（`instance_id`，兼作幂等键）、自带**溯源**（`acquired_at` + `source`）与**收藏编号**（`serial`）；**`count` 是派生值**；**"堆叠"在结构上不可能存在**。Godot **没有**内置 UUID（`ResourceUID.create_id()` 返回的 `uid://` 串**不是 UUID**，见 §4.5）。
+> 1. **持有模型 = 实例列表**：每个实例一个 **UUID**（`instance_id`，兼作幂等键）、自带**溯源**（`acquired_at` + `source`）与**收藏编号**（`serial`）；**`count` 是派生值**；**"堆叠"在结构上不可能存在**。Godot **没有**内置 UUID（`ResourceUID.create_id()` 返回的 `uid://` 串**不是 UUID**，见 §4.5）。
 > 2. **仓库与邮件是同一实例列表的两个位置**：`location ∈ {warehouse, mail}`；**`count()` 只统计仓库**；**被动产出（开盒 / 迁移 / 解锁）放不下 ⇒ 进邮件**（永不丢失），**主动操作（转化 / 拆卸返还）放不下 ⇒ 拒绝整个操作**；**领取只改 `location`**；**玩家可主动丢弃**（死局逃生阀）。仓库容量 `warehouse_capacity` 是**抽象单位**、UI 只显示**占比**。
 > 3. **物品池的两份数据不归本文**：`Box.item_pool` / `Box.modules` 挂在该盒子上（归 01），编辑与写入权归 01 的 `PoolService`；本文只定义 **`ItemDef`** 与**实例列表**。**`rarity ≥ 1` 这条规则的权威在本文档（§5.12 V5）**，`ItemPool.validate()` 是**执行点**并报同一原因码 `bad_rarity`。
 
@@ -75,7 +75,7 @@
 | 物品定义 | `ItemDef` | 一种物品的**静态属性**：`item_id` / `display_name` / `category` / `quality` / `value` / **`rarity`** / **`size`** / `icon` / `tags`；**归属本系统**，01 的 `SeriesDef` 只引用（**无 `is_hidden`【§16.8】**） |
 | **物品权重（`rarity`）** | `rarity` | `ItemDef.rarity`：该物品在池中的**权重**——**数值越大越常见**（"越稀有"就写得**越小**），**必须 ≥ 1**（`0` = **永不产出** = 配置错误，§5.12 V5）。物品概率 `p_i = rarity_i / Σ rarity`（**全部物品共分 100%**）；全部 `rarity` 相等时**退化为均等**。**它只管"抽到什么"，不管"值多少"**（后者是 `value`） |
 | 物品实例 | `ItemInstance` | 玩家实际持有的**一个**物品；**每个实例持有一个 UUID，全局唯一** |
-| 实例 id | `instance_id` | **UUIDv4，全局唯一**，兼作**幂等键**（同一 id 重复发放不得产生第二个实例） |
+| 实例 id | `instance_id` | **UUID，全局唯一**，兼作**幂等键**（同一 id 重复发放不得产生第二个实例） |
 | 收藏编号 | `serial` | **该玩家开出的第 N 个此物品**。**判据（带作用域）：分配编号的只有开盒（`gacha`）；恢复编号的是迁移（一次性、且必须与 `serial_counters` 对齐）。除这两者外，任何来源的实例 `serial == 0`**（**非开盒来源举例**：转化 / 拆卸返还 / 解锁发放） |
 | 溯源 | `source` | 实例来自哪里：**开放字典**，`kind` 必填，其余键按来源类型附加（§4.2） |
 | **物品大小** | `size` | `ItemDef.size`：该物品占仓库多少空间（**同种物品大小相同**，必须 > 0，§5.12）；**不是容量字段**——容量在仓库上 |
@@ -136,7 +136,7 @@ extends Resource
 class_name ItemInstance
 extends Resource
 
-@export var instance_id: String = ""            # UUIDv4（36 字符，小写），全局唯一，兼作幂等键
+@export var instance_id: String = ""            # UUID（插件产出：8-4-4-12 / 31 字符 / 小写 base36），全局唯一，兼作幂等键
 @export var item_id: StringName = &""           # 指向 ItemDef；category/quality 经 ItemCatalog 查出
 @export var acquired_at: int = 0                # 入库时刻（int(Time.get_unix_time_from_system())，Unix 秒）
 @export var source: Dictionary = {}             # 溯源：开放字典，kind 必填，其余键按来源类型附加（见下表）
@@ -193,7 +193,7 @@ func rebuild_count_index() -> Dictionary: ...        # 自愈 / 对账（§4.4�
 
 **行为规格（逐条钉子）：**
 
-- **`grant`**：正常路径 → 生成 UUIDv4 → 写 `serial`（§5.6）→ 追加实例 → **按 `overflow` 决定落位**（§5.10）：落仓库则 `count_index[key] += 1` 且 `warehouse_used += size`，落邮件则两者都不动，**被拒则整个 `grant` 失败**（返回 `null`、不创建实例、状态完全不变）→ `total_granted += 1`（**成功入库与成功入邮件都计入**）。返回**已带 `location` 的实例**——调用方读 `instance.location` 即知去向，**不需要、也不允许**自己算空间。`instance_id` 非空且**已存在** → **幂等命中**：不新建、不改任何计数器、**不改 `location`**，返回现存实例。`item_id` 未注册、`source.kind` 不在 §4.2 的六值域内、**或 `overflow` 越权放宽**（主动操作声明 `&"mail"`）→ 返回 `null`，状态完全不变。**裸 `grant` 的失败原因不外传**（上述失败与"空间被拒"都只是 `null`）：需要区分"空间被拒"与"配置错误"的调用方**一律经 `transact`**（`reason == &"no_space"` / `&"bad_op"`，§5.11）。
+- **`grant`**：正常路径 → 生成 UUID → 写 `serial`（§5.6）→ 追加实例 → **按 `overflow` 决定落位**（§5.10）：落仓库则 `count_index[key] += 1` 且 `warehouse_used += size`，落邮件则两者都不动，**被拒则整个 `grant` 失败**（返回 `null`、不创建实例、状态完全不变）→ `total_granted += 1`（**成功入库与成功入邮件都计入**）。返回**已带 `location` 的实例**——调用方读 `instance.location` 即知去向，**不需要、也不允许**自己算空间。`instance_id` 非空且**已存在** → **幂等命中**：不新建、不改任何计数器、**不改 `location`**，返回现存实例。`item_id` 未注册、`source.kind` 不在 §4.2 的六值域内、**或 `overflow` 越权放宽**（主动操作声明 `&"mail"`）→ 返回 `null`，状态完全不变。**裸 `grant` 的失败原因不外传**（上述失败与"空间被拒"都只是 `null`）：需要区分"空间被拒"与"配置错误"的调用方**一律经 `transact`**（`reason == &"no_space"` / `&"bad_op"`，§5.11）。
 - **`discard`**（R-M13，裁决 16）：与 `consume` **共用同一实现与同一原子性**（全有或全无、只作用于仓库实例），但**不产生任何产出**且**不计入三个出口标签**——单列 `&"discard"`，**07 的出口归因必须排除它**（否则 ρ 的出口账被污染）；计入 `total_consumed`，守恒式因此仍成立。
 - **`transact`**（§5.11）：整批 `ops` 要么全部生效、要么完全不生效；失败时 `instances` / `count_index` / `warehouse_used` / 三个计数器**逐项回到事务前**。**替换与转化必须走它**，不得拼多次调用。
 - **`consume`**：按实例销毁，**全有或全无**。返回 `{ ok: bool, consumed: Array[String], reason: StringName }`（`[补充]` GDScript 无 `Result` 类型，用 `Dictionary`；`reason ∈ &"" / &"missing_instance" / &"duplicate_id" / &"not_in_warehouse" / &"bad_tag" / &"no_space"`——后两个是**保留值**：`consume` / `discard` **不检查空间**、永远不会返回 `&"no_space"`（列入只为让出库族接口共用一套原因码，调用方不必按接口分支），而 `&"bad_tag"` 会在 `tag` 缺失或越域时**立刻**返回）。任一 id 不存在、入参内**重复出现同一个 id**、**或任一 id 的 `location != warehouse`** → `ok == false`，`instances` / `count_index` / `warehouse_used` / 两个计数器**完全不变**。空列表是合法 no-op。**`consume` 不检查空间**（只消耗不产出，核心 §4.7 第 2 条）。
@@ -213,28 +213,26 @@ count_index / warehouse_used : int   # 两个派生缓存（可由实例列表�
 
 **为什么不能逐帧遍历实例列表：** ①查询是**帧级高频**（六面板 + 试算 + 任务面板随每次输入变化都会读），而实例数可达数千（§4.6），O(n) 乘上帧率不可接受；②成本会**随存档体积增长**——存档越大越卡，玩家无法解释也无法通过配置缓解（P6 / R7 同精神）；③03 的需求匹配是**最大流判定**，输入是聚合后的持有量而非实例列表，把全量遍历塞进图构建会让判定耗时随实例数增长。核心 §4.2.2 的"必须缓存"因此落地为**增量维护保性能 + 全量重算保正确性**两条路径，两者结果必须**逐项相等**（§10.2 的一致性红线）。④`warehouse_used` 与 `count_index` 是**同一类派生缓存**：仓库占比是面板常驻显示，全量求和同样不能逐帧做；两者必须由**同一次写入**一起更新，否则会出现"数量对了但占比不对"的不可解释状态（而占比正是容量唯一的反馈通道）。
 
-### 4.5 UUIDv4 生成器（Godot 无内置 UUID，必须自己实现）
+### 4.5 UUID 生成器（★ v0.25：改用已安装的插件 `addons/minos_uuid_generator`）
+
+**不再自己实现。** 项目安装的是 **`minos-UUID-generator-for-godot`**（`res://addons/minos_uuid_generator/`，MIT，by Minoqi；全局类 `MinosUUIDGenerator` / `UUIDManager`）：**id 的布局与熵全部由它产出**（`MinosUUIDGenerator.generate_new_UUID()`），`src/core/uuid.gd` 只剩一层适配——**插件负责"长什么样、怎么随机"，适配层只负责"关掉它的调试输出 + 提供契约校验"**。★ **适配层的类名带 `I` 前缀 = `IUuid`**（用户裁决）：加前缀后一眼看得出它是**接口 / 适配层**，而不是生成器本体：
 
 ```gdscript
-# res://src/core/uuid.gd —— 静态工具，不依赖节点，可在无头模式跑单测
-class_name Uuid
+class_name IUuid
 extends RefCounted
-static var _crypto := Crypto.new()               # Crypto 是 RefCounted，持有一个静态实例即可
+static var _silenced := false                     # 插件默认把每条 id print 出来，先关掉
 
 static func v4() -> String:
-	var b: PackedByteArray = _crypto.generate_random_bytes(16)
-	b[6] = (b[6] & 0x0F) | 0x40        # version = 4（第 7 字节高 4 位 = 0100）
-	b[8] = (b[8] & 0x3F) | 0x80        # variant = RFC 4122（第 9 字节高 2 位 = 10）
-	var h := b.hex_encode()            # 32 个小写十六进制字符
-	return "%s-%s-%s-%s-%s" % [h.substr(0, 8), h.substr(8, 4),
-		h.substr(12, 4), h.substr(16, 4), h.substr(20, 12)]
+	_silence_plugin_debug()
+	return MinosUUIDGenerator.generate_new_UUID()  # 布局与熵全归插件
 ```
 
-**实现要点：**
+**实现要点（★ 形态已经变了，必须按这版读）：**
 
-1. **随机源必须是 `Crypto`（OS CSPRNG）**：`Crypto.generate_random_bytes(16)`；不要每次 `new()`。**两位必须手工设置**，否则字节流只是"看起来像 UUID"：`version` 位（第 7 字节高 4 位 = `0x4`）与 `variant` 位（第 9 字节高 2 位 = `0b10`）。
-2. **格式 8-4-4-4-12、32 位小写十六进制**；比较一律按小写字符串——大小写不统一会让同一个 id 出现两种写法，幂等键当场失效。
-3. **禁止 `ResourceUID.create_id()`**（返回 int64 的 `uid://` 串，**不是 UUID**，核心 §4.2.2）；**禁止 `randi()` / `RandomNumberGenerator` / 任何可复现种子流**——**池子求值**用的是"给定 seed 完全可复现"的随机流（核心 §9 铁律 1），实例身份必须与它**无关**，否则同一次重放会产出同一个 UUID，幂等键立刻失去意义（§10.1 第 3 条）。生成开销只落在 `grant` 路径（非热路径）。
+1. **形态 = `8-4-4-12`（31 字符、3 个 `-`、小写字母数字 `a–z0–9`，即 base36）**，**不再是 RFC 4122 的 UUIDv4**：没有 version nibble `4`、没有 variant `10` 位、**也不是十六进制**。`IUuid.is_valid()` 按**插件口径**校验（31 字符 / 4 段 8-4-4-12 / 小写 base36）；**方法名仍叫 `v4()`** 只是为了不动调用点与字段名——**形状的唯一权威是插件的 `generate_new_UUID()`**。
+2. **已知限制（v0.25 如实登记）**：插件**不提供熵入口**（没有 `v4_rng(rng)` 那种签名），内部用 `Array.pick_random()` ⇒ **熵来自全局 `randi()` 流**。后果：**若任何代码对全局 RNG 调 `seed()`，同一段重放会产出同一串 id**，幂等键就会把"新实例"误判成"重放"而静默丢弃。**因此全库禁止对全局 RNG `seed()`**（v0.24 那条"seed 两次仍须不同"的守护测试已删除——它守不住了，只能靠纪律）。
+3. **仍然禁止 `ResourceUID.create_id()`**（返回 int64 的 `uid://` 串，**不是 UUID**，核心 §4.2.2）。生成开销只落在 `grant` / `grant_box` 路径（非热路径）。
+4. **这个依赖是硬的**：`addons/` **不入版本库**（`.gitignore` 里就有 `/addons/`）⇒ 新环境必须自己安装该插件，否则 `MinosUUIDGenerator` 不存在、**项目直接加载失败**（不是降级、没有回退实现）。插件把生成过的 id 记在**静态** `usedUUID` 数组里（进程内去重，不落盘、不参与跨档唯一性）。
 
 ### 4.6 存档形态与体积代价（交给 10）
 
@@ -253,7 +251,7 @@ func to_save_dict() -> Dictionary:
 
 | 体积项 | 量级 |
 |---|---|
-| 单实例 JSON（`instance_id` 36 字符 + `item_id` + `acquired_at` + `serial` + `source` 四键） | **约 120 B**（上游口径，**未含 `location`**），其中 **`source` 是大头** |
+| 单实例 JSON（`instance_id` 31 字符 + `item_id` + `acquired_at` + `serial` + `source` 四键） | **约 120 B**（上游口径，**未含 `location`**），其中 **`source` 是大头** |
 | 5000 实例 / 10000 实例 | **约 600 KB** / 约 1.2 MB |
 
 > **该数字是估算，切片必须实测**（§11 M6）：按朴素 JSON（含键名与 `source` 四键）逐字段相加会落在 150–200 B/实例区间，因此"是否折叠 `source` 短键、是否换二进制/压缩格式"必须用实测数据裁决。**`location` 另有固定成本（约 +20 B/实例），上游的 120 B 口径未含它**——M6 实测必须一并计入（不改变估算量级）。
@@ -485,7 +483,7 @@ transact(ops) -> { ok, reason, consumed, granted, discarded, mailed, sold: Array
 | 领取策略 | 常量 | **按 `acquired_at` 升序尽可能多领**（部分成功） | §5.10 的裁决；若上游改判为"整体拒绝"，只需改 `claim` 一处，`grant`、守恒式与 §10.8 其余各条均不受影响 |
 | **溢出策略（`overflow`）与主动丢弃（`discard`）** | 常量 / 结构 | **被动产出 → `mail`；主动操作 → `reject`**；丢弃**始终可用**（仅对仓库实例） | 都不是调参旋钮：`overflow` 只允许**收紧**（主动操作声明 `mail` 会被 `grant` 拒绝，裁决 17 / §5.10 R-M14）；`discard` 是死局逃生阀（裁决 16 / R-M13），不产出、无出口标签、归因单列 `&"discard"`，UI 二次确认（归 08） |
 | `count_index` 键数 | 由维度决定 | **42**（★ v0.22：切片 7 × 6） | **不可调，也不是容量上限**；与实例数无关（R-M2）。它是"类别 × 品质"的自然乘积 ⇒ **加类 / 加档都会抬高它**（M12） |
-| `instance_id` 形态 | 常量 | **UUIDv4**：36 字符小写、version 4、variant RFC 4122 | **不可配置**：格式一旦入档，改动即破坏幂等键与存档（§4.5） |
+| `instance_id` 形态 | 常量 | **插件产出的 UUID 字符串**：`8-4-4-12`、**31 字符**、3 个 `-`、小写 base36（`a–z0–9`）——★ v0.25：**由 `addons/minos_uuid_generator` 生成**，**不是 RFC 4122 的 v4**（无 version / variant 位），§4.5 | **不可配置**：格式一旦入档，改动即破坏幂等键与存档（§4.5）；**旧档里的 36 字符 id 仍然合法**（§4.5：`is_valid()` 只校验"本代口径"，**读档不因 id 变短而拒绝**） |
 | `serial` 起点 | 常量 | **1**（`0` 保留给非开盒来源） | 编号不复用；计数器持久、只增不减（§5.6） |
 | 物品品质色（`quality`） | UI 主题（`ItemConstants.QUALITY_COLORS`） | 1 `#B9C0C9` 白 / 2 `#4CAF50` 绿 / 3 `#4FA3E3` 蓝 / 4 `#A66CF2` 紫 / 5 `#F2B01E` 金 / 6 `#E0453C` 红（★ v0.22 六色两两不同） | 见 §5.1 / §9；指**物品品质**；**颜色只是 UI 常量、不影响平衡**（数量徽标格式同为 UI 常量：`1–999` 直显，`≥1000` 转 `1.2k`） |
 
@@ -513,7 +511,7 @@ transact(ops) -> { ok, reason, consumed, granted, discarded, mailed, sold: Array
    → ItemService.grant(item.item_id, { kind = &"gacha", series_id, box_seed, draw_index })   # 被动产出 → overflow 推导为 mail（R-M14）
        ├─ item_id 未注册 / kind 不在六值域 → 返回 null，状态完全不变
        ├─ instance_id 已存在 → 幂等命中：返回现存实例，不新建、不计数、**不改 location**
-       └─ 正常 → 生成 UUIDv4 → serial = ++serial_counters[item_id] → 追加实例 → 逐件判定落位
+       └─ 正常 → 生成 UUID → serial = ++serial_counters[item_id] → 追加实例 → 逐件判定落位
                  ├─ used + size <= capacity → location = warehouse → count_index[key] += 1、warehouse_used += size
                  └─ 否则 → location = mail → **`count_index` / `warehouse_used` 都不动**（`mail_count_index` +1 ⇒ `count(c, q, &"mail")` 增 1）；total_granted += 1（**两种落点都计入**，§5.3 守恒式）
    → 通知 08：落仓库 → 高亮该聚合条目；**开盒前的空间预告只能是下界式**（见 §9 文案规格；**不得**做件数预测）。`[补充]` **结算后的精确件数才允许出现**：落点为 mail 的实例由本次兑现汇总给出（"其中 M 件进了邮件，不会丢失"）——**结算前不得出现任何 M**
@@ -603,8 +601,8 @@ transact(ops)（06 转化 / 04 拆卸装配替换）→ 先预校验全部 ops�
 ### 10.1 实例与幂等（必测）
 
 1. **幂等**：对同一 `instance_id` 重复 `grant`（重放同一 `source`）→ `instances.size()` 不变、返回**同一个**实例、`total_granted` 与 `count` 均不变、**`location` 也不变**（幂等命中不得把邮件实例"顺手"搬进仓库，§4.3）。**"不得产生第二个实例"必须逐项断言**（核心 §14.2 铁律 8）。
-2. **UUID 唯一性**：连续生成 1e5 个 → **零碰撞**；逐个校验格式（36 字符、4 个 `-`、version nibble == `4`、variant 高 2 位 == `10`、全小写）。
-3. **UUID 不来自可复现种子**：同一 `(series_id, box_seed, draw_index)` 重放两次（不传 `instance_id`）→ 得到**不同**的 id（实例身份与抽取随机流无关）。
+2. **UUID 唯一性**：连续生成 2e4 个 → **零碰撞**；逐个校验格式（★ v0.25：**31 字符 / 4 段 8-4-4-12 / 小写 base36**——**不再是 36 字符 + version 4 + variant 10 的那个口径**）。★ **已知限制**：插件不提供熵入口，id 来自全局 `randi()` 流 ⇒ **全库禁止对全局 RNG 调 `seed()`**（否则重放会产出同一串 id、幂等键把新实例误判成重放）。
+3. **UUID 不来自可复现种子**：同一 `(series_id, box_seed, draw_index)` 重放两次（不传 `instance_id`）→ 得到**不同**的 id（实例身份与抽取随机流无关）。**注意边界（v0.25）**：这条只对"抽取用的私有 RNG"成立；**全局 `randi()` 被 `seed()` 之后本系统就守不住**（见上条的已知限制）。
 4. **`serial` 语义**：**判据（带作用域，§5.6）：① 只有开盒分配编号（`gacha`）② 迁移恢复编号（`migrate`，一次性、与 `serial_counters` 对齐）③ 除①②外任何来源的实例 `serial == 0`**（**不按来源枚举**——枚举会漏，判据不会漏）；开盒产出 `serial >= 1` 且对同一 `item_id` **严格单调、不复用**（销毁编号最大的实例后再开出一个，新编号 > 历史最大值）；**非开盒来源（举例：转化 / 拆除返还 / 解锁）产出 `serial == 0`** 且不推进 `serial_counters`（**举例不含"迁移"**——它属②）。**未知 `item_id`**：`grant(&"nope")` → 返回 `null`，`instances` 与计数器完全不变。
 
 ### 10.2 `count` 派生一致性（必测）

@@ -24,7 +24,7 @@ extends Resource
 ## v0.13 起这就是**全部物品**的合计——不再有"常规 9800 + 隐藏 200"的切分。
 const TOTAL_BP: int = 10000
 
-@export var box_id: String = ""                 # 稳定身份（归 01；`Uuid.v4()`，无转换点）
+@export var box_id: String = ""                 # 稳定身份（归 01；`IUuid.v4()`，无转换点）
 @export var series_id: StringName = &""         # 基础池的来源（引用 01 的 SeriesDef）
 @export var regular_count: int = 0              # 冻结元数据：物品数（C6 的依据）
 @export var socket_count: int = 0               # 冻结元数据：镶嵌位数（C4）
