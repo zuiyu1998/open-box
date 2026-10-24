@@ -73,6 +73,9 @@
 
 ### 4.1 `SeriesDef`（基础池模板，`src/gacha/defs/series_def.gd`）
 
+> **★ v0.26：套系也是内容（`res://src/gacha/content/*.tres`）。** `GachaCatalog._ready()` 自动载入该目录下的全部 `SeriesDef`（`load_series_content()`），**加一个套系 = 加一个 `.tres`，不改代码**。`regular_items` 是**对 02 的 `ItemDef` 资源（`src/items/content/items/*.tres`）的引用**——所以**物品内容必须先就位**（否则校验报 `null_item`）。
+> **切片内容**：`series_01`（品质 2「精良」= **8 件常规物品 / 3 个镶嵌位 / 15 次寿命 / `gem_cost = 30`**），8 件全部取自现有 42 个物品资源：`home_q1, home_q2, tool_material_q1, tool_material_q2, energy_q1, medical_q1, information_q1, electronic_q1`（六类，白/绿两档）；由 `tools/gen_series_content.gd` 生成（**改选材就改脚本里的 `PICKS` 再重跑**，不要手改 `.tres`）。
+
 ```gdscript
 class_name SeriesDef extends Resource
 @export var series_id: StringName = &""

@@ -15,6 +15,40 @@ var _series: Dictionary = {}
 ## module_id(String) -> ModuleDef
 var _modules: Dictionary = {}
 
+## ★ v0.26：**套系内容目录**——`SeriesDef` 的 `.tres` 放这里，`_ready()` 自动载入。
+## **加一个套系 = 加一个 `.tres`，不改代码**（与 `ItemCatalog` 的两个内容目录同一纪律）。
+## 内容里的 `regular_items` 是对 02 的 `ItemDef` 资源（`src/items/content/items/*.tres`）的**引用**，
+## 所以**物品内容必须先于套系内容就位**（否则 `validate()` 会报 `null_item` / 引用不存在）。
+const SERIES_CONTENT_DIR := "res://src/gacha/content"
+
+
+## ★ v0.26：从内容目录载入全部 `SeriesDef`（幂等；同 id 覆盖）。返回载入条数。
+func load_series_content() -> int:
+	var n := 0
+	var dir := DirAccess.open(SERIES_CONTENT_DIR)
+	if dir == null:
+		push_warning(
+			"GachaCatalog: 打不开套系内容目录 `%s`（没有套系内容时是正常的）" % SERIES_CONTENT_DIR
+		)
+		return 0
+	dir.list_dir_begin()
+	var fname := dir.get_next()
+	while fname != "":
+		if not dir.current_is_dir() and fname.ends_with(".tres"):
+			var path := SERIES_CONTENT_DIR + "/" + fname
+			if ResourceLoader.exists(path):
+				var res = load(path)
+				if res is SeriesDef:
+					register_series(res as SeriesDef)
+					n += 1
+		fname = dir.get_next()
+	dir.list_dir_end()
+	return n
+
+
+func _ready() -> void:
+	load_series_content()
+
 
 func register_series(def: SeriesDef) -> void:
 	if def == null or def.series_id == &"":

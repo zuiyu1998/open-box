@@ -498,8 +498,8 @@ transact(ops) -> { ok, reason, consumed, granted, discarded, mailed, sold: Array
 
 ```
 [不存在] ──grant()──▶ [warehouse] ──(仓库满时) grant()──▶ [mail]     （同一 item_id 也是两个独立实例）
-                          ▲                                  │
-                          └──────────claim()（只改 location）─┘
+						  ▲                                  │
+						  └──────────claim()（只改 location）─┘
 [warehouse] ──consume(ids, tag)──▶ 已销毁   ；[mail] 不可销毁（→ &"not_in_warehouse"，R-M6）
 ```
 
@@ -510,13 +510,13 @@ transact(ops) -> { ok, reason, consumed, granted, discarded, mailed, sold: Array
 ```
 01 结算 roll() → 物品（恰 1 个；void 结果不调用本系统） → 09 演出（本系统不参与）
    → ItemService.grant(item.item_id, { kind = &"gacha", series_id, box_seed, draw_index })   # 被动产出 → overflow 推导为 mail（R-M14）
-       ├─ item_id 未注册 / kind 不在六值域 → 返回 null，状态完全不变
-       ├─ instance_id 已存在 → 幂等命中：返回现存实例，不新建、不计数、**不改 location**
-       └─ 正常 → 生成 UUID → serial = ++serial_counters[item_id] → 追加实例 → 逐件判定落位
-                 ├─ used + size <= capacity → location = warehouse → count_index[key] += 1、warehouse_used += size
-                 └─ 否则 → location = mail → **`count_index` / `warehouse_used` 都不动**（`mail_count_index` +1 ⇒ `count(c, q, &"mail")` 增 1）；total_granted += 1（**两种落点都计入**，§5.3 守恒式）
+	   ├─ item_id 未注册 / kind 不在六值域 → 返回 null，状态完全不变
+	   ├─ instance_id 已存在 → 幂等命中：返回现存实例，不新建、不计数、**不改 location**
+	   └─ 正常 → 生成 UUID → serial = ++serial_counters[item_id] → 追加实例 → 逐件判定落位
+				 ├─ used + size <= capacity → location = warehouse → count_index[key] += 1、warehouse_used += size
+				 └─ 否则 → location = mail → **`count_index` / `warehouse_used` 都不动**（`mail_count_index` +1 ⇒ `count(c, q, &"mail")` 增 1）；total_granted += 1（**两种落点都计入**，§5.3 守恒式）
    → 通知 08：落仓库 → 高亮该聚合条目；**开盒前的空间预告只能是下界式**（见 §9 文案规格；**不得**做件数预测）。`[补充]` **结算后的精确件数才允许出现**：落点为 mail 的实例由本次兑现汇总给出（"其中 M 件进了邮件，不会丢失"）——**结算前不得出现任何 M**
-     开箱日志归 01 / 10（开出一个物品 = 新增一个实例，没有"计数 +1"这个动作；日志不记 location，由存档承担）
+	 开箱日志归 01 / 10（开出一个物品 = 新增一个实例，没有"计数 +1"这个动作；日志不记 location，由存档承担）
 ```
 
 ### 7.3 一次按实例销毁 / 按条件销毁（燃料 / 引擎 / 转化 / 丢弃统一路径）
@@ -525,7 +525,7 @@ transact(ops) -> { ok, reason, consumed, granted, discarded, mailed, sold: Array
 请求方（03 / 04 / 01 / 06）→ ItemService.consume(instance_ids, tag)   # 主动丢弃走 discard(ids)：同一实现，归因单列 &"discard"（R-M13）
    ├─ 任一 id 不存在 / 入参内重复 / **任一 id 在邮件** → { ok = false, reason }：instances、count_index、warehouse_used、两个计数器**完全不变**（原子，R-M6）
    └─ 全部有效 → 逐个从 instances 移除 → 对应键 count_index −1（归零即消键）、warehouse_used −= Σ size → total_consumed += n，记录 tag 与事件 → 07 只读取用做归因
-     （**不检查空间**：消耗不产出，永远不因容量失败）
+	 （**不检查空间**：消耗不产出，永远不因容量失败）
 
 请求方（★ v0.19：**模块不再消耗物品，04 已无此调用**；保留给"按类别 + 品质批量销毁"的将来请求方）→ ItemService.consume_by_filter(category, quality_floor, n)
    → 合格集（**只含仓库实例**）按 §5.5 排序 → 取前 n 个 → 一次性全部销毁 → 返回被销毁的 id 列表（size == n；n > 合格集大小 → 返回 []，状态不变）
@@ -696,4 +696,3 @@ transact(ops)（06 转化 / 04 拆卸装配替换）→ 先预校验全部 ops�
 | **M11** | **★ v0.19：金币与售卖价、模块金币价的联合标定** | **两种货币都已落地**（`gem` 原石 / `gold` 金币）：`CurrencyDef` 的"加一种货币 = 加一个 `.tres`，不改结构"已由金币验证过一次。**待标定的是数值**——**售卖价 `sell_gold`**（核心 **D26**）与 **`ModuleDef.gold_cost`**（核心 **D25**）**必须一起定**：金币有两条供给（任务奖励 / 售卖），售价偏高就会让"刷物品换金币"取代任务奖励，v0.19 的两道资源闸门当场失效（R16 / §5.14） |
 | **M12** | **★ v0.21 / v0.22：类别 7 × 品质 6 = 42 格的"心算压力"** | 42 格已顶到 P6 / R5 的边（§1 R5、§9 可心算）⇒ **对策写死为"按类别分组呈现"**（一行一类、一列一品质，`08` **R-31**），**不得**平铺 42 个数字。**若切片实测仍觉拥挤**，可选方向（需上游裁决）：①内容门控减少可见类别（M5）或可见品质档（M4 的数值释放）；②分组折叠——**不得**用"合并 `count_index` 键"实现（那会破坏"类别 × 品质"口径）。**加类 / 加档都属内容释放**（R11）⇒ **每次都要重测这一格数** |
 | **M10** | **`ItemInstance.source` 是否补 `box_id`**（**暂不加**） | **裁决：暂不加 `box_id`。** 理由：①**反向链路已够用**——`source.box_seed` + `series_id` → 查开箱日志（核心 §14.2.7 已含 `box_id`）→ 得到 `box_id`；②加键会**改本系统已实现并全绿的实例存档 schema**（本文件 134 个断言全绿、含字节级往返），而当前**没有任何机制需要"从实例直接定位盒子"**；③`source` 与日志**不得互相当主键**（`01` §4.4）。**触发条件：若将来要做"逐盒归因 ρ"（按盒子统计产出 / 期望），才需要给 `source` 补 `box_id`**；届时须走一次存档版本迁移并同步 `01` / `10` 的断言 |
-

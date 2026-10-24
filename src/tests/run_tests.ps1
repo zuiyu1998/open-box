@@ -43,6 +43,7 @@ $scenes = @(
     'res://src/gacha/pool/tests/test_pool_service.tscn',
     'res://src/gacha/tests/test_gacha_service.tscn',
     'res://src/gacha/tests/test_box_uses.tscn',
+    'res://src/gacha/tests/test_series_content.tscn',
     'res://src/devices/tests/test_device_service.tscn'
 )
 $timeoutMs = 120000

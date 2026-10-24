@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="SeriesDef" load_steps=11 format=3]
+
+[ext_resource type="Script" path="res://src/items/defs/item_def.gd" id="1_asged"]
+[ext_resource type="Resource" path="res://src/items/content/items/home_q1.tres" id="2_82nm8"]
+[ext_resource type="Resource" path="res://src/items/content/items/home_q2.tres" id="3_blra2"]
+[ext_resource type="Resource" path="res://src/items/content/items/tool_material_q1.tres" id="4_m8nso"]
+[ext_resource type="Resource" path="res://src/items/content/items/tool_material_q2.tres" id="5_bdwf0"]
+[ext_resource type="Resource" path="res://src/items/content/items/energy_q1.tres" id="6_swb7v"]
+[ext_resource type="Resource" path="res://src/items/content/items/medical_q1.tres" id="7_t7ohf"]
+[ext_resource type="Resource" path="res://src/items/content/items/information_q1.tres" id="8_5x0fh"]
+[ext_resource type="Resource" path="res://src/items/content/items/electronic_q1.tres" id="9_s6vww"]
+[ext_resource type="Script" path="res://src/gacha/defs/series_def.gd" id="10_ce53i"]
+
+[resource]
+script = ExtResource("10_ce53i")
+series_id = &"series_01"
+regular_items = Array[ExtResource("1_asged")]([ExtResource("2_82nm8"), ExtResource("3_blra2"), ExtResource("4_m8nso"), ExtResource("5_bdwf0"), ExtResource("6_swb7v"), ExtResource("7_t7ohf"), ExtResource("8_5x0fh"), ExtResource("9_s6vww")])
+uses_per_box = 15
