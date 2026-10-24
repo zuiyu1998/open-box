@@ -119,8 +119,9 @@ func _move(inst: ItemInstance, to_loc: StringName) -> void:
 		warehouse_used += sz
 
 
+## ★ v0.26：容量判定**同时算盲盒的占位**（盲盒与物品共用同一份容量账）。
 func _fits(size: int) -> bool:
-	return warehouse_used + size <= warehouse_capacity
+	return warehouse_used + box_warehouse_used + size <= warehouse_capacity
 
 
 ## §5.5 挑选顺序：( quality 升序 , acquired_at 升序 , instance_id 字典序 )
@@ -690,11 +691,57 @@ func count(
 
 ## { used, capacity, ratio }，供 08 直接画占比条（§5.9）。
 ## **04/05/06/08 一律只读它，不得自己求和。**
+## ★ v0.26：`used` = 仓库内物品实例的 `size` **＋ 仓库内盲盒的占位**（每盒 1 单位）——
+##   **盲盒与物品共用同一份容量账**（用户裁决："盲盒同样是物品"）。
 func warehouse_usage() -> Dictionary:
+	var used := warehouse_used + box_warehouse_used
 	var ratio := 0.0
 	if warehouse_capacity > 0:
-		ratio = float(warehouse_used) / float(warehouse_capacity)
-	return {"used": warehouse_used, "capacity": warehouse_capacity, "ratio": ratio}
+		ratio = float(used) / float(warehouse_capacity)
+	return {"used": used, "capacity": warehouse_capacity, "ratio": ratio}
+
+
+# ── ★ v0.26：盲盒的仓库占位（与物品共用同一份容量账）──────────────────────────
+## **为什么放在 02**：容量必须**只有一个判定点**（§5.9 / §10.6）。盲盒的语义归 01，
+## 但"放得下 / 放不下"与"已用多少"只能由本类的账本回答——否则又会出现两套容量副本。
+## 01 只**报告事实**（新建 / 移动 / 销毁），判定与记账一律在这里。
+
+## 盲盒在仓库里占的容量之和（派生值，不入档：载入后由 01 逐个 `place_box()` 重建）。
+var box_warehouse_used: int = 0
+
+
+## 仓库现在还放得下一个 `size` 单位的盲盒吗？（盒子固定 1 单位，见 `Box.size`）
+func box_fits(sz: int = 1) -> bool:
+	return warehouse_used + box_warehouse_used + sz <= warehouse_capacity
+
+
+## 给一个新盒子**判定落位**：放得下 → `warehouse`（并记账）；放不下 → `mail`（不记账）。
+## **被动产出永不丢失**（P5）：盲盒由任务 / 里程碑发放，玩家没有主动要求这一刻，
+## 所以与物品的被动产出同一口径——**进邮件，不是拒绝**。
+func place_box(sz: int = 1) -> StringName:
+	if box_fits(sz):
+		box_warehouse_used += sz
+		return ItemConstants.LOC_WAREHOUSE
+	return ItemConstants.LOC_MAIL
+
+
+## 盒子被摧毁（`uses_remaining` 归零）时释放它占的那一份容量。
+func release_box(sz: int = 1) -> void:
+	box_warehouse_used = maxi(box_warehouse_used - sz, 0)
+
+
+## 领取：把邮件里的盒子搬回仓库（**放得下才搬**，调用方据此实现"部分成功"）。
+func claim_box(sz: int = 1) -> bool:
+	if not box_fits(sz):
+		return false
+	box_warehouse_used += sz
+	return true
+
+
+## 读档时**按存档里的位置**重建盲盒占位：位置是玩家的既成事实，**不重新判定落位**
+## （重新判定等于篡改存档：仓库里的盒子可能因此被"搬"进邮件）。
+func restore_box_occupancy(sz: int = 1) -> void:
+	box_warehouse_used += sz
 
 
 ## 邮件位置的实例，按 (acquired_at 升序, instance_id 字典序)（§5.5 同序）。
@@ -920,6 +967,7 @@ func reset() -> void:
 	count_index.clear()
 	mail_count_index.clear()
 	warehouse_used = 0
+	box_warehouse_used = 0      # ★ v0.26：盲盒占位也要清（否则测试之间会串账）
 	serial_counters.clear()
 	total_granted = 0
 	total_consumed = 0

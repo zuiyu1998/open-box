@@ -63,6 +63,9 @@ const REASON_NOT_IN_MAIL := &"not_in_mail"
 ## ★ v0.20：该物品**不可售**（`ItemDef.sell_gold == 0`）——售卖入口专用
 const REASON_NOT_SELLABLE := &"not_sellable"
 const REASON_NO_SPACE := &"no_space"  # 空间问题的唯一原因码（transact 与 claim 共用）
+## ★ v0.26：**这个盒子在邮件里**——邮件不是"可用持有"，所以不能配置 / 兑现（与物品同一纪律）。
+## 专门给盲盒用：物品侧的同一情形用 `not_in_warehouse`，**两者不得混用**（原因码要能指认对象）。
+const REASON_BOX_IN_MAIL := &"box_in_mail"
 
 # ── 事务 op 类型（02-item.md §5.11）────────────────────────────────────────────
 const OP_GRANT := &"grant"

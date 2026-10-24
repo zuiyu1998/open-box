@@ -396,11 +396,11 @@ func _test_unsocket_works_when_warehouse_full() -> void:
 	var f := _new_state(1)
 	var st: GameState = f["state"]
 	var bx: Box = f["boxes"][0]
-	ItemService.warehouse_capacity = 10
+	ItemService.warehouse_capacity = 11
 	ok(PoolService.socket(st, bx.box_id, &"mod_ban_costly", 0)["ok"], "先镶嵌（金币扣款）")
 	for _i in 5:
 		ItemService.grant(&"s01_02", {"kind": ItemConstants.KIND_UNLOCK})
-	eq(ItemService.warehouse_usage()["used"], 10, "仓库恰好占满（5 件 × size 2）")
+	eq(ItemService.warehouse_usage()["used"], 11, "仓库恰好占满（5 件 × size 2 + 盲盒 1 单位）")
 	var inst_before := ItemService.instances.size()
 	var gold_before := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
 
@@ -408,7 +408,7 @@ func _test_unsocket_works_when_warehouse_full() -> void:
 	ok(u["ok"], "**仓库满也能拆卸**（旧口径的 no_space 拒绝已随零返还作废）")
 	eq(bx.occupied_count(), 0, "该位被置空")
 	eq(ItemService.instances.size(), inst_before, "实例列表逐项不变（没有返还实例）")
-	eq(ItemService.warehouse_usage()["used"], 10, "占用不变")
+	eq(ItemService.warehouse_usage()["used"], 11, "占用不变")
 	eq(
 		ItemService.currency_balance(ItemConstants.CURRENCY_GOLD),
 		gold_before,

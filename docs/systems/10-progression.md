@@ -239,14 +239,14 @@ var quality: int = 1                 # 该物品的品质，取自 `ItemDef.qual
     "total_consumed": 186,
     "total_granted": 191
   },
-  "pending_boxes": [
+  "pending_boxes": [   // ★ v0.26：每个盒子带 location（warehouse/mail）与 size（固定 1），旧档缺键回填 warehouse / 1
     { "acquired_tick": 1729999990, "box_id": "3f2c8a51-9c47-42e0-8a17-6b0d5e94c7f2",
       "item_pool": { "box_id": "3f2c8a51-9c47-42e0-8a17-6b0d5e94c7f2", "regular_count": 8, "revision": 4, "series_id": "series_01", "socket_count": 3 },
       "modules": [ { "index": 1, "module_id": "mod_ban_s01_05", "quality": 2, "socketed_at": 1730000000 } ],
-      "series_id": "series_01", "source": "task_regular_a", "uses_remaining": 14 },
+      "location": "warehouse", "series_id": "series_01", "size": 1, "source": "task_regular_a", "uses_remaining": 14 },
     { "acquired_tick": 1730000001, "box_id": "b71e0d38-4a95-4f6c-9d20-1c8a7f3b5e46",
       "item_pool": { "box_id": "b71e0d38-4a95-4f6c-9d20-1c8a7f3b5e46", "regular_count": 8, "revision": 0, "series_id": "series_01", "socket_count": 3 },
-      "modules": [], "series_id": "series_01", "source": "task_regular_b", "uses_remaining": 15 }
+      "location": "mail", "modules": [], "series_id": "series_01", "source": "task_regular_b", "uses_remaining": 15 }
   ],
   "progression": {
     "collected": { "series_01": { "s01_01": true, "s01_02": true, "s01_04": true } }, "current_phase": "opening",

@@ -412,11 +412,11 @@ func _test_socket_gold_and_replace() -> void:
 	var full := _new_state(1000, MOD_GOLD, 1)
 	var st3: GameState = full["state"]
 	var bx3: Box = full["box"]
-	ItemService.warehouse_capacity = 4
+	ItemService.warehouse_capacity = 5
 	ok(DeviceService.socket(st3, bx3.box_id, &"mod_ban_sd5", 0)["ok"], "先镶嵌")
 	for _i in 2:
 		ItemService.grant(&"s01_01", {"kind": ItemConstants.KIND_UNLOCK})
-	eq(ItemService.warehouse_usage()["used"], 4, "仓库占满")
+	eq(ItemService.warehouse_usage()["used"], 5, "仓库占满（2 件 × size 2 + 盲盒 1 单位）")
 	var gold3 := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
 	var n3 := ItemService.instances.size()
 	ok(PoolService.unsocket(st3, bx3.box_id, 0)["ok"], "**仓库满也能拆卸**（零返还 ⇒ 无空间问题）")
@@ -426,6 +426,8 @@ func _test_socket_gold_and_replace() -> void:
 
 func _test_starting_state_has_no_deadlock() -> void:
 	print("— T13 ③ / T15 ③：开局（装置 + 原石 + 金币）⇒ 开第一个盒子、装第一个模块都不会被闸门挡住")
+	_setup()                       # ★ v0.26：先清账（盲盒占位会跨用例累积，不重置会串账）
+	ItemService.warehouse_capacity = 1000
 	var st := GameState.new_game()
 	ok(st.has_device(), "开局有一台装置")
 	ok(DeviceService.has_device(st), "DeviceService.has_device() = true")

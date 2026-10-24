@@ -31,6 +31,7 @@ func _ready() -> void:
 	_test_two_spend_points_share_counter()
 	_test_zero_by_socket_destroys_box()
 	_test_device_gate()
+	_test_box_is_a_held_thing()
 
 	print("\n=== 结果：%d 通过 / %d 失败 ===" % [_pass, _fail])
 	get_tree().quit(0 if _fail == 0 else 1)
@@ -924,6 +925,83 @@ func _test_zero_by_socket_destroys_box() -> void:
 # ══════════════════════════════════════════════════════════════════════════════
 #  ⑫ 设备是硬门槛（v0.14 裁决：开盒与装模块都要有设备）
 # ══════════════════════════════════════════════════════════════════════════════
+func _test_box_is_a_held_thing() -> void:
+	# ★ v0.26（用户裁决）：**盲盒同样是物品的一类**——它有位置（仓库 / 邮件）、占 1 单位容量，
+	#   与物品记进**同一份容量账**；邮件里的盒子不可配置 / 兑现；放不下就进邮件；能自己领回来。
+	_setup()
+	ItemService.warehouse_capacity = 2          # 只放得下 2 个盒子
+	var st := GameState.new_game()
+
+	var b1 := GachaService.grant_box(st, &"series_q2", 1, &"test")[0]
+	eq(b1.location, ItemConstants.LOC_WAREHOUSE, "放得下 ⇒ 落仓库")
+	eq(b1.size, 1, "每盒固定 1 单位")
+	eq(ItemService.warehouse_usage()["used"], 1, "**仓库已用把盲盒算进去**（used = 1）")
+
+	var b2 := GachaService.grant_box(st, &"series_q2", 1, &"test")[0]
+	eq(ItemService.warehouse_usage()["used"], 2, "两个盒子 = 2 单位")
+	var b3 := GachaService.grant_box(st, &"series_q2", 1, &"test")[0]
+	eq(b3.location, ItemConstants.LOC_MAIL, "仓库满 ⇒ 新盒子**进邮件**（被动产出永不丢失）")
+	eq(ItemService.warehouse_usage()["used"], 2, "邮件盒子**不占**仓库容量")
+	eq(st.pending_boxes.size(), 3, "邮件里的盒子仍在清单里（是玩家的）")
+	eq(st.mail_boxes().size(), 1, "mail_boxes() 只含邮件里的那一个")
+
+	# 邮件里的盒子：**不可兑现**
+	var r := GachaService.redeem(st, b3, 30)
+	eq(r.ok, false, "邮件盒子兑现被拒")
+	eq(r.error, ItemConstants.REASON_BOX_IN_MAIL, "原因码 = box_in_mail")
+	eq(b3.uses_remaining, SeriesDef.expected_initial_uses(2), "被拒 ⇒ 一次寿命都不扣")
+	eq(ItemService.instances.size(), 0, "被拒 ⇒ 不产出实例")
+
+	# 邮件里的盒子：**不可镶嵌**
+	var sock := PoolService.socket(st, b3.box_id, &"mod_ban_sd1", 0)
+	eq(sock["ok"], false, "邮件盒子镶嵌被拒")
+	eq(sock["reason"], ItemConstants.REASON_BOX_IN_MAIL, "原因码同样是 box_in_mail")
+	eq(b3.modules[0], null, "被拒 ⇒ modules 未写入")
+	eq(b3.uses_remaining, SeriesDef.expected_initial_uses(2), "被拒 ⇒ 寿命未扣")
+
+	# 腾出空间后可领回
+	ItemService.warehouse_capacity = 3
+	var claim := GachaService.claim_boxes(st)
+	eq(claim["ok"], true, "腾出空间 ⇒ 领回成功")
+	eq(b3.location, ItemConstants.LOC_WAREHOUSE, "领回后位置 = 仓库")
+	eq(ItemService.warehouse_usage()["used"], 3, "领回后占 3 单位")
+	eq(st.mail_boxes().size(), 0, "邮件里不再有盒子")
+
+	# 领回后就能正常兑现
+	var r2 := GachaService.redeem(st, b3, 0)
+	ok(r2.ok, "领回后可以兑现")
+	eq(b3.uses_remaining, SeriesDef.expected_initial_uses(2) - 1, "兑现扣 1 次寿命")
+
+	# 「放不下就部分成功」
+	ItemService.warehouse_capacity = 3
+	var b4 := GachaService.grant_box(st, &"series_q2", 2, &"test")
+	eq(b4[0].location, ItemConstants.LOC_MAIL, "满仓时新盒进邮件（第 1 个）")
+	eq(b4[1].location, ItemConstants.LOC_MAIL, "满仓时新盒进邮件（第 2 个）")
+	# 注意：前面那次兑现产出了 1 件物品（`size == 2`）——**物品与盲盒共用同一份容量账**，
+	# 所以"只放得下 1 个盒子"要按**当前实际占用**来设，不能按"3 个盒子"来设。
+	ItemService.warehouse_capacity = int(ItemService.warehouse_usage()["used"]) + 1
+	var claim2 := GachaService.claim_boxes(st)
+	eq(claim2["ok"], false, "只放得下 1 个 ⇒ **部分成功**（ok = false）")
+	eq(claim2["reason"], ItemConstants.REASON_NO_SPACE, "原因码 = no_space")
+	eq(claim2["claimed"].size(), 1, "已领取 1 件")
+	eq(claim2["remaining"].size(), 1, "还剩 1 件")
+
+	# **销毁才释放空间**：开盒本身不还那 1 单位
+	_setup()
+	ItemService.warehouse_capacity = 10
+	var st2 := GameState.new_game()
+	var solo := GachaService.grant_box(st2, &"series_q2", 1, &"test")[0]
+	solo.uses_remaining = 1
+	eq(ItemService.warehouse_usage()["used"], 1, "建盒后占 1 单位")
+	var used_before_redeem: int = int(ItemService.warehouse_usage()["used"])
+	var r3 := GachaService.redeem(st2, solo, 0)
+	ok(r3.ok, "开最后一刀前仍能兑现")
+	ok(solo.is_exhausted(), "归零 ⇒ 盒子被摧毁")
+	# 开盒本身**不还**那 1 单位（盒子还在）；摧毁时才还。兑现产出的物品照常占位。
+	eq(ItemService.warehouse_usage()["used"], used_before_redeem - 1 + 2,
+		"剩下的占用 = 产出的物品（2 单位）：被摧毁的那 1 单位已释放")
+	eq(st2.pending_boxes.size(), 0, "盒子离开清单")
+
 
 func _test_device_gate() -> void:
 	print("— ⑫ 设备是硬门槛：无设备 ⇒ 两条入口都拒绝且**不消耗寿命**；开局送一台 ⇒ 实测可开盒")

@@ -43,15 +43,41 @@ func has_box(box_id: String) -> bool:
 	return find_box(box_id) != null
 
 
+## ★ v0.26：**盲盒与物品一样有位置**——仓库里的盒子可配置 / 兑现，邮件里的不可用。
+## 这两个查询是**只读派生**（不改任何状态、不建第二份清单）。
+func boxes_in(loc: StringName) -> Array[Box]:
+	var out: Array[Box] = []
+	for b in pending_boxes:
+		if b.location == loc:
+			out.append(b)
+	return out
+
+
+## 邮件里的盒子，按 `(acquired_tick 升序, box_id 字典序)`——与物品领取同一顺序（§5.5 同序）。
+func mail_boxes() -> Array[Box]:
+	var out := boxes_in(ItemConstants.LOC_MAIL)
+	out.sort_custom(func(a: Box, b: Box) -> bool:
+		if a.acquired_tick != b.acquired_tick:
+			return a.acquired_tick < b.acquired_tick
+		return a.box_id < b.box_id)
+	return out
+
+
 ## **v0.14：归零即移除（含镶嵌导致）——盒子离开清单的唯一原因就是"使用次数归零"。**
 ## 本方法把盒子连同它的 `item_pool` 与 `modules` 一起移除、**不再存在**。
 ## 两条导致归零的路径**共用** `spend_use()`：**装模块**（`PoolService.socket()`）与**兑现**
 ## （`GachaService.redeem()`）。**不存在"用尽才消耗"的缓冲**：镶嵌把次数扣到 0 时立即移除，
 ## 哪怕这个盒子从未被兑现过（那是**合法路径**，不做防御性拦截）。
+## ★ v0.26：盒子被摧毁 ⇒ **释放它占的仓库容量**（盲盒与物品共用同一份容量账）。
+##   释放动作放在这里，是因为 `remove_box()` 是**盒子离开清单的唯一出口**——
+##   在这里做，就不会出现"销毁了却没还空间"的第二条路径。
 func remove_box(box_id: String) -> bool:
 	for i in pending_boxes.size():
 		if pending_boxes[i].box_id == box_id:
+			var b := pending_boxes[i]
 			pending_boxes.remove_at(i)
+			if b.location == ItemConstants.LOC_WAREHOUSE:
+				ItemService.release_box(b.size)
 			return true
 	return false
 
@@ -175,4 +201,9 @@ static func box_from_dict(d: Dictionary) -> Box:
 		if series != null:
 			backfill = SeriesDef.expected_initial_uses(series.series_quality)
 	# 套系解析不到时 `Box.from_dict` 自己会返回 null（不静默降级），补不补都无所谓
-	return Box.from_dict(d, backfill)
+	var b := Box.from_dict(d, backfill)
+	if b != null and b.location == ItemConstants.LOC_WAREHOUSE:
+		# ★ v0.26：读档时**按存档里的位置重建仓库占位**（不重新判定落位——位置是既成事实；
+		#   重新判定会把"仓库里的盒子"按当前容量重新分配，等于篡改存档）。
+		ItemService.restore_box_occupancy(b.size)
+	return b

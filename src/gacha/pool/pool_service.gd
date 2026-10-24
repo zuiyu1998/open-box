@@ -194,6 +194,10 @@ static func socket(state: GameState, box_id: String, module_id: StringName, slot
 		#   这里在**任何消耗之前**返回 ⇒ **一次寿命都不扣**（与"校验失败不扣次数"同一纪律）。
 		#   注意：设备只是**前置条件**，本函数仍是池子数据的**唯一写入方**（不变量不变）。
 		return _reject(R_NO_DEVICE)
+	if b.location != ItemConstants.LOC_WAREHOUSE:
+		# ★ v0.26：**邮件里的盒子不可配置**（与物品同一纪律：邮件不是"可用持有"）。
+		#   在任何消耗之前拒绝（不扣寿命、不扣金币、不改 modules）。
+		return _reject(ItemConstants.REASON_BOX_IN_MAIL)
 	if b.item_pool == null:
 		return _reject(R_POOL_INVALID)
 	if slot < 0 or slot >= b.modules.size():
@@ -269,6 +273,9 @@ static func unsocket(state: GameState, box_id: String, slot: int) -> Dictionary:
 	var b := _find(state, box_id)
 	if b == null:
 		return _reject(R_BOX_NOT_FOUND)
+	if b.location != ItemConstants.LOC_WAREHOUSE:
+		# ★ v0.26：邮件里的盒子连"拆"也不做（配置权属于"可用持有"）——不消耗任何东西
+		return _reject(ItemConstants.REASON_BOX_IN_MAIL)
 	if slot < 0 or slot >= b.modules.size():
 		return _reject(R_BAD_SLOT)
 	var m := b.modules[slot]

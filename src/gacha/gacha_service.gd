@@ -75,11 +75,41 @@ static func grant_box(
 			break
 		b.modules = PoolService.empty_slots(series.socket_count)
 		b.uses_remaining = series.uses_per_box    # ★ v0.14：初始使用次数（按套系品质）
+		b.size = 1                                # ★ v0.26：每盒固定 1 单位（记进同一份容量账）
+		# ★ v0.26：**落位由 02 判定**（容量只有一个判定点）——放得下进仓库，放不下进邮件。
+		#   盲盒是**被动产出**（任务 / 里程碑发放），所以与物品同一口径：永不丢失。
+		b.location = ItemService.place_box(b.size)
 		b.source = source
 		b.acquired_tick = int(Time.get_ticks_msec())
 		state.add_box(b)
 		out.append(b)
 	return out
+
+
+## ★ v0.26：**领取邮件里的盒子**——盲盒也是物品，所以它和物品一样"放不下就进邮件、要自己领回来"。
+##
+## 与 `ItemService.claim_all()` **同一套纪律**：按 `(acquired_tick, box_id)` 升序逐件判定，
+## **放得下才搬**（占 1 单位），放不下的留在邮件 —— **部分成功**，
+## 返回 `{ok, reason, claimed, remaining}`（`ok` = 全部领回；否则 `reason = no_space`）。
+## **只改 `location`**：不新建盒子、不改 `uses_remaining` / `modules` / `item_pool`。
+static func claim_boxes(state: GameState) -> Dictionary:
+	var claimed: Array[String] = []
+	var remaining: Array[String] = []
+	if state == null:
+		return {"ok": false, "reason": R_BOX_NOT_FOUND, "claimed": claimed, "remaining": remaining}
+	for b in state.mail_boxes():
+		if ItemService.claim_box(b.size):
+			b.location = ItemConstants.LOC_WAREHOUSE
+			claimed.append(b.box_id)
+		else:
+			remaining.append(b.box_id)
+	var all_claimed := remaining.is_empty()
+	return {
+		"ok": all_claimed,
+		"reason": R_OK if all_claimed else ItemConstants.REASON_NO_SPACE,
+		"claimed": claimed,
+		"remaining": remaining,
+	}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -190,6 +220,10 @@ static func redeem(state: GameState, box: Box, gem_cost: int, seed_override: int
 	if not state.has_device():
 		# ★ v0.14 裁决：**设备是硬门槛**——没有设备就不能开盒（也不消耗任何一次寿命）
 		return GachaResult.failure(R_NO_DEVICE)
+	if box.location != ItemConstants.LOC_WAREHOUSE:
+		# ★ v0.26：**邮件里的盒子不可用**（与物品同一纪律：邮件不是"可用持有"）。
+		# 链首就拒，**什么都不消耗**（寿命 / 原石 / draw_index 全都不动）。
+		return GachaResult.failure(ItemConstants.REASON_BOX_IN_MAIL)
 	if gem_cost < 0:
 		return GachaResult.failure(R_BAD_EVALUATION)
 	if ItemService.currency_balance(ItemConstants.CURRENCY_GEM) < gem_cost:
@@ -296,6 +330,9 @@ static func redeem_batch(
 				reason = R_BOX_NOT_FOUND
 			elif GachaCatalog.get_series(b.series_id) == null:
 				reason = R_BAD_SERIES
+			elif b.location != ItemConstants.LOC_WAREHOUSE:
+				# ★ v0.26：批量兑现里**只要混进一个邮件盒子**，整批就拒（邮件不是可用持有）
+				reason = ItemConstants.REASON_BOX_IN_MAIL
 			else:
 				available += maxi(b.uses_remaining, 0)
 		if reason == R_OK and available < k:

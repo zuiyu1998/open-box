@@ -39,6 +39,19 @@ extends Resource
 ##   改这条曲线等于改 `C/d`，**必须同步重标 D17**（P7 唯一的跨池锚点）。
 @export var uses_remaining: int = 0                      # 0 = 用尽 ⇒ 盒子被摧毁
 
+## ★ v0.26（用户裁决）：**盲盒同样是"持有物"的一类**——它和物品一样有**位置**与**体积**。
+##
+## · `location ∈ {warehouse, mail}`（与 `ItemInstance.location` **同一取值域**，取自
+##   `ItemConstants.LOC_WAREHOUSE / LOC_MAIL`）：**仓库里的盒子可以配置 / 兑现；
+##   邮件里的盒子不可用**（与物品同一纪律：邮件不是"可用持有"）。
+## · `size`：**每盒固定 1 单位**（用户裁决），并且**与物品的 `size` 记进同一份容量账**
+##   （`ItemService.warehouse_usage()` 同时算物品与盒子）——**容量仍然只有一个判定点**。
+##   后果（必须正视）：**囤盒子本身会占地方**，仓库满时新盒子进邮件（被动产出永不丢失）。
+## · 盒子进仓库/邮件的判定发生在 `GachaService.grant_box()`（问 02 的 `place_box()`）；
+##   **开盒不释放空间**（盒子还在），**只有"次数归零被摧毁"才释放那 1 单位**。
+@export var location: StringName = &"warehouse"           # warehouse / mail
+@export var size: int = 1                                # 每盒固定 1 单位（记进同一份容量账）
+
 
 ## 是否已用尽（用尽 ⇒ 盒子离开囤积清单，`modules` 随之消失）。
 func is_exhausted() -> bool:
@@ -143,6 +156,8 @@ func to_dict() -> Dictionary:
 		"source": String(source),
 		"acquired_tick": acquired_tick,
 		"uses_remaining": uses_remaining,
+		"location": String(location),
+		"size": size,
 		"item_pool": pool_subset,
 		"modules": modules_to_sparse_array(),
 	}
@@ -183,4 +198,8 @@ static func from_dict(d: Dictionary, uses_when_missing: int = 0) -> Box:
 	b.acquired_tick = int(d.get("acquired_tick", 0))
 	# ★ 键存在 ⇒ 用档里的值（含 0，那是"已用尽"的合法状态）；缺键 ⇒ 用调用方给的补齐值
 	b.uses_remaining = int(d["uses_remaining"]) if d.has("uses_remaining") else uses_when_missing
+	# ★ v0.26：位置与体积。**旧档没有这两个键 ⇒ 一律回填 `warehouse` / 1**
+	#   （旧档里的盒子在旧口径下根本不在仓库/邮件里，回填"仓库"是唯一不丢东西的选择）。
+	b.location = StringName(d.get("location", String(ItemConstants.LOC_WAREHOUSE)))
+	b.size = int(d.get("size", 1))
 	return b
