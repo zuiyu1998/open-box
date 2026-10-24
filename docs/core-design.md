@@ -1,6 +1,6 @@
 # 《Open Box》核心设计书
 
-- 版本：**v0.26（盲盒也是持有物：占仓库 1 单位、放不下进邮件；邮件里的盒子不可用）**
+- 版本：**v0.27（新增第 11 个系统：流程管理——菜单 / 游戏 / 设置三个节点）**
 - 历史版本：`docs/archive/core-design-v0.1.md` ~ `v0.5.md`
 - 引擎：Godot 4.5（Forward+）
 - 已定前提：**纯单人** / **纯游戏内货币，无数值付费** / 社交**留接口不实现**
@@ -1124,6 +1124,8 @@ res://
     gacha_service.gd      # ★ 两层入口：纯函数层 roll(evaluation, seed) -> GachaResult（只抽样）
                           #   有状态层 redeem(state, box, seed_override := -1) / redeem_batch(state, boxes, k, seed_overrides := [])
                           #   以及 grant_box(state, series_id, count, source := &"") -> Array[Box]
+    flow_service.gd       # ★ v0.27：流程管理（autoload）——三个节点 `menu` / `game` / `settings`
+                          #   + 白名单状态机 + 唯一换场景入口（`apply_scene()`）；不碰任何游戏数据
     device_catalog.gd     # ★ v0.18：**装置注册表**（autoload）——`device_id` → `DeviceDef`（等级曲线）；
                           #   开局那台的内容配置 = `res://src/devices/content/dev_basic_q1.tres`
     device_service.gd     # ★ v0.17 / v0.18：设备系统的**薄入口**（**静态类，不注册 autoload**——它不持状态）
@@ -1942,6 +1944,29 @@ res://
 > - **"盲盒不占仓库容量"作废**；**"囤积无成本"**这条不对称随之关闭。
 > - **新增原因码 `box_in_mail`**；**新增 `claim_boxes()`**（邮件盒子领取，与物品 `claim_all()` 同纪律）。
 > - **存档**：`Box` 落盘新增 `location` / `size` 两键，**旧档缺键回填 `warehouse` / 1**（"新增字段 + 载入补齐"，不改 `schema_version`，与 `uses_remaining` 的先例同处理）。
+
+---
+
+### 16.22 v0.26 → v0.27
+
+**新增第 11 个系统：流程管理**（`docs/systems/11-flow.md`，代码 `src/flow/flow_service.gd` → autoload `FlowService`）。
+
+用户裁决原话："**新增一个系统，该系统负责整个游戏的流程管理，当前流程为游戏菜单，游戏场景，设置**"（追问确认：**就是三个节点**，"四个场景"是口误；**设置可从任意节点进入并返回来源**；作为**第 11 个系统**独立编号）。
+
+**四条含义**：
+1. **三个节点**：`menu`（游戏菜单）/ `game`（游戏场景）/ `settings`（设置）——**逐字**，存档与日志都用这三个字符串。
+2. **唯一事实来源**：`FlowService.current`。任何面板 / 场景**不得自己记"我在哪"**；转换必须过**白名单**（`menu ↔ game`、`menu ↔ settings`、`game ↔ settings`），**禁止原地切换与未知节点**，被拒时**状态不变、信号不发**。
+3. **设置是覆盖层**：从任意节点可进，`settings_return_to` 记住来源，`close_settings()` 转回来源（无来源 ⇒ 菜单），**离开即清空记忆**（只服务一次返回）。
+4. **唯一换场景入口**：`apply_scene()`（`change_scene_to_file` 只允许出现在这一处）；**本系统不碰游戏数据**——不读档、不写档、不改 `GameState` / `ItemService`，"进游戏要不要读档"由 10 订阅 `flow_changed` 自行决定。
+
+| 项 | v0.26 | v0.27 |
+|---|---|---|
+| **系统数** | 10 个 | **11 个**（`11-flow.md`，编号不复用） |
+| **游戏流程** | 无系统负责（各场景自己换场景） | **11 独家负责**：状态机 + 白名单 + 单一换场景点 |
+| **设置入口** | 未定义 | **从任意节点可进、返回来源**（`settings_return_to`） |
+| **不变** | — | **C1–C6、P1–P7、10 个既有系统的边界与数据所有权、存档格式（本系统不入档）** |
+
+> **代价（一处）**：多了一条必须被遵守的入口约定——**场景切换只能走 `FlowService`**，否则"状态说在游戏、画面在菜单"。**判据**：全库 `grep change_scene_to_file` 只应命中 `flow_service.gd`。
 
 ---
 

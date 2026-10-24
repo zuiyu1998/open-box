@@ -11,7 +11,8 @@ config_version=5
 [application]
 
 config/name="open-box"
-run/main_scene="uid://cob0testitem1"
+run/main_scene="uid://cflowmenu01"
+run/disable_stdout=true
 config/features=PackedStringArray("4.5", "Forward Plus")
 config/icon="res://icon.svg"
 
@@ -21,6 +22,7 @@ ItemCatalog="*res://src/items/item_catalog.gd"
 ItemService="*res://src/items/item_service.gd"
 GachaCatalog="*res://src/gacha/gacha_catalog.gd"
 DeviceCatalog="*res://src/devices/device_catalog.gd"
+FlowService="*res://src/flow/flow_service.gd"
 _mcp_game_helper="*res://addons/godot_ai/runtime/game_helper.gd"
 
 [editor_plugins]
