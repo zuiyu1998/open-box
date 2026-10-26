@@ -21,6 +21,11 @@ const CATEGORY_CONTENT_DIR := "res://src/items/content/categories"
 ## `ItemConstants` 的六档阶梯生成**（改数值 = 改常量后重跑生成器，不要手改 `.tres`）。
 const ITEM_CONTENT_DIR := "res://src/items/content/items"
 
+## ★ v0.28：**货币（资源）的内容目录**——`CurrencyDef` 的 `.tres` 放这里，`_ready()` 自动载入。
+## **必须要有**：V6 要求开局必发的 `gem` / `gold` 都已注册，否则 `grant_currency()` 走
+## `transact` 会被 `unknown_currency` 拒掉，而**开局资源静默变成 0**（开盒直接卡死）。
+const CURRENCY_CONTENT_DIR := "res://src/items/content/currencies"
+
 ## item_id(String) -> ItemDef
 var _by_id: Dictionary = {}
 ## 派生索引键 "<category>:<quality>"(String) -> item_id(StringName)
@@ -118,10 +123,35 @@ func load_item_content() -> int:
 	return n
 
 
+## ★ v0.28：从内容目录载入全部 `CurrencyDef`（幂等；同 id 覆盖）。返回载入条数。
+func load_currency_content() -> int:
+	var n := 0
+	var dir := DirAccess.open(CURRENCY_CONTENT_DIR)
+	if dir == null:
+		push_warning(
+			"ItemCatalog: 打不开货币内容目录 `%s`（没有货币内容时是正常的）" % CURRENCY_CONTENT_DIR
+		)
+		return 0
+	dir.list_dir_begin()
+	var fname := dir.get_next()
+	while fname != "":
+		if not dir.current_is_dir() and fname.ends_with(".tres"):
+			var path := CURRENCY_CONTENT_DIR + "/" + fname
+			if ResourceLoader.exists(path):
+				var res = load(path)
+				if res is CurrencyDef:
+					register_currency(res as CurrencyDef)
+					n += 1
+		fname = dir.get_next()
+	dir.list_dir_end()
+	return n
+
+
 func _ready() -> void:
 	# 顺序有意义：类别先于物品（物品引用类别），货币最后不依赖顺序（V6 只查是否注册）。
 	load_category_content()
 	load_item_content()
+	load_currency_content()
 
 
 ## ★ v0.18：注册一种资源（货币类）。切片两种：`gem`（原石）/ `gold`（金币）。

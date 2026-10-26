@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3 uid="uid://cflowgamescr1"]
+
+
+[ext_resource type="Script" path="res://src/flow/tests/test_game_screen.gd" id="1_game"]
+
+[node name="TestGameScreen" type="Node"]
+script = ExtResource("1_game")

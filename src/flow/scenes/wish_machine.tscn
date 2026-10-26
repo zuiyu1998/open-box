@@ -1,0 +1,53 @@
+[gd_scene load_steps=2 format=3 uid="uid://cflowwish01"]
+
+[ext_resource type="Script" path="res://src/flow/scenes/wish_machine.gd" id="1_wish"]
+
+[node name="WishMachine" type="VBoxContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 10
+script = ExtResource("1_wish")
+
+[node name="DeviceName" type="Label" parent="."]
+layout_mode = 2
+theme_override_font_sizes/font_size = 32
+text = "许愿机"
+
+[node name="DeviceDesc" type="Label" parent="."]
+layout_mode = 2
+autowrap_mode = 3
+text = ""
+
+[node name="LevelLine" type="Label" parent="."]
+layout_mode = 2
+text = ""
+
+[node name="EffectLine" type="Label" parent="."]
+layout_mode = 2
+text = ""
+
+[node name="GemLine" type="Label" parent="."]
+layout_mode = 2
+text = ""
+
+[node name="UpgradeButton" type="Button" parent="."]
+layout_mode = 2
+text = "升级"
+
+[node name="Sep" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="BoxPicker" type="OptionButton" parent="."]
+layout_mode = 2
+
+[node name="OpenButton" type="Button" parent="."]
+layout_mode = 2
+text = "开一次"
+
+[node name="ResultLine" type="Label" parent="."]
+layout_mode = 2
+autowrap_mode = 3
+text = ""

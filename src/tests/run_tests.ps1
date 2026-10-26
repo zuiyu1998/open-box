@@ -45,6 +45,7 @@ $scenes = @(
     'res://src/gacha/tests/test_box_uses.tscn',
     'res://src/gacha/tests/test_series_content.tscn',
     'res://src/flow/tests/test_flow_service.tscn',
+    'res://src/flow/tests/test_game_screen.tscn',
     'res://src/devices/tests/test_device_service.tscn'
 )
 $timeoutMs = 120000
@@ -92,6 +93,7 @@ foreach ($scene in $scenes) {
     }
 
     $text = Get-Content $log -Encoding UTF8 -Raw -ErrorAction SilentlyContinue
+    if ($null -eq $text) { $text = "" }   # 环境故障兜底：别让 [regex]::Match(null) 抛异常
     $m = [regex]::Match($text, [char]0x7ED3 + [char]0x679C + [char]0xFF1A + '(\d+)' + [char]0x0020 + [char]0x901A + [char]0x8FC7 + ' / (\d+)')
     if (-not $m.Success) {
         Write-Host 'NO SUMMARY LINE -- the scene probably failed to load (stderr below)' -ForegroundColor Red

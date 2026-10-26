@@ -11,7 +11,12 @@
 3. **转换白名单**：合法边只有 `menu ↔ game`、`menu ↔ settings`、`game ↔ settings`；**禁止原地切换**、**禁止跳到未知节点**。
 4. **设置的"来源记忆"**：`settings_return_to`——**从哪个节点进设置，关掉就回哪个**（用户裁决：设置可从任意场景进入）。没有来源 ⇒ 回菜单。
 5. **唯一换场景入口**：`FlowService.apply_scene()` 是全库**唯一**可以 `change_scene_to_file` 的地方。
-6. **三个占位场景**：`src/flow/scenes/{menu,game,settings}_screen.tscn`（只含一个居中标题，够跑通流转；内容归 08）。
+6. **场景清单**：`menu_screen.tscn`（四按钮）/ `settings_screen.tscn`（空壳）/ `game_screen.tscn`（**只做 tab 骨架**）＋ 两个**页场景**：`warehouse_page.tscn`（仓库）/ **`wish_machine.tscn`（许愿机）**。★ **v0.29 用户裁决：「许愿机」就是设备的名字**（`dev_basic_q1.tres` 的 `display_name` 已改为「许愿机」），**它的整页内容是一个独立场景**：设备名 / 描述 / 等级 / 本级两条效果（可开套系品质上限、开盒折扣）/ 升级价 + 升级按钮 / 原石余额 / 盲盒下拉 + 开一次 + 结果。**页面内容归 08 的视觉规格，行为入口归 01/04**（本系统只负责把场景放进 tab）。
+7. **★ 会话容器 `GameSession`（v0.28）**：**"这一局是哪个 `GameState`"只此一份**。`FlowService` 只转场、**不持游戏数据**；切场景之后新场景还拿得到这一局，靠的就是 `GameSession.state`。
+   - 菜单「**新游戏**」→ `GameSession.start_new_game()`（内部 `GameState.new_game()`，**开局 = 设备 + 原石 + 金币**）→ 再 `transition(game)`；
+   - 菜单「**继续**」→ `GameSession.load()`——**读档归 10**，本版是**占位实现（恒 false）** ⇒ 无档时**明确拒绝**（置灰 + `continue_unavailable`），**不装作能继续**；
+   - 游戏场景 `_ready()`：`state == null` 时从 `GameSession.state` 取 —— **一局只能有一个 `GameState`**（两个场景各建一份，玩家的东西就分家了）；
+   - **本系统仍不解释存档格式**：`has_save()` / `load()` 是留给 10 的两个空槽。
 
 ## 2. 不负责什么（边界）
 
@@ -56,7 +61,7 @@ signal flow_changed(from, to)            # 只在真转换时发
 | 11 → 全库 | `flow_changed(from, to)` 信号 | 08 / 09 / 10 订阅它做"进入游戏时刷新""回菜单时停演出"这类动作 |
 | 11 → 10 | **无**（**故意不耦合**） | "进入游戏场景要不要读档"由 10 自己订阅 `flow_changed` 决定 |
 
-## 6. 测试点（`src/flow/tests/test_flow_service.gd`，37 条断言全绿）
+## 6. 测试点（v0.29：两个场景，共 **111 条断言**全绿）
 
 1. 初始节点 = 菜单；`menu→game` / `menu→settings` 允许；`menu→menu` 与未知节点**禁止**。
 2. **非法流转状态不变**（`transition(&"no_such_node")` ⇒ false、`current` 不动）。
@@ -64,6 +69,9 @@ signal flow_changed(from, to)            # 只在真转换时发
 4. **边界**：设置里再开设置 ⇒ 拒绝；不在设置里关设置 ⇒ 拒绝；**无来源记忆**时关设置 ⇒ 回菜单。
 5. **信号只发真转换**（被拒的不发，`from` / `to` 正确）。
 6. **三个节点的场景文件都必须存在**（`ResourceLoader.exists`）。
+7. **菜单内容**（`test_flow_service.gd`）：游戏名称 + 四个按钮（**顺序 = 继续 → 新游戏 → 存档 → 设置**）、各自去向；**无档时「继续」不切节点并转发 `continue_unavailable`**（v0.28 语义：读档归 10）。
+8. **游戏场景**（`test_game_screen.gd`，49 条）：两个 tab **都是场景实例**（`warehouse_page` / `wish_machine`）、`refresh()` **不重建页**（页引用保持有效）；仓库页占用/分组/盲盒数；许愿机页设备名「许愿机」/等级/两条效果/升级真扣原石/余额不足置灰/开盒真产出/下拉只列仓库盒子。
+9. **旁路写盘**：本机 runner 拿不到 Godot 的 stdout，两个 flow 测试都会另写 `user://test_*.txt`（正常环境只是一次无害的额外写盘）。
 
 ## 7. 待定项
 

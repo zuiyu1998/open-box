@@ -27,6 +27,6 @@ upgrade_cost_gems = 120
 [resource]
 script = ExtResource("1_def")
 id = &"dev_basic_q1"
-display_name = "基础装置"
-description = "开局发放的那一台。升级可以让开盒更便宜，并打开更高品质的套系。"
+display_name = "许愿机"
+description = "开局发放的那一台许愿机。升级可以让开盒更便宜，并打开更高品质的套系。"
 levels = Array[Resource]([SubResource("DeviceLevelSpec_lv1"), SubResource("DeviceLevelSpec_lv2"), SubResource("DeviceLevelSpec_lv3")])

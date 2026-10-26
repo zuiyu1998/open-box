@@ -6,6 +6,8 @@ extends Node
 
 var _pass := 0
 var _fail := 0
+## 旁路：本机 runner 拿不到 stdout，结果另写 user://test_flow_service.txt。
+var _lines: Array[String] = []
 var _events: Array = []
 
 
@@ -21,7 +23,13 @@ func _ready() -> void:
 	await _test_menu_scene_content()
 	FlowService.auto_scene_change = true
 	FlowService.reset_flow()
-	print("\n=== 结果：%d 通过 / %d 失败 ===" % [_pass, _fail])
+	var summary := "=== 结果：%d 通过 / %d 失败 ===" % [_pass, _fail]
+	print("\n" + summary)
+	_lines.append(summary)
+	var f := FileAccess.open("user://test_flow_service.txt", FileAccess.WRITE)
+	if f != null:
+		f.store_string("\n".join(_lines))
+		f.close()
 	get_tree().quit(1 if _fail > 0 else 0)
 
 
@@ -29,9 +37,11 @@ func ok(cond: bool, what: String) -> void:
 	if cond:
 		_pass += 1
 		print("  [PASS] " + what)
+		_lines.append("PASS " + what)
 	else:
 		_fail += 1
 		print("  [FAIL] " + what)
+		_lines.append("FAIL " + what)
 
 
 func eq(a, b, what: String) -> void:
@@ -149,9 +159,14 @@ func _test_menu_scene_content() -> void:
 	menu.get_node("Buttons/NewGame").pressed.emit()
 	eq(FlowService.current, FlowService.NODE_GAME, "**新游戏 ⇒ 进游戏场景**")
 
+	# ★ v0.28 改语义：**继续**要经过 `GameSession.load()`（读档归 10，本版占位恒 false）
+	#   ⇒ 无档时**明确拒绝**（不切节点 + 发 continue_unavailable），绝不"装作能继续"。
 	FlowService.reset_flow()
+	var unavailable := []
+	menu.continue_unavailable.connect(func(): unavailable.append(1))
 	menu.get_node("Buttons/Continue").pressed.emit()
-	eq(FlowService.current, FlowService.NODE_GAME, "**继续 ⇒ 进游戏场景**（有无存档由 10 判）")
+	eq(FlowService.current, FlowService.NODE_MENU, "**无档时「继续」不切节点**（读档归 10）")
+	eq(unavailable.size(), 1, "无档时「继续」⇒ 发 continue_unavailable")
 
 	FlowService.reset_flow()
 	menu.get_node("Buttons/Settings").pressed.emit()

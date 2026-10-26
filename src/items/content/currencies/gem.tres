@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="CurrencyDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/items/defs/currency_def.gd" id="1_cur"]
+
+[resource]
+script = ExtResource("1_cur")
+id = &"gem"
+display_name = "原石"
+description = "开盒与设备升级的入场费。不占仓库、不进邮件。"

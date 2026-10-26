@@ -43,11 +43,18 @@ func refresh(has_save: bool = true) -> void:
 
 
 func _on_new_game() -> void:
+	# ★ v0.28：**开一局**（`GameState.new_game()`）由会话容器代持，然后进游戏场景；
+	#   游戏场景在 `_ready()` 里从 `GameSession` 取这一局 —— 一局只能有一个 GameState。
+	GameSession.start_new_game()
 	FlowService.transition(FlowService.NODE_GAME)
 
 
 func _on_continue() -> void:
 	if _btn_continue.disabled:
+		continue_unavailable.emit()
+		return
+	# ★ v0.28：读档归 10（`GameSession.load()` 目前是占位 false）⇒ 没档就明确拒绝，不装作能继续
+	if not GameSession.load():
 		continue_unavailable.emit()
 		return
 	FlowService.transition(FlowService.NODE_GAME)
