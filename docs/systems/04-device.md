@@ -300,17 +300,17 @@ var level: int = 1
 ```
 开盒（兑现）：
   前置：① 有一台设备（否则 `no_device`）② 该设备等级能开这个盒子（否则 `device_level_low`）
-        → 无设备 / 等级不足 ⇒ 本次调用被拒绝，**不进入下述任何一步**
+		→ 无设备 / 等级不足 ⇒ 本次调用被拒绝，**不进入下述任何一步**
   DeviceService.redeem(state, box, seed_override)          ← 本系统（校验 + 计价）
-      → 算出 gem_cost（§5.2）→ 余额不足 ⇒ `currency_insufficient`（不扣任何东西）
-      → GachaService.redeem(state, box, gem_cost, seed_override)   ← 01 执行：
-            求该盒当前分布 → roll() → **一次 ItemService.transact([扣 gem_cost, grant 实例])**
-            （抽中 void ⇒ 事务里只有"扣原石"这一项）→ 扣 1 次寿命（归零即摧毁该盒）
+	  → 算出 gem_cost（§5.2）→ 余额不足 ⇒ `currency_insufficient`（不扣任何东西）
+	  → GachaService.redeem(state, box, gem_cost, seed_override)   ← 01 执行：
+			求该盒当前分布 → roll() → **一次 ItemService.transact([扣 gem_cost, grant 实例])**
+			（抽中 void ⇒ 事务里只有"扣原石"这一项）→ 扣 1 次寿命（归零即摧毁该盒）
 升级（设备自身）：
   DeviceService.upgrade_device(state, device_id)
-      → 满级 ⇒ `device_max_level`；原石不足 ⇒ `currency_insufficient`
-      → ItemService.transact([{ op = &"currency", kind = &"gem", delta = -price }])
-      → device.level += 1（**新档立刻生效**：下一次开盒用新的折扣与准入）
+	  → 满级 ⇒ `device_max_level`；原石不足 ⇒ `currency_insufficient`
+	  → ItemService.transact([{ op = &"currency", kind = &"gem", delta = -price }])
+	  → device.level += 1（**新档立刻生效**：下一次开盒用新的折扣与准入）
 镶嵌（装模块）：
   前置：**已有一台设备**（无设备 ⇒ `no_device`；**不看等级**）
   空位：DeviceService.socket(...) → PoolService.socket(state, box_id, module_id, slot)      ← 01 执行

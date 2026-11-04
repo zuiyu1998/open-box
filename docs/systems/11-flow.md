@@ -11,7 +11,7 @@
 3. **转换白名单**：合法边只有 `menu ↔ game`、`menu ↔ settings`、`game ↔ settings`；**禁止原地切换**、**禁止跳到未知节点**。
 4. **设置的"来源记忆"**：`settings_return_to`——**从哪个节点进设置，关掉就回哪个**（用户裁决：设置可从任意场景进入）。没有来源 ⇒ 回菜单。
 5. **唯一换场景入口**：`FlowService.apply_scene()` 是全库**唯一**可以 `change_scene_to_file` 的地方。
-6. **场景清单**：`menu_screen.tscn`（四按钮）/ `settings_screen.tscn`（空壳）/ `game_screen.tscn`（**只做 tab 骨架**）＋ 两个**页场景**：`warehouse_page.tscn`（仓库）/ **`wish_machine.tscn`（许愿机）**。★ **v0.29 用户裁决：「许愿机」就是设备的名字**（`dev_basic_q1.tres` 的 `display_name` 已改为「许愿机」），**它的整页内容是一个独立场景**：设备名 / 描述 / 等级 / 本级两条效果（可开套系品质上限、开盒折扣）/ 升级价 + 升级按钮 / 原石余额 / 盲盒下拉 + 开一次 + 结果。**页面内容归 08 的视觉规格，行为入口归 01/04**（本系统只负责把场景放进 tab）。
+6. **场景清单**：`menu_screen.tscn`（四按钮）/ `settings_screen.tscn`（空壳）/ `game_screen.tscn`（**只做 tab 骨架**）＋ 两个**页场景**：`warehouse_page.tscn`（仓库）/ **`wish_machine.tscn`（许愿机）**。★ **v0.29 用户裁决：「许愿机」就是设备的名字**（`dev_basic_q1.tres` 的 `display_name` 已改为「许愿机」），**它的整页内容是一个独立场景**：设备名 / 描述 / 等级 / 本级两条效果（可开套系品质上限、开盒折扣）/ 升级价 + 升级按钮 / 原石余额 / **盲盒剩余开盒次数 + 数学期望 M̄**（★ v0.31，走 `EvalService`）/ 盲盒下拉 + 开一次/开 10 次 + 结果。**页面内容归 08 的视觉规格，行为入口归 01/04**（本系统只负责把场景放进 tab）。
 7. **★ 会话容器 `GameSession`（v0.28）**：**"这一局是哪个 `GameState`"只此一份**。`FlowService` 只转场、**不持游戏数据**；切场景之后新场景还拿得到这一局，靠的就是 `GameSession.state`。
    - 菜单「**新游戏**」→ `GameSession.start_new_game()`（内部 `GameState.new_game()`，**开局 = 设备 + 原石 + 金币**）→ 再 `transition(game)`；
    - 菜单「**继续**」→ `GameSession.load()`——**读档归 10**，本版是**占位实现（恒 false）** ⇒ 无档时**明确拒绝**（置灰 + `continue_unavailable`），**不装作能继续**；

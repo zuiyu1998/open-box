@@ -49,8 +49,15 @@ func refresh() -> void:
 	_ensure_tabs()
 	for page_name in ["WarehousePage", "WishPage"]:
 		var page := page_node(page_name)
-		if page != null and page.has_method("bind_state"):
-			page.bind_state(state)
+		if page == null:
+			continue
+		# ★ MVC 页（许愿机）的 bind_state 在子节点 `Controller` 上；仓库页在自己身上
+		var target := page
+		var ctrl := page.get_node_or_null("Controller")
+		if ctrl != null and ctrl.has_method("bind_state"):
+			target = ctrl
+		if target.has_method("bind_state"):
+			target.bind_state(state)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

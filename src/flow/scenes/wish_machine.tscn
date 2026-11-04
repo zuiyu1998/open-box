@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3 uid="uid://cflowwish01"]
+[gd_scene load_steps=3 format=3 uid="uid://cflowwish01"]
 
-[ext_resource type="Script" path="res://src/flow/scenes/wish_machine.gd" id="1_wish"]
+[ext_resource type="Script" path="res://src/flow/scenes/wish_machine_view.gd" id="1_view"]
+[ext_resource type="Script" path="res://src/flow/scenes/wish_machine_controller.gd" id="2_ctrl"]
 
 [node name="WishMachine" type="VBoxContainer"]
 anchors_preset = 15
@@ -9,7 +10,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_override_constants/separation = 10
-script = ExtResource("1_wish")
+script = ExtResource("1_view")
 
 [node name="DeviceName" type="Label" parent="."]
 layout_mode = 2
@@ -40,14 +41,35 @@ text = "升级"
 [node name="Sep" type="HSeparator" parent="."]
 layout_mode = 2
 
+[node name="BoxUses" type="Label" parent="."]
+layout_mode = 2
+text = "剩余开盒次数 —"
+
+[node name="BoxExpectation" type="Label" parent="."]
+layout_mode = 2
+text = "数学期望 M̄ —"
+
 [node name="BoxPicker" type="OptionButton" parent="."]
 layout_mode = 2
 
-[node name="OpenButton" type="Button" parent="."]
+[node name="OpenButtons" type="HBoxContainer" parent="."]
 layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="OpenOne" type="Button" parent="OpenButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
 text = "开一次"
+
+[node name="OpenTen" type="Button" parent="OpenButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "开 10 次"
 
 [node name="ResultLine" type="Label" parent="."]
 layout_mode = 2
 autowrap_mode = 3
 text = ""
+
+[node name="Controller" type="Node" parent="."]
+script = ExtResource("2_ctrl")

@@ -87,7 +87,7 @@ func _test_structure() -> void:
 	eq(titles[0], "仓库", "第 1 个 tab = 仓库")
 	eq(titles[1], "许愿机", "第 2 个 tab = 许愿机")
 
-	# ★ v0.29：两个 tab 的内容都是**独立场景实例**（不是代码拼的节点）
+	# ★ v0.30：两个 tab 的内容都是**独立场景实例**（MVC：许愿机页 = View + 子节点 Controller）
 	var wh: Node = scr.page_node("WarehousePage")
 	var wish: Node = scr.page_node("WishPage")
 	ok(wh != null, "仓库页存在")
@@ -97,9 +97,11 @@ func _test_structure() -> void:
 			"仓库页 = warehouse_page 场景实例（%s）" % wh.get_script().resource_path)
 		ok(wh.has_method("snapshot"), "仓库页有只读快照接口")
 	if wish != null:
-		ok(String(wish.get_script().resource_path).ends_with("wish_machine.gd"),
-			"许愿机页 = wish_machine 场景实例（%s）" % wish.get_script().resource_path)
-		ok(wish.has_method("snapshot"), "许愿机页有只读快照接口")
+		ok(String(wish.get_script().resource_path).ends_with("wish_machine_view.gd"),
+			"许愿机页根 = wish_machine_view（View）（%s）" % wish.get_script().resource_path)
+		var ctrl: Node = wish.get_node_or_null("Controller")
+		ok(ctrl != null and String(ctrl.get_script().resource_path).ends_with("wish_machine_controller.gd"),
+			"许愿机页有 Controller 子节点（%s）" % (ctrl.get_script().resource_path if ctrl else "nil"))
 
 	var tabs: TabContainer = scr.get_node("Tabs")
 	tabs.current_tab = 1
@@ -165,7 +167,8 @@ func _test_wish_machine_device() -> void:
 	scr.bind_state(st)
 	await get_tree().process_frame
 	var wish: Node = scr.page_node("WishPage")
-	var s: Dictionary = wish.snapshot()
+	var ctrl: Node = wish.get_node("Controller")
+	var s: Dictionary = ctrl.snapshot()
 
 	eq(s["device_name"], "许愿机", "★ 设备名就是「许愿机」")
 	ok(String(s["level"]).find("Lv.1 / Lv.3") >= 0, "等级行（%s）" % s["level"])
@@ -174,7 +177,7 @@ func _test_wish_machine_device() -> void:
 	eq(s["gem"], "原石 60", "显示原石余额")
 	ok(String(s["upgrade_text"]).find("升级（40 原石）") >= 0, "升级价取自 04（%s）" % s["upgrade_text"])
 	eq(s["upgrade_disabled"], false, "原石够 ⇒ 升级可点")
-	eq(s["open_disabled"], true, "没有盒子 ⇒ 开一次置灰")
+	eq(s["open_disabled"], true, "没有盒子 ⇒ 两个开盒按钮都置灰")
 
 	print("— §3.2 升级：真扣原石、真升等级、面板跟着刷新")
 	var gem_before := ItemService.currency_balance(ItemConstants.CURRENCY_GEM)
@@ -184,7 +187,7 @@ func _test_wish_machine_device() -> void:
 	await get_tree().process_frame
 	eq(DeviceService.primary_device(st).level, lv_before + 1, "等级 +1")
 	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GEM), gem_before - 40, "原石 −40")
-	var s2: Dictionary = wish.snapshot()
+	var s2: Dictionary = ctrl.snapshot()
 	ok(String(s2["level"]).find("Lv.2 / Lv.3") >= 0, "面板等级行刷新（%s）" % s2["level"])
 	eq(s2["gem"], "原石 20", "面板余额刷新")
 	ok(String(s2["result"]).find("升级成功") >= 0, "结果行报告升级成功（%s）" % s2["result"])
@@ -194,7 +197,7 @@ func _test_wish_machine_device() -> void:
 	ItemService.grant_currency(ItemConstants.CURRENCY_GEM, 0, ItemConstants.CURRENCY_SOURCE_INIT)
 	scr.refresh()
 	await get_tree().process_frame
-	var s3: Dictionary = wish.snapshot()
+	var s3: Dictionary = ctrl.snapshot()
 	eq(s3["upgrade_disabled"], true, "原石 0 ⇒ 升级置灰")
 	scr.queue_free()
 	await get_tree().process_frame
@@ -216,16 +219,20 @@ func _test_wish_machine_open() -> void:
 	scr.bind_state(st)
 	await get_tree().process_frame
 	var wish: Node = scr.page_node("WishPage")
-	var s: Dictionary = wish.snapshot()
-	eq(s["box_count"], 1, "下拉里出现 1 个仓库盒子")
-	eq(s["open_disabled"], false, "有盒子 ⇒ 开一次可点")
+	var ctrl: Node = wish.get_node("Controller")
+	var s: Dictionary = ctrl.snapshot()
+	eq(s["box_options"].size(), 1, "下拉里出现 1 个仓库盒子")
+	eq(s["open_disabled"], false, "有盒子 ⇒ 两个开盒按钮可点")
 
-	var btn: Button = wish.get_node("OpenButton")
-	btn.pressed.emit()
+	var one: Button = wish.get_node("OpenButtons/OpenOne")
+	var ten: Button = wish.get_node("OpenButtons/OpenTen")
+	ok(one != null and ten != null, "两个开盒按钮存在")
+	eq(one.text, "开一次", "按钮文案 = 开一次")
+	eq(ten.text, "开 10 次", "按钮文案 = 开 10 次")
+	one.pressed.emit()
 	await get_tree().process_frame
-	var s2: Dictionary = wish.snapshot()
-	ok(String(s2["result"]).find("许愿机") == 0, "结果文案以「许愿机」开头（%s）" % s2["result"])
-	ok(String(s2["result"]).find("许愿机开出：") >= 0 or String(s2["result"]).find("什么都没有") >= 0,
+	var s2: Dictionary = ctrl.snapshot()
+	ok(String(s2["result"]).find("开出：") >= 0 or String(s2["result"]).find("什么都没有") >= 0,
 		"结果要么是物品名、要么是 void 文案（%s）" % s2["result"])
 	eq(bx.uses_remaining, uses_before - 1, "寿命 −1")
 	ok(ItemService.instances.size() >= inst_before, "非 void ⇒ 至少多一个实例")
@@ -243,6 +250,6 @@ func _test_wish_machine_open() -> void:
 	scr2.bind_state(st2)
 	await get_tree().process_frame
 	var wish2: Node = scr2.page_node("WishPage")
-	eq(wish2.snapshot()["box_count"], 1, "下拉**只列仓库里的盒子**（不含邮件那个）")
+	eq(wish2.get_node("Controller").snapshot()["box_options"].size(), 1, "下拉**只列仓库里的盒子**（不含邮件那个）")
 	scr2.queue_free()
 	await get_tree().process_frame
