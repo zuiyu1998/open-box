@@ -15,6 +15,9 @@
 ##   · `has_save()` / `load()` —— **占位**：返回 `false` / 失败。**读档归 10**，接上时只改这两个方法。
 extends Node
 
+## ★ v0.32：开局初始化发的那个盲盒（内容归 10 / 内容配置，本处只调 `grant_box`）。
+const INITIAL_BOX_SERIES := &"series_01"
+
 ## 这一局的运行时状态（null = 还没有局）。
 var state: GameState = null
 
@@ -24,8 +27,12 @@ func has_session() -> bool:
 
 
 ## 开一局新游戏（覆盖旧的一局）。**由"新游戏"按钮 / 测试调用**，只此一处。
+## ★ v0.32：开局除了设备 + 原石 + 金币，**再发一个初始盲盒**（`series_01`），
+##   这样仓库页一进去就有可开的东西；盒子内容归 10 / 内容配置，本处只发不解释。
 func start_new_game() -> GameState:
 	state = GameState.new_game()
+	if GachaCatalog.get_series(INITIAL_BOX_SERIES) != null:
+		GachaService.grant_box(state, INITIAL_BOX_SERIES, 1, &"init")
 	return state
 
 

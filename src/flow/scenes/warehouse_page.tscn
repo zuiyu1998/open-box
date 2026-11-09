@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3 uid="uid://cflowwh01"]
+[gd_scene load_steps=3 format=3 uid="uid://cflowwh01"]
 
-[ext_resource type="Script" path="res://src/flow/scenes/warehouse_page.gd" id="1_wh"]
+[ext_resource type="Script" path="res://src/flow/scenes/warehouse_view.gd" id="1_view"]
+[ext_resource type="Script" path="res://src/flow/scenes/warehouse_controller.gd" id="2_ctrl"]
 
 [node name="WarehousePage" type="VBoxContainer"]
 anchors_preset = 15
@@ -9,7 +10,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_override_constants/separation = 10
-script = ExtResource("1_wh")
+script = ExtResource("1_view")
 
 [node name="Usage" type="Label" parent="."]
 layout_mode = 2
@@ -23,3 +24,6 @@ text = ""
 [node name="Boxes" type="Label" parent="."]
 layout_mode = 2
 text = ""
+
+[node name="Controller" type="Node" parent="."]
+script = ExtResource("2_ctrl")

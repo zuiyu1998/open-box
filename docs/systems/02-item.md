@@ -419,7 +419,7 @@ transact(ops) -> { ok, reason, consumed, granted, discarded, mailed, sold: Array
 - **为什么必须有：单次 `consume` 原子 ≠ 组合原子。** 转化的"销毁源实例 + 创建新实例"、04/01 的"替换（拆旧装新）"都是**一个逻辑动作**；用"多次销毁 + 多次创建"拼起来时，中间任一步失败就会留下**半个装置 / 凭空消失的物品**，而 `consume` 自身的原子性对此毫无帮助（它只保证"这一次销毁全有或全无"）。**因此：替换与转化 = 一次 `transact` 调用，不得拼接。** `[补充]` 核心未规定该接口，但"每个写入入口原子"推不出"组合原子"——这是落地必需的原语。
 - **`transact` 只接受 `grant` / `consume` / `discard` / `currency` / `sell` 五类 op**（**★ v0.18 新增 `currency`**：`{ op = &"currency", kind = <货币 id>, delta = <整数> }`——`delta < 0` 是**扣除**、`> 0` 是**发放**，见 §5.13；**★ v0.20 新增 `sell`**：只由 `sell()` 入口写，见 §5.14）：`claim` 不进事务（它只改位置、不改数量、不参与守恒式，且天然不失败）；**`discard` 进事务**是因为"先丢弃腾出空间、再转化"是一个完整的玩家意图（与 grant/consume 的组合同语义）；未知 `op` / 缺必填键 / 多出键 → `ok == false`、`reason == &"bad_op"`、状态完全不变。**`reason` 取值域（逐字给出，供 03/04/01/06/07 对接）**：`&""`（成功）/ `&"bad_op"`（op 类型或键集非法）/ `&"bad_tag"`（`tag` 不在 §5.7 R-M9 的域内）/ `&"missing_instance"` / `&"duplicate_id"` / `&"not_in_warehouse"` / **`&"no_space"`（裁决 17 的落点：主动操作产出放不下，不产生任何实例）** / **★ v0.18：`&"currency_insufficient"`（资源余额不足以完成本批的 `currency` 扣除）/ `&"unknown_currency"`（`kind` 未注册——配置错误）** / **★ v0.20：`&"not_sellable"`（`sell` 的某个实例 `sell_gold == 0` ⇒ 整批拒绝）** / **★ v0.26：`&"box_in_mail"`（盲盒在邮件里 ⇒ 不可配置 / 兑现；与物品的 `not_in_warehouse` 同精神、不同码——原因码要能指认对象）**。
 
-### 5.12 配置校验器（加载时强制）
+### 5.12 配置校验器（加载时强制） 
 
 | # | 规则 | 违反时 | 理由 |
 |---|---|---|---|

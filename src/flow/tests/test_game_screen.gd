@@ -93,9 +93,10 @@ func _test_structure() -> void:
 	ok(wh != null, "仓库页存在")
 	ok(wish != null, "许愿机页存在")
 	if wh != null:
-		ok(String(wh.get_script().resource_path).ends_with("warehouse_page.gd"),
-			"仓库页 = warehouse_page 场景实例（%s）" % wh.get_script().resource_path)
-		ok(wh.has_method("snapshot"), "仓库页有只读快照接口")
+		ok(String(wh.get_script().resource_path).ends_with("warehouse_view.gd"),
+			"仓库页根 = warehouse_view（View）（%s）" % wh.get_script().resource_path)
+		var wh_ctrl: Node = wh.get_node_or_null("Controller")
+		ok(wh_ctrl != null and String(wh_ctrl.get_script().resource_path).ends_with("warehouse_controller.gd"), "仓库页有 Controller 子节点（%s）" % (wh_ctrl.get_script().resource_path if wh_ctrl else "nil"))
 	if wish != null:
 		ok(String(wish.get_script().resource_path).ends_with("wish_machine_view.gd"),
 			"许愿机页根 = wish_machine_view（View）（%s）" % wish.get_script().resource_path)
@@ -129,7 +130,7 @@ func _test_warehouse_page() -> void:
 	if scr == null:
 		return
 	var wh: Node = scr.page_node("WarehousePage")
-	var s0: Dictionary = wh.snapshot()
+	var s0: Dictionary = wh.get_node("Controller").snapshot()
 	eq(s0["boxes"], "尚未开局", "未注入状态 ⇒ 盲盒行显示「尚未开局」")
 
 	print("— §3.1 仓库页：注入状态后读真实数据")
@@ -138,7 +139,7 @@ func _test_warehouse_page() -> void:
 	eq(boxes.size(), 1, "夹具：发 1 个盒子")
 	scr.bind_state(st)
 	await get_tree().process_frame
-	var s1: Dictionary = wh.snapshot()
+	var s1: Dictionary = wh.get_node("Controller").snapshot()
 	ok(String(s1["usage"]).find("仓库占用") >= 0, "显示仓库占用（%s）" % s1["usage"])
 	ok(String(s1["usage"]).find("%") >= 0, "占用用百分比表达（P6：不让玩家做除法）")
 	ok(String(s1["items"]).find("还没有物品") >= 0, "空仓库时明说「还没有物品」")
@@ -149,7 +150,7 @@ func _test_warehouse_page() -> void:
 	ItemService.grant(&"home_q1", {"kind": ItemConstants.KIND_UNLOCK})
 	scr.refresh()
 	await get_tree().process_frame
-	var s2: Dictionary = wh.snapshot()
+	var s2: Dictionary = wh.get_node("Controller").snapshot()
 	ok(String(s2["items"]).find("家居物品") >= 0, "物品聚合按类别分组（%s）" % s2["items"])
 	ok(String(s2["items"]).find("白×1") >= 0, "同一行的档位计数（%s）" % s2["items"])
 	scr.queue_free()
@@ -174,7 +175,7 @@ func _test_wish_machine_device() -> void:
 	ok(String(s["level"]).find("Lv.1 / Lv.3") >= 0, "等级行（%s）" % s["level"])
 	ok(String(s["effect"]).find("可开套系品质") >= 0, "显示本级效果：可开套系品质上限（%s）" % s["effect"])
 	ok(String(s["effect"]).find("开盒成本") >= 0, "显示本级效果：开盒折扣（%s）" % s["effect"])
-	eq(s["gem"], "原石 60", "显示原石余额")
+	eq(s["gem"], "原石 10000", "显示原石余额（开局 10000）")
 	ok(String(s["upgrade_text"]).find("升级（40 原石）") >= 0, "升级价取自 04（%s）" % s["upgrade_text"])
 	eq(s["upgrade_disabled"], false, "原石够 ⇒ 升级可点")
 	eq(s["open_disabled"], true, "没有盒子 ⇒ 两个开盒按钮都置灰")
@@ -189,7 +190,7 @@ func _test_wish_machine_device() -> void:
 	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GEM), gem_before - 40, "原石 −40")
 	var s2: Dictionary = ctrl.snapshot()
 	ok(String(s2["level"]).find("Lv.2 / Lv.3") >= 0, "面板等级行刷新（%s）" % s2["level"])
-	eq(s2["gem"], "原石 20", "面板余额刷新")
+	eq(s2["gem"], "原石 9960", "面板余额刷新（10000 − 40）")
 	ok(String(s2["result"]).find("升级成功") >= 0, "结果行报告升级成功（%s）" % s2["result"])
 
 	print("— §3.2 原石不够 ⇒ 升级置灰（本层只读余额，不自己判门槛）")
