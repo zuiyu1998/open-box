@@ -64,6 +64,15 @@ func hydrate(state, data) -> void  # 数据源二：从存档注入（占位）
 | **W2** | `hydrate()` 的真实实现（从存档重建实例与盒子） | 占位；依赖 10 的读档流程与存档 schema 定型 |
 | **W3** | "开局物品"（除盲盒外，是否再发若干物品） | 未定；内容归 10/内容配置，加在 `initialize()` 里即可 |
 
-**W1-b/c 的设计决策点（需拍板后再动）：** "位置"这个语义的归属有三种切法——
-① `location` 字段留在 `ItemInstance`（02 拥有、随存档序列化），**读写权**归 12（02 只提供实例遍历/查找，位置变更一律走 12）；② 实例列表整体搬到 12，02 退化为"物品定义 + 实例工厂"；③ 位置仍是 02 的，12 只做"领取/容量的**门面**"（这与"仓库接管位置"的裁决相悖，不推荐）。
-推荐 **①**：字段留 02、读写权归 12，最贴合"02 管身份、12 管位置"的边界，且存档字段不动。
+**W1-b/c 的设计决策点（已裁决：方案 B，真迁移）。** `location` 从 `ItemInstance` **移出**，变为本系统维护的 `instance_id → location` 映射（`WarehouseService.locations`）。**分步计划（每步可编译可回归）：**
+
+| 步 | 动作 | 波及 |
+|---|---|---|
+| **B1** | `WarehouseService` 加 `locations: Dictionary` + `location_of(id)` / `set_location(id, loc)` / `remove_location(id)` / `is_warehouse(id)` / `is_mail(id)` / `reset_locations()` | 仓库系统 |
+| **B2** | `ItemInstance` 删 `location` 字段与 `is_in_warehouse()` / `is_in_mail()`；`to_dict`/`from_dict` 删 `location` 键 | 02 定义 |
+| **B3** | `ItemService` 全部 `inst.location` / `is_in_*` 改为 `WarehouseService.location_of(inst.instance_id)` 等；`_move`/`_attach`/`_detach`/`grant`/`claim`/`mail_instances`/`query`/`count`/`rebuild_count_index` 适配 | 02 核心（~30 处） |
+| **B4** | 存档：`location` 从实例序列化移除，改由 `WarehouseService` 输出独立段（`locations: {id: loc}`）；**存档升 v7**，迁移：旧档实例里的 `location` 键读到 12 的映射 | 10 / 存档 schema |
+| **B5** | `transact` 落位/回滚经 12（原子性） | 02 ↔ 12 |
+| **B6** | `test_item_system` 几十条位置/领取/邮件/容量断言迁移到 12 口径 | 测试 |
+
+**注意**：`Box.location`（v0.26 加的）暂留 `Box` 上——它随 `Box` 序列化、容量账已在 12（W1-a），B 的目标是**物品实例**的位置；Box 位置是否同迁留待 B 完成后另行评估。
