@@ -92,9 +92,11 @@ foreach ($scene in $scenes) {
         $_ -notmatch 'FullyQualifiedErrorId'
     }
 
-    $text = Get-Content $log -Encoding UTF8 -Raw -ErrorAction SilentlyContinue
-    if ($null -eq $text) { $text = "" }   # 环境故障兜底：别让 [regex]::Match(null) 抛异常
-    $m = [regex]::Match($text, [char]0x7ED3 + [char]0x679C + [char]0xFF1A + '(\d+)' + [char]0x0020 + [char]0x901A + [char]0x8FC7 + ' / (\d+)')
+    $text = ""
+    if (Test-Path $log) {
+        $text = [System.IO.File]::ReadAllText($log, (New-Object System.Text.UTF8Encoding($false)))
+    }
+    $m = [regex]::Match($text, '(\d+)\s*' + [char]0x901A + [char]0x8FC7 + '\s*/\s*(\d+)')
     if (-not $m.Success) {
         Write-Host 'NO SUMMARY LINE -- the scene probably failed to load (stderr below)' -ForegroundColor Red
         Get-Content $errl -Encoding UTF8 -ErrorAction SilentlyContinue |

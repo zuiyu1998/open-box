@@ -76,9 +76,9 @@ static func grant_box(
 		b.modules = PoolService.empty_slots(series.socket_count)
 		b.uses_remaining = series.uses_per_box    # ★ v0.14：初始使用次数（按套系品质）
 		b.size = 1                                # ★ v0.26：每盒固定 1 单位（记进同一份容量账）
-		# ★ v0.26：**落位由 02 判定**（容量只有一个判定点）——放得下进仓库，放不下进邮件。
+		# ★ v0.35（W1-a）：盲盒落位判定归仓库系统（WarehouseService）——容量仍只有一个判定点。
 		#   盲盒是**被动产出**（任务 / 里程碑发放），所以与物品同一口径：永不丢失。
-		b.location = ItemService.place_box(b.size)
+		b.location = WarehouseService.place_box(b.size)
 		b.source = source
 		b.acquired_tick = int(Time.get_ticks_msec())
 		state.add_box(b)
@@ -98,7 +98,7 @@ static func claim_boxes(state: GameState) -> Dictionary:
 	if state == null:
 		return {"ok": false, "reason": R_BOX_NOT_FOUND, "claimed": claimed, "remaining": remaining}
 	for b in state.mail_boxes():
-		if ItemService.claim_box(b.size):
+		if WarehouseService.claim_box(b.size):
 			b.location = ItemConstants.LOC_WAREHOUSE
 			claimed.append(b.box_id)
 		else:

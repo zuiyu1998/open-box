@@ -77,7 +77,7 @@ func remove_box(box_id: String) -> bool:
 			var b := pending_boxes[i]
 			pending_boxes.remove_at(i)
 			if b.location == ItemConstants.LOC_WAREHOUSE:
-				ItemService.release_box(b.size)
+				WarehouseService.release_box(b.size)
 			return true
 	return false
 
@@ -205,5 +205,5 @@ static func box_from_dict(d: Dictionary) -> Box:
 	if b != null and b.location == ItemConstants.LOC_WAREHOUSE:
 		# ★ v0.26：读档时**按存档里的位置重建仓库占位**（不重新判定落位——位置是既成事实；
 		#   重新判定会把"仓库里的盒子"按当前容量重新分配，等于篡改存档）。
-		ItemService.restore_box_occupancy(b.size)
+		WarehouseService.restore_box_occupancy(b.size)
 	return b

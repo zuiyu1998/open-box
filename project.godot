@@ -12,7 +12,6 @@ config_version=5
 
 config/name="open-box"
 run/main_scene="uid://cflowmenu01"
-run/disable_stdout=true
 config/features=PackedStringArray("4.5", "Forward Plus")
 config/icon="res://icon.svg"
 
@@ -21,6 +20,7 @@ config/icon="res://icon.svg"
 ItemCatalog="*res://src/items/item_catalog.gd"
 ItemService="*res://src/items/item_service.gd"
 GachaCatalog="*res://src/gacha/gacha_catalog.gd"
+WarehouseService="*res://src/warehouse/warehouse_service.gd"
 DeviceCatalog="*res://src/devices/device_catalog.gd"
 FlowService="*res://src/flow/flow_service.gd"
 GameSession="*res://src/flow/session.gd"
