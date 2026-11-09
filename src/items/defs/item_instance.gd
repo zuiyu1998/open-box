@@ -26,12 +26,14 @@ extends Resource
 ## 编号不复用、不回收；计数器持久、只增不减（§5.6）。
 @export var serial: int = 0
 
-## 所在容器：ItemConstants.LOC_WAREHOUSE / LOC_MAIL（v0.9）。
-## **只有 grant（产出落位）与 claim（领取）能改它。**
-@export var location: StringName = &"warehouse"
+## ★ v0.36（B2）：**`location` 已移出本类**——位置不再随实例走，改由 `WarehouseService.locations`
+## 维护（`instance_id -> location` 映射）。本类只保留"实例是什么、何时入库、从哪来、第几个"，
+## **不回答"它在哪"**（那是 12 的职责，12-warehouse.md §7 方案 B）。
+## `to_dict` / `from_dict` 因此**不再含 `location` 键**（存档位置段由 12 独立输出）。
 
 
 ## 序列化。**键序固定**——§4.6 的"往返字节级稳定"依赖它。
+## ★ `location` 键已移除（B2）：位置是 12 的账，实例序列化不再携带它。
 func to_dict() -> Dictionary:
 	return {
 		"instance_id": instance_id,
@@ -39,7 +41,6 @@ func to_dict() -> Dictionary:
 		"acquired_at": acquired_at,
 		"source": source.duplicate(true),
 		"serial": serial,
-		"location": String(location),
 	}
 
 
@@ -51,7 +52,6 @@ static func from_dict(d: Dictionary) -> ItemInstance:
 	var src = d.get("source", {})
 	inst.source = normalize_source(src) if src is Dictionary else {}
 	inst.serial = int(d.get("serial", 0))
-	inst.location = StringName(d.get("location", String(ItemConstants.LOC_WAREHOUSE)))
 	return inst
 
 
@@ -86,11 +86,3 @@ func clone() -> ItemInstance:
 
 func kind() -> StringName:
 	return source.get("kind", &"")
-
-
-func is_in_warehouse() -> bool:
-	return location == ItemConstants.LOC_WAREHOUSE
-
-
-func is_in_mail() -> bool:
-	return location == ItemConstants.LOC_MAIL

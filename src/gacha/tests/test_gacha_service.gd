@@ -349,7 +349,7 @@ func _test_redeem_consumes_box_and_grants_exactly_once() -> void:
 	eq(int(inst.source.get("box_seed")), seed, "source 含 box_seed（= 本次 seed）")
 	eq(int(inst.source.get("draw_index")), 1, "source 含 draw_index")
 	eq(inst.serial, 1, "开盒来源的 serial 从 1 开始（02 内部赋值）")
-	eq(inst.location, ItemConstants.LOC_WAREHOUSE, "放得下 ⇒ 进仓库")
+	eq(WarehouseService.location_of(inst.instance_id), ItemConstants.LOC_WAREHOUSE, "放得下 ⇒ 进仓库")
 	ok(r.probability > 0.0, "结果带有本次所用分布中该结果的概率（显示与抽取同源）")
 
 

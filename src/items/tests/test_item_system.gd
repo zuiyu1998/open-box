@@ -413,9 +413,9 @@ func _test_idempotent_grant() -> void:
 	_reset(1)  # 容量 1，q1 的 size 也是 1 → 第二件必进邮件
 	ItemService.grant(&"stardust_q1", src)
 	var m := ItemService.grant(&"stardust_q1", src)
-	eq(m.location, ItemConstants.LOC_MAIL, "容量不足时落邮件")
+	eq(WarehouseService.location_of(m.instance_id), ItemConstants.LOC_MAIL, "容量不足时落邮件")
 	var again := ItemService.grant(&"stardust_q1", src, m.instance_id)
-	eq(again.location, ItemConstants.LOC_MAIL, "幂等命中：不改 location")
+	eq(WarehouseService.location_of(again.instance_id), ItemConstants.LOC_MAIL, "幂等命中：不改 location")
 
 
 func _test_uuid_uniqueness() -> void:
@@ -556,7 +556,7 @@ func _test_count_matches_rebuild() -> void:
 	# 每个键的值 == 实例列表中该 (category, quality) 的实例数（仅仓库）
 	var manual := {}
 	for inst in ItemService.instances:
-		if not inst.is_in_warehouse():
+		if not WarehouseService.is_warehouse(inst.instance_id):
 			continue
 		var def := ItemCatalog.get_def(inst.item_id)
 		var k := def.count_key()
@@ -681,7 +681,7 @@ func _test_save_roundtrip() -> void:
 	eq(ItemService.check_conservation(), true, "载入后守恒式成立")
 	var manual := {}
 	for inst in ItemService.instances:
-		if not inst.is_in_warehouse():
+		if not WarehouseService.is_warehouse(inst.instance_id):
 			continue
 		var def := ItemCatalog.get_def(inst.item_id)
 		manual[def.count_key()] = int(manual.get(def.count_key(), 0)) + 1
@@ -732,17 +732,17 @@ func _test_overflow_boundaries() -> void:
 	_reset(2)
 	var a := ItemService.grant(&"stardust_q1", {"kind": &"gacha"})
 	var b := ItemService.grant(&"stardust_q1", {"kind": &"gacha"})
-	eq(a.location, ItemConstants.LOC_WAREHOUSE, "刚好放得下 → warehouse")
-	eq(b.location, ItemConstants.LOC_WAREHOUSE, "填满容量 → warehouse")
+	eq(WarehouseService.location_of(a.instance_id), ItemConstants.LOC_WAREHOUSE, "刚好放得下 → warehouse")
+	eq(WarehouseService.location_of(b.instance_id), ItemConstants.LOC_WAREHOUSE, "填满容量 → warehouse")
 	var c := ItemService.grant(&"stardust_q1", {"kind": &"gacha"})
-	eq(c.location, ItemConstants.LOC_MAIL, "超出一件 → mail")
+	eq(WarehouseService.location_of(c.instance_id), ItemConstants.LOC_MAIL, "超出一件 → mail")
 	eq(ItemService.warehouse_used, 2, "邮件实例不计入 warehouse_used")
 	eq(ItemService.warehouse_usage()["used"], 2, "warehouse_usage().used 正确")
 	ok(c != null, "被动产出装不下仍被创建（P5：产出永不丢失）")
 
 	# 超出一件时不再有空间，后续全进邮件
 	var d := ItemService.grant(&"stardust_q1", {"kind": &"gacha"})
-	eq(d.location, ItemConstants.LOC_MAIL, "持续超出 → 全部进邮件")
+	eq(WarehouseService.location_of(d.instance_id), ItemConstants.LOC_MAIL, "持续超出 → 全部进邮件")
 
 
 func _test_mail_not_counted() -> void:
@@ -768,7 +768,7 @@ func _test_claim_only_location() -> void:
 	_reset(1)
 	ItemService.grant(&"stardust_q1", {"kind": &"gacha"})
 	var m := ItemService.grant(&"stardust_q1", {"kind": &"gacha"})
-	eq(m.location, ItemConstants.LOC_MAIL, "前置：第二件在邮件")
+	eq(WarehouseService.location_of(m.instance_id), ItemConstants.LOC_MAIL, "前置：第二件在邮件")
 
 	var g_before := ItemService.total_granted
 	var c_before := ItemService.total_consumed
@@ -788,7 +788,7 @@ func _test_claim_only_location() -> void:
 	var ids_before := _id_set()
 	var res := ItemService.claim([m.instance_id])
 	eq(res["ok"], true, "腾出空间后领取成功")
-	eq(m.location, ItemConstants.LOC_WAREHOUSE, "领取只改 location")
+	eq(WarehouseService.location_of(m.instance_id), ItemConstants.LOC_WAREHOUSE, "领取只改 location")
 
 	eq(ItemService.instances.size(), n_before, "领取前后实例总数不变")
 	eq(_id_set(), ids_before, "领取前后 instance_id 集合逐项相等")
@@ -811,9 +811,9 @@ func _test_claim_partial() -> void:
 	var m1 := ItemService.grant(&"stardust_q1", {"kind": &"gacha"})
 	var m2 := ItemService.grant(&"stardust_q1", {"kind": &"gacha"})
 	var m3 := ItemService.grant(&"stardust_q1", {"kind": &"gacha"})
-	eq(m1.location, ItemConstants.LOC_MAIL, "前置：容量已满")
-	eq(m2.location, ItemConstants.LOC_MAIL, "前置：容量已满")
-	eq(m3.location, ItemConstants.LOC_MAIL, "前置：容量已满")
+	eq(WarehouseService.location_of(m1.instance_id), ItemConstants.LOC_MAIL, "前置：容量已满")
+	eq(WarehouseService.location_of(m2.instance_id), ItemConstants.LOC_MAIL, "前置：容量已满")
+	eq(WarehouseService.location_of(m3.instance_id), ItemConstants.LOC_MAIL, "前置：容量已满")
 
 	# 腾出 2 点空间 → 3 件各占 1，只能领 2 件（部分成功）
 	var q := ItemService.query(&"stardust", 2)
@@ -884,7 +884,7 @@ func _test_overflow_loosening_rejected() -> void:
 		null, "被动产出声明 reject → 允许收紧，装不下即被拒")
 	# 被动产出默认 → 进邮件
 	var g := ItemService.grant(&"crystal_q1", {"kind": &"gacha"})
-	eq(g.location, ItemConstants.LOC_MAIL, "被动产出默认 overflow → 进邮件")
+	eq(WarehouseService.location_of(g.instance_id), ItemConstants.LOC_MAIL, "被动产出默认 overflow → 进邮件")
 	# 越权放宽在 transact 内同样生效
 	var res := ItemService.transact([
 		{"op": &"grant", "item_id": &"crystal_q2", "source": {"kind": &"convert"},
@@ -903,7 +903,8 @@ func _test_no_partial_containment() -> void:
 	var n := 50
 	var ware := 0
 	for i in n:
-		if ItemService.grant(&"stardust_q1", {"kind": &"gacha"}).is_in_warehouse():
+		var inst := ItemService.grant(&"stardust_q1", {"kind": &"gacha"})
+		if WarehouseService.is_warehouse(inst.instance_id):
 			ware += 1
 	ok(ItemService.warehouse_used <= 5, "批量超容产出后 used <= capacity")
 	eq(ware, 5, "入库数 == 容量 / size（完全填满，无部分入库）")
@@ -937,7 +938,7 @@ func _test_discard_escape_valve() -> void:
 
 	# ④ 不能丢弃邮件实例
 	var m2 := ItemService.grant(&"stardust_q1", {"kind": &"gacha"})
-	eq(m2.location, ItemConstants.LOC_MAIL, "前置：容量已满")
+	eq(WarehouseService.location_of(m2.instance_id), ItemConstants.LOC_MAIL, "前置：容量已满")
 	eq(ItemService.discard([m2.instance_id])["reason"], ItemConstants.REASON_NOT_IN_WAREHOUSE,
 		"不能丢弃邮件实例 → not_in_warehouse")
 
@@ -1054,6 +1055,7 @@ func _state_snapshot() -> Dictionary:
 		insts.append(inst.to_dict())
 	return {
 		"instances": insts,
+		"locations": WarehouseService.locations_to_dict(),  # ★ B6：位置是 12 的账，快照也走它
 		"count_index": ItemService.count_index.duplicate(),
 		"mail_count_index": ItemService.mail_count_index.duplicate(),
 		"warehouse_used": ItemService.warehouse_used,
@@ -1131,7 +1133,7 @@ func _test_sell_rejects_and_is_atomic() -> void:
 	ItemService.warehouse_capacity = 1
 	var mall := ItemService.grant(&"stardust_q2", {"kind": ItemConstants.KIND_GACHA})
 	ItemService.warehouse_capacity = 1000
-	eq(mall.location, ItemConstants.LOC_MAIL, "该实例落在邮件（仓库已满）")
+	eq(WarehouseService.location_of(mall.instance_id), ItemConstants.LOC_MAIL, "该实例落在邮件（仓库已满）")
 	var r2 := ItemService.sell([mall.instance_id])
 	eq(r2["reason"], ItemConstants.REASON_NOT_IN_WAREHOUSE, "邮件实例 ⇒ not_in_warehouse")
 

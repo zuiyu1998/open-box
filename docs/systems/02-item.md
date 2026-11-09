@@ -6,7 +6,7 @@
 
 > **本文档当前有效的三条背景**（更早的版本沿革见核心 **§16**，本文件不复述）：
 > 1. **持有模型 = 实例列表**：每个实例一个 **UUID**（`instance_id`，兼作幂等键）、自带**溯源**（`acquired_at` + `source`）与**收藏编号**（`serial`）；**`count` 是派生值**；**"堆叠"在结构上不可能存在**。Godot **没有**内置 UUID（`ResourceUID.create_id()` 返回的 `uid://` 串**不是 UUID**，见 §4.5）。
-> 2. **仓库与邮件是同一实例列表的两个位置**：`location ∈ {warehouse, mail}`；**`count()` 只统计仓库**；**被动产出（开盒 / 迁移 / 解锁）放不下 ⇒ 进邮件**（永不丢失），**主动操作（转化 / 拆卸返还）放不下 ⇒ 拒绝整个操作**；**领取只改 `location`**；**玩家可主动丢弃**（死局逃生阀）。仓库容量 `warehouse_capacity` 是**抽象单位**、UI 只显示**占比**。
+> 2. **仓库与邮件是同一实例列表的两个位置**：`location ∈ {warehouse, mail}`（**★ v0.36：该字段已从实例迁到 12 的 `WarehouseService.locations`**）；**`count()` 只统计仓库**；**被动产出（开盒 / 迁移 / 解锁）放不下 ⇒ 进邮件**（永不丢失），**主动操作（转化 / 拆卸返还）放不下 ⇒ 拒绝整个操作**；**领取只改 `location`**；**玩家可主动丢弃**（死局逃生阀）。仓库容量 `warehouse_capacity` 是**抽象单位**、UI 只显示**占比**。
 > 3. **物品池的两份数据不归本文**：`Box.item_pool` / `Box.modules` 挂在该盒子上（归 01），编辑与写入权归 01 的 `PoolService`；本文只定义 **`ItemDef`** 与**实例列表**。**`rarity ≥ 1` 这条规则的权威在本文档（§5.12 V5）**，`ItemPool.validate()` 是**执行点**并报同一原因码 `bad_rarity`。
 
 
@@ -18,7 +18,7 @@
 
 1. **`ItemDef` 两维定义**：类别 `category` × **物品品质 `quality`**（核心 §4.2、D2）。**术语纪律：本文档的"品质"一律指物品品质 `quality`；"套系品质 `series_quality`"归属核心 §4.1.1，本文档只引用、不拥有。**
 2. **物品价值 `v_i` 的定义**（`ItemDef.value`；口径归本系统，计算归 07）。
-3. **持有模型 = 实例列表**：**持有量就是 `Array[ItemInstance]`**。同一 `item_id` 的多个实例是**互不相同的个体**，不合并、不堆叠。**每个实例还有一个位置 `location`**（仓库 / 邮件）。
+3. **持有模型 = 实例列表**：**持有量就是 `Array[ItemInstance]`**。同一 `item_id` 的多个实例是**互不相同的个体**，不合并、不堆叠。**每个实例另有一份位置账**（仓库 / 邮件；**★ v0.36 起归 12 的 `WarehouseService.locations`，不再是实例字段**）。
 4. **`count` 是派生值**：`count(category, quality)` 由**仓库内**实例**数出并缓存**（**只统计 `location == warehouse`**，§5.9）；**任何地方都不得把它当作存储字段读写**（核心 §14.2 铁律 8）。
 5. **重复物品 → 新增一个实例**（P5「重复与过剩永远不是空手」，§5.4）。
 6. **来源清单与两个出口在物品侧的表现**：本系统只负责"创建实例 / 按实例销毁"这两个动作，来源与出口规则指向对应系统（§5.7、§5.8）。
@@ -141,7 +141,7 @@ extends Resource
 @export var acquired_at: int = 0                # 入库时刻（int(Time.get_unix_time_from_system())，Unix 秒）
 @export var source: Dictionary = {}             # 溯源：开放字典，kind 必填，其余键按来源类型附加（见下表）
 @export var serial: int = 0                     # 该玩家开出的第 N 个此物品；0 = 非开盒来源（**迁移按 §5.6 作用域恢复编号，不取 0**）
-@export var location: StringName = &"warehouse" # 所在容器：&"warehouse" 仓库 / &"mail" 邮件
+# ★ v0.36（B2）：`location` 已**移出实例**（字段与 `to_dict`/`from_dict` 键都删）⇒ 位置改由 12 的 `WarehouseService.locations` 维护；下文"实例的 `location`"一律读 `location_of(instance_id)`，语义不变。
 func to_dict() -> Dictionary: ...                # 键序固定（§4.6 的字节级稳定依赖它）
 static func from_dict(d: Dictionary) -> ItemInstance: ...
 ```

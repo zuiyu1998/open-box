@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cob0testwhc1"]
+
+[ext_resource type="Script" path="res://src/warehouse/tests/test_warehouse_service.gd" id="1_whsvc"]
+
+[node name="TestWarehouseService" type="Node"]
+script = ExtResource("1_whsvc")

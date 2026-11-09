@@ -103,17 +103,23 @@ func _size_of(inst: ItemInstance) -> int:
 	return def.size if def != null else 0
 
 
+## ★ v0.36（B3）：位置读取一律经 `WarehouseService`（`inst.location` 已随 B2 删除）。
+func _loc_of(inst: ItemInstance) -> StringName:
+	return WarehouseService.location_of(inst.instance_id)
+
+
 ## 位置变更的唯一实现（领取 / 落位都经它），同时维护两个派生值。
 ## **只改 location**——不创建实例、不改 instance_id / serial / source（§5.10）。
 func _move(inst: ItemInstance, to_loc: StringName) -> void:
-	if inst.location == to_loc:
+	var from_loc := _loc_of(inst)
+	if from_loc == to_loc:
 		return
 	var key := _key_of(inst)
 	var sz := _size_of(inst)
-	_index_sub(key, inst.location)
-	if inst.location == ItemConstants.LOC_WAREHOUSE:
+	_index_sub(key, from_loc)
+	if from_loc == ItemConstants.LOC_WAREHOUSE:
 		warehouse_used -= sz
-	inst.location = to_loc
+	WarehouseService.set_location(inst.instance_id, to_loc)
 	_index_add(key, to_loc)
 	if to_loc == ItemConstants.LOC_WAREHOUSE:
 		warehouse_used += sz
@@ -232,7 +238,8 @@ func grant(
 	inst.acquired_at = int(Time.get_unix_time_from_system())
 	inst.source = source.duplicate(true)
 	inst.serial = _allocate_serial(item_id, kind)
-	inst.location = loc
+	# ★ B3：位置写入归 12（`inst.location` 已随 B2 删除）
+	WarehouseService.set_location(new_id, loc)
 
 	_attach(inst)
 	return inst
@@ -242,8 +249,8 @@ func grant(
 func _attach(inst: ItemInstance) -> void:
 	instances.append(inst)
 	_by_id[inst.instance_id] = inst
-	_index_add(_key_of(inst), inst.location)
-	if inst.location == ItemConstants.LOC_WAREHOUSE:
+	_index_add(_key_of(inst), _loc_of(inst))
+	if _loc_of(inst) == ItemConstants.LOC_WAREHOUSE:
 		warehouse_used += _size_of(inst)
 	total_granted += 1
 
@@ -299,7 +306,7 @@ func _destroy(ids: Array[String], tag: StringName, is_discard: bool) -> Dictiona
 		var inst := _by_id.get(id, null) as ItemInstance
 		if inst == null:
 			return fail.call(ItemConstants.REASON_MISSING_INSTANCE)
-		if not inst.is_in_warehouse():
+		if not WarehouseService.is_warehouse(inst.instance_id):
 			# 邮件实例不可销毁（核心 §4.7 第 1 条边界在出库口的落地）
 			return fail.call(ItemConstants.REASON_NOT_IN_WAREHOUSE)
 
@@ -316,9 +323,11 @@ func _destroy(ids: Array[String], tag: StringName, is_discard: bool) -> Dictiona
 func _detach(inst: ItemInstance) -> void:
 	instances.erase(inst)
 	_by_id.erase(inst.instance_id)
-	_index_sub(_key_of(inst), inst.location)
-	if inst.location == ItemConstants.LOC_WAREHOUSE:
+	_index_sub(_key_of(inst), _loc_of(inst))
+	if _loc_of(inst) == ItemConstants.LOC_WAREHOUSE:
 		warehouse_used -= _size_of(inst)
+	# ★ B3：实例销毁时清掉它的位置映射，避免 `WarehouseService.locations` 泄漏
+	WarehouseService.remove_location(inst.instance_id)
 
 
 ## 按条件挑选并销毁（04 / 05 的素材消耗）。
@@ -455,7 +464,7 @@ func transact(ops: Array) -> Dictionary:
 					var inst := _by_id.get(sid, null) as ItemInstance
 					if inst == null:
 						return fail.call(ItemConstants.REASON_MISSING_INSTANCE)
-					if not inst.is_in_warehouse():
+					if not WarehouseService.is_warehouse(inst.instance_id):
 						return fail.call(ItemConstants.REASON_NOT_IN_WAREHOUSE)
 					seen_remove[sid] = true
 					remove_ids.append(sid)
@@ -530,7 +539,9 @@ func transact(ops: Array) -> Dictionary:
 		inst.acquired_at = int(Time.get_unix_time_from_system())
 		inst.source = plan["source"]
 		inst.serial = _allocate_serial(inst.item_id, kind)
-		inst.location = (
+		# ★ B3：位置写入归 12（`inst.location` 已随 B2 删除）
+		WarehouseService.set_location(
+			inst.instance_id,
 			ItemConstants.LOC_MAIL if mailed_plan[i] else ItemConstants.LOC_WAREHOUSE
 		)
 		_attach(inst)
@@ -641,7 +652,7 @@ func sell(instance_ids: Array[String]) -> Dictionary:
 		var inst := _by_id.get(sid, null) as ItemInstance
 		if inst == null:
 			return fail.call(ItemConstants.REASON_MISSING_INSTANCE)
-		if not inst.is_in_warehouse():
+		if not WarehouseService.is_warehouse(inst.instance_id):
 			return fail.call(ItemConstants.REASON_NOT_IN_WAREHOUSE)
 		var def := ItemCatalog.get_def(inst.item_id)
 		if def == null:
@@ -704,7 +715,7 @@ func warehouse_usage() -> Dictionary:
 func mail_instances() -> Array[ItemInstance]:
 	var out: Array[ItemInstance] = []
 	for inst in instances:
-		if inst.is_in_mail():
+		if WarehouseService.is_mail(inst.instance_id):
 			out.append(inst)
 	out.sort_custom(_less)
 	return out
@@ -714,7 +725,7 @@ func mail_instances() -> Array[ItemInstance]:
 func query(category: StringName, quality_floor: int) -> Array[String]:
 	var picked: Array[ItemInstance] = []
 	for inst in instances:
-		if not inst.is_in_warehouse():
+		if not WarehouseService.is_warehouse(inst.instance_id):
 			continue
 		var def := ItemCatalog.get_def(inst.item_id)
 		if def == null:
@@ -793,7 +804,7 @@ func claim(instance_ids: Array[String]) -> Dictionary:
 		if inst == null:
 			return {"ok": false, "claimed": [] as Array[String], "remaining": [] as Array[String],
 				"reason": ItemConstants.REASON_MISSING_INSTANCE}
-		if inst.is_in_mail():
+		if WarehouseService.is_mail(inst.instance_id):
 			candidates.append(inst)
 		else:
 			# 已在仓库 → no-op，但计入 claimed：领取是幂等的（只把 location 写成同一个值）
@@ -838,8 +849,8 @@ func rebuild_count_index() -> Dictionary:
 	mail_count_index.clear()
 	warehouse_used = 0
 	for inst in instances:
-		_index_add(_key_of(inst), inst.location)
-		if inst.is_in_warehouse():
+		_index_add(_key_of(inst), _loc_of(inst))
+		if WarehouseService.is_warehouse(inst.instance_id):
 			warehouse_used += _size_of(inst)
 	return {"count_index": count_index.duplicate(), "warehouse_used": warehouse_used}
 
@@ -860,12 +871,15 @@ func rebuild_all() -> void:
 
 ## 存档形态（§4.6）。**文件与格式归 10**，本系统只提供这个字典。
 ## 键序固定：往返字节级稳定依赖它。
+## ★ v0.36（B4）：`location` 已从实例序列化移出（B2），改由本方法**附带 12 的位置段**——
+##   位置只有一份事实来源（`WarehouseService.locations`），实例条目不携带它。
 func to_save_dict() -> Dictionary:
 	var arr: Array = []
 	for inst in instances:
 		arr.append(inst.to_dict())
 	return {
 		"instances": arr,
+		"locations": WarehouseService.locations_to_dict(),  # ★ B4：位置段归 12
 		"warehouse_capacity": warehouse_capacity,
 		"serial_counters": serial_counters.duplicate(),
 		"total_granted": total_granted,
@@ -881,6 +895,13 @@ func from_save_dict(d: Dictionary) -> void:
 		for e in (arr as Array):
 			if e is Dictionary:
 				instances.append(ItemInstance.from_dict(e))
+	# ★ v0.36（B4）：位置段由 12 还原（`location` 不在实例条目里）。
+	#   旧档若仍带逐实例 `location` 键，`ItemInstance.from_dict` 已忽略它（B2），
+	#   这里以 12 的 `locations` 段为准；缺段则全部落默认 `warehouse`。
+	WarehouseService.reset_locations()
+	var locs = d.get("locations", {})
+	if locs is Dictionary:
+		WarehouseService.locations_from_dict(locs)
 	warehouse_capacity = int(d.get("warehouse_capacity", 1000))
 	var sc = d.get("serial_counters", {})
 	serial_counters = {}
@@ -924,6 +945,7 @@ func reset() -> void:
 	mail_count_index.clear()
 	warehouse_used = 0
 	WarehouseService.reset_box_usage()  # ★ v0.35：盲盒占位归仓库系统，清账也走它
+	WarehouseService.reset_locations()  # ★ v0.36（B4）：位置映射归仓库系统，清账也走它
 	serial_counters.clear()
 	total_granted = 0
 	total_consumed = 0

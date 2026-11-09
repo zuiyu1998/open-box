@@ -30,6 +30,63 @@ const INITIAL_BOX_SERIES := &"series_01"
 ##   本系统**只读**它们来做盲盒判定（W1 后续刀再把它们整体迁过来）。
 var box_used: int = 0
 
+## ★ v0.36（B1）：**物品实例的位置映射**（`instance_id -> location`）。
+##
+## `location` 从 `ItemInstance` **移出**，变为本系统维护的映射——"这件东西在哪"
+## **只有本系统这一份答案**（12-warehouse.md §7 方案 B 的第一步）。
+## 键 = `instance_id`（String，与 `ItemInstance.instance_id` 同型）；值 = `StringName`（`LOC_WAREHOUSE` / `LOC_MAIL`）。
+## 缺键 = 默认 `warehouse`（与旧 `ItemInstance.location` 的默认值一致，避免"凭空造位置"）。
+var locations: Dictionary = {}
+
+
+## 查询一个实例的当前位置。**缺键返回默认 `warehouse`**（旧实例默认值口径）。
+func location_of(instance_id: String) -> StringName:
+	return StringName(locations.get(instance_id, String(ItemConstants.LOC_WAREHOUSE)))
+
+
+## 写入一个实例的位置（**只有"产出落位 / 领取 / 读档还原"可以写**）。
+func set_location(instance_id: String, loc: StringName) -> void:
+	locations[instance_id] = loc
+
+
+## 移除一个实例的位置记录（**实例被销毁时**必须清掉，否则映射会泄漏）。
+func remove_location(instance_id: String) -> void:
+	locations.erase(instance_id)
+
+
+## 该实例是否在仓库里。
+func is_warehouse(instance_id: String) -> bool:
+	return location_of(instance_id) == ItemConstants.LOC_WAREHOUSE
+
+
+## 该实例是否在邮件里。
+func is_mail(instance_id: String) -> bool:
+	return location_of(instance_id) == ItemConstants.LOC_MAIL
+
+
+## 清空全部位置映射（新游戏 / 测试重置时由外部调用）。
+func reset_locations() -> void:
+	locations.clear()
+
+
+## ★ v0.36（B4）：位置段的存档形状——`{instance_id: "warehouse"|"mail"}`。
+## 键序不敏感（字典），但值统一为 String，供 JSON 序列化与字节级稳定。
+## 只输出**现存实例**的位置（已销毁实例的位置由 02 在 `_detach` 时移除，不会残留）。
+func locations_to_dict() -> Dictionary:
+	var out := {}
+	for k in locations.keys():
+		out[k] = String(locations[k])
+	return out
+
+
+## ★ v0.36（B4）：从存档位置段还原映射。**覆盖式**（调用方已先 `reset_locations()`）。
+## 只接受 `warehouse` / `mail` 两种取值，其它一律按缺键处理（默认 warehouse）。
+func locations_from_dict(d: Dictionary) -> void:
+	for k in d.keys():
+		var v := String(d[k])
+		if v == String(ItemConstants.LOC_WAREHOUSE) or v == String(ItemConstants.LOC_MAIL):
+			locations[k] = StringName(v)
+
 
 ## 盲盒在仓库里占的容量之和（派生值，不入档：载入后由 01 逐个 `place_box()` 重建）。
 func box_fits(sz: int = 1) -> bool:
@@ -73,6 +130,7 @@ func initialize(state: GameState) -> void:
 	if state == null:
 		return
 	reset_box_usage()
+	reset_locations()
 	if GachaCatalog.get_series(INITIAL_BOX_SERIES) != null:
 		GachaService.grant_box(state, INITIAL_BOX_SERIES, 1, &"init")
 
