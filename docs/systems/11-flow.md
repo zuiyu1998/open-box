@@ -11,7 +11,7 @@
 3. **转换白名单**：合法边只有 `menu ↔ game`、`menu ↔ settings`、`game ↔ settings`；**禁止原地切换**、**禁止跳到未知节点**。
 4. **设置的"来源记忆"**：`settings_return_to`——**从哪个节点进设置，关掉就回哪个**（用户裁决：设置可从任意场景进入）。没有来源 ⇒ 回菜单。
 5. **唯一换场景入口**：`FlowService.apply_scene()` 是全库**唯一**可以 `change_scene_to_file` 的地方。
-6. **场景清单**：`menu_screen.tscn`（四按钮）/ `settings_screen.tscn`（空壳）/ `game_screen.tscn`（**只做 tab 骨架**）＋ 两个**页场景**：**`src/warehouse/scenes/warehouse_page.tscn`（仓库，★ v0.36 起归属 12：整页代码——`warehouse_model` / `warehouse_view` / `warehouse_controller`——都在 `src/warehouse/scenes/`，本系统只负责把场景放进 tab）** / **`wish_machine.tscn`（许愿机）**。★ **v0.29 用户裁决：「许愿机」就是设备的名字**（`dev_basic_q1.tres` 的 `display_name` 已改为「许愿机」），**它的整页内容是一个独立场景**：设备名 / 描述 / 等级 / 本级两条效果（可开套系品质上限、开盒折扣）/ 升级价 + 升级按钮 / 原石余额 / **盲盒剩余开盒次数 + 数学期望 M̄**（★ v0.31，走 `EvalService`）/ 盲盒下拉 + 开一次/开 10 次 + 结果。**页面内容归 08 的视觉规格，行为入口归 01/04**（本系统只负责把场景放进 tab）。
+6. **场景清单**：`menu_screen.tscn`（四按钮）/ `settings_screen.tscn`（空壳）/ `game_screen.tscn`（**只做 tab 骨架**）＋ 三个**页场景**：**`src/warehouse/scenes/warehouse_page.tscn`（仓库，★ v0.36 起归属 12：整页代码——`warehouse_model` / `warehouse_view` / `warehouse_controller`——都在 `src/warehouse/scenes/`，本系统只负责把场景放进 tab）** / **`wish_machine.tscn`（许愿机）** / **`src/market/scenes/market_page.tscn`（市场，★ v0.38 起归属 13：`market_model` / `market_view` / `market_controller`）。★ **v0.29 用户裁决：「许愿机」就是设备的名字**（`dev_basic_q1.tres` 的 `display_name` 已改为「许愿机」），**它的整页内容是一个独立场景**：设备名 / 描述 / 等级 / 本级两条效果（可开套系品质上限、开盒折扣）/ 升级价 + 升级按钮 / 原石余额 / **盲盒剩余开盒次数 + 数学期望 M̄**（★ v0.31，走 `EvalService`）/ 盲盒下拉 + 开一次/开 10 次 + 结果。**页面内容归 08 的视觉规格，行为入口归 01/04/13**（本系统只负责把场景放进 tab）。
 7. **★ 会话容器 `GameSession`（v0.28）**：**"这一局是哪个 `GameState`"只此一份**。`FlowService` 只转场、**不持游戏数据**；切场景之后新场景还拿得到这一局，靠的就是 `GameSession.state`。
    - 菜单「**新游戏**」→ `GameSession.start_new_game()`（内部 `GameState.new_game()`，**开局 = 设备 + 原石 + 金币**）→ 再 `transition(game)`；
    - 菜单「**继续**」→ `GameSession.load()`——**读档归 10**，本版是**占位实现（恒 false）** ⇒ 无档时**明确拒绝**（置灰 + `continue_unavailable`），**不装作能继续**；
@@ -70,7 +70,7 @@ signal flow_changed(from, to)            # 只在真转换时发
 5. **信号只发真转换**（被拒的不发，`from` / `to` 正确）。
 6. **三个节点的场景文件都必须存在**（`ResourceLoader.exists`）。
 7. **菜单内容**（`test_flow_service.gd`）：游戏名称 + 四个按钮（**顺序 = 继续 → 新游戏 → 存档 → 设置**）、各自去向；**无档时「继续」不切节点并转发 `continue_unavailable`**（v0.28 语义：读档归 10）。
-8. **游戏场景**（`test_game_screen.gd`，51 条）：两个 tab **都是场景实例**（`src/warehouse/scenes/warehouse_page.tscn` / `src/flow/scenes/wish_machine.tscn`）、`refresh()` **不重建页**（页引用保持有效）；仓库页占用/分组/盲盒数；许愿机页设备名「许愿机」/等级/两条效果/升级真扣原石/余额不足置灰/开盒真产出/下拉只列仓库盒子。
+8. **游戏场景**（`test_game_screen.gd`，77 条）：三个 tab **都是场景实例**（`src/warehouse/scenes/warehouse_page.tscn` / `src/flow/scenes/wish_machine.tscn` / `src/market/scenes/market_page.tscn`）、`refresh()` **不重建页**（页引用保持有效）；仓库页占用/分组/盲盒数；许愿机页设备名「许愿机」/等级/两条效果/升级真扣原石/余额不足置灰/开盒真产出/下拉只列仓库盒子；市场页金币/刷新倒计时/上架清单/买入真扣金币发实例/卖出真换金币。
 9. **旁路写盘**：本机 runner 拿不到 Godot 的 stdout，两个 flow 测试都会另写 `user://test_*.txt`（正常环境只是一次无害的额外写盘）。
 
 ## 7. 待定项

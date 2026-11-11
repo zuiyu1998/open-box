@@ -47,7 +47,8 @@ $scenes = @(
     'res://src/flow/tests/test_flow_service.tscn',
     'res://src/flow/tests/test_game_screen.tscn',
     'res://src/devices/tests/test_device_service.tscn',
-    'res://src/warehouse/tests/test_warehouse_service.tscn'
+    'res://src/warehouse/tests/test_warehouse_service.tscn',
+    'res://src/market/tests/test_market_service.tscn'
 )
 $timeoutMs = 120000
 

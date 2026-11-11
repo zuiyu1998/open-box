@@ -16,9 +16,12 @@ const KIND_REFUND := &"refund"    # （保留值）曾经是"拆卸装置 / 模�
 const KIND_MAIL := &"mail"        # 保留值：系统补偿 / 邮件直投（切片内无调用方）
 const KIND_MIGRATE := &"migrate"  # 存档迁移产出（注意不是 migration）
 const KIND_UNLOCK := &"unlock"    # 里程碑 / 套系解锁发放
+## ★ v0.38（13-market）：**市场买入产出**。它是**主动操作**（玩家花钱买）——
+## 放不下 ⇒ 拒绝整笔（扣金币与发物品同生共死），所以归入 `ACTIVE_KINDS`。
+const KIND_MARKET := &"market"
 
 const ALL_KINDS: Array[StringName] = [
-	KIND_GACHA, KIND_CONVERT, KIND_REFUND, KIND_MAIL, KIND_MIGRATE, KIND_UNLOCK,
+	KIND_GACHA, KIND_CONVERT, KIND_REFUND, KIND_MAIL, KIND_MIGRATE, KIND_UNLOCK, KIND_MARKET,
 ]
 
 # ── 实例位置（02-item.md §4.2 / §5.10）──────────────────────────────────────────
@@ -34,7 +37,7 @@ const OVERFLOW_REJECT := &"reject"  # 主动操作：装不下 → 拒绝整个�
 # 被动产出（放不下进邮件）
 const PASSIVE_KINDS: Array[StringName] = [KIND_GACHA, KIND_MIGRATE, KIND_UNLOCK, KIND_MAIL]
 # 主动操作（放不下拒绝整个操作）
-const ACTIVE_KINDS: Array[StringName] = [KIND_CONVERT, KIND_REFUND]
+const ACTIVE_KINDS: Array[StringName] = [KIND_CONVERT, KIND_REFUND, KIND_MARKET]
 
 # ── consume / discard 的出口标签（02-item.md §5.7 R-M9）─────────────────────────
 const TAG_FUEL := &"fuel"

@@ -1,0 +1,61 @@
+[gd_scene load_steps=3 format=3 uid="uid://cob0mktpage1"]
+
+[ext_resource type="Script" path="res://src/market/scenes/market_view.gd" id="1_view"]
+[ext_resource type="Script" path="res://src/market/scenes/market_controller.gd" id="2_ctrl"]
+
+[node name="MarketPage" type="VBoxContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 10
+script = ExtResource("1_view")
+
+[node name="Gold" type="Label" parent="."]
+layout_mode = 2
+text = "金币 0"
+
+[node name="Refresh" type="Label" parent="."]
+layout_mode = 2
+text = ""
+
+[node name="Sep" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="Listings" type="Label" parent="."]
+layout_mode = 2
+autowrap_mode = 3
+text = "市场暂无可购买的物品"
+
+[node name="BuyRow" type="HBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BuyPicker" type="OptionButton" parent="BuyRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="BuyButton" type="Button" parent="BuyRow"]
+layout_mode = 2
+text = "买一件"
+
+[node name="SellRow" type="HBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="SellPicker" type="OptionButton" parent="SellRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="SellButton" type="Button" parent="SellRow"]
+layout_mode = 2
+text = "卖一件"
+
+[node name="Result" type="Label" parent="."]
+layout_mode = 2
+autowrap_mode = 3
+text = ""
+
+[node name="Controller" type="Node" parent="."]
+script = ExtResource("2_ctrl")

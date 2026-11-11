@@ -30,6 +30,8 @@ func _ready() -> void:
 	await _test_wish_machine_device()
 	_reset_world()
 	await _test_wish_machine_open()
+	_reset_world()
+	await _test_market_page()
 	FlowService.auto_scene_change = true
 	var summary := "=== 结果：%d 通过 / %d 失败 ===" % [_pass, _fail]
 	print("\n" + summary)
@@ -79,20 +81,23 @@ func _make_screen():
 # ══════════════════════════════════════════════════════════════════════════════
 
 func _test_structure() -> void:
-	print("— §3.0 顶层 tab：仓库 / 许愿机")
+	print("— §3.0 顶层 tab：仓库 / 许愿机 / 市场")
 	var scr = await _make_screen()
 	if scr == null:
 		return
 	var titles: Array = scr.tab_titles()
-	eq(titles.size(), 2, "两个 tab")
+	eq(titles.size(), 3, "三个 tab")
 	eq(titles[0], "仓库", "第 1 个 tab = 仓库")
 	eq(titles[1], "许愿机", "第 2 个 tab = 许愿机")
+	eq(titles[2], "市场", "第 3 个 tab = 市场（★ v0.38）")
 
-	# ★ v0.30：两个 tab 的内容都是**独立场景实例**（MVC：许愿机页 = View + 子节点 Controller）
+	# ★ v0.30：tab 的内容都是**独立场景实例**（MVC：页 = View + 子节点 Controller）
 	var wh: Node = scr.page_node("WarehousePage")
 	var wish: Node = scr.page_node("WishPage")
+	var mkt: Node = scr.page_node("MarketPage")
 	ok(wh != null, "仓库页存在")
 	ok(wish != null, "许愿机页存在")
+	ok(mkt != null, "市场页存在")
 	if wh != null:
 		ok(String(wh.get_script().resource_path).ends_with("warehouse_view.gd"),
 			"仓库页根 = warehouse_view（View）（%s）" % wh.get_script().resource_path)
@@ -104,10 +109,18 @@ func _test_structure() -> void:
 		var ctrl: Node = wish.get_node_or_null("Controller")
 		ok(ctrl != null and String(ctrl.get_script().resource_path).ends_with("wish_machine_controller.gd"),
 			"许愿机页有 Controller 子节点（%s）" % (ctrl.get_script().resource_path if ctrl else "nil"))
+	if mkt != null:
+		ok(String(mkt.get_script().resource_path).ends_with("market_view.gd"),
+			"市场页根 = market_view（View）（%s）" % mkt.get_script().resource_path)
+		var mkt_ctrl: Node = mkt.get_node_or_null("Controller")
+		ok(mkt_ctrl != null and String(mkt_ctrl.get_script().resource_path).ends_with("market_controller.gd"),
+			"市场页有 Controller 子节点（%s）" % (mkt_ctrl.get_script().resource_path if mkt_ctrl else "nil"))
 
 	var tabs: TabContainer = scr.get_node("Tabs")
 	tabs.current_tab = 1
 	eq(tabs.current_tab, 1, "可以切到「许愿机」")
+	tabs.current_tab = 2
+	eq(tabs.current_tab, 2, "可以切到「市场」")
 	tabs.current_tab = 0
 	eq(tabs.current_tab, 0, "可以切回「仓库」")
 
@@ -279,4 +292,62 @@ func _test_wish_machine_open() -> void:
 	var wish2: Node = scr2.page_node("WishPage")
 	eq(wish2.get_node("Controller").snapshot()["box_options"].size(), 1, "下拉**只列仓库里的盒子**（不含邮件那个）")
 	scr2.queue_free()
+	await get_tree().process_frame
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ⑤ 市场页
+# ══════════════════════════════════════════════════════════════════════════════
+
+func _test_market_page() -> void:
+	print("— §3.3 市场页：显示金币 / 刷新倒计时 / 上架清单")
+	_reset_world()
+	MarketService.reset()
+	var st := GameState.new_game()
+	var scr = await _make_screen()
+	scr.bind_state(st)
+	await get_tree().process_frame
+	var mkt: Node = scr.page_node("MarketPage")
+	var ctrl: Node = mkt.get_node("Controller")
+	var s: Dictionary = ctrl.snapshot()
+
+	ok(String(s["gold"]).find("金币") >= 0, "显示金币余额（%s）" % s["gold"])
+	ok(String(s["refresh"]).find("距刷新") >= 0, "显示刷新倒计时（%s）" % s["refresh"])
+	eq((s["listing_lines"] as Array).size(), MarketService.SLOT_COUNT,
+		"上架清单 = SLOT_COUNT 格")
+	eq((s["buy_options"] as Array).size(), MarketService.SLOT_COUNT,
+		"买入下拉选项数 == 上架格数")
+	eq(s["buy_disabled"], false, "有货 ⇒ 买按钮可点")
+	eq(s["sell_disabled"], true, "仓库无可售实例 ⇒ 卖按钮置灰")
+
+	print("— §3.3 市场页：买入真扣金币、真发实例")
+	# 发一笔金币足够买任意一件上架品
+	ItemService.grant_currency(ItemConstants.CURRENCY_GOLD, 100000,
+		ItemConstants.CURRENCY_SOURCE_INIT)
+	scr.refresh()
+	await get_tree().process_frame
+	var gold_before := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
+	var inst_before := ItemService.instances.size()
+	var buy_btn: Button = mkt.get_node("BuyRow/BuyButton")
+	buy_btn.pressed.emit()
+	await get_tree().process_frame
+	var s2: Dictionary = ctrl.snapshot()
+	ok(String(s2["result"]).find("买入成功") >= 0, "买入成功（%s）" % s2["result"])
+	ok(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD) < gold_before, "金币真扣")
+	ok(ItemService.instances.size() > inst_before, "真发了一个实例")
+
+	print("— §3.3 市场页：卖出真发金币、实例消失")
+	# 现在仓库里至少有刚才买入的那一件（可售），卖按钮应可点
+	var s3: Dictionary = ctrl.snapshot()
+	eq(s3["sell_disabled"], false, "有可售实例 ⇒ 卖按钮可点")
+	var sell_btn: Button = mkt.get_node("SellRow/SellButton")
+	var gold_before_sell := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
+	var inst_before_sell := ItemService.instances.size()
+	sell_btn.pressed.emit()
+	await get_tree().process_frame
+	var s4: Dictionary = ctrl.snapshot()
+	ok(String(s4["result"]).find("卖出成功") >= 0, "卖出成功（%s）" % s4["result"])
+	ok(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD) > gold_before_sell, "金币真增")
+	ok(ItemService.instances.size() < inst_before_sell, "实例被销毁")
+	scr.queue_free()
 	await get_tree().process_frame

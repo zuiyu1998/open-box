@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cob0testmkt1"]
+
+[ext_resource type="Script" path="res://src/market/tests/test_market_service.gd" id="1_mkt"]
+
+[node name="TestMarketService" type="Node"]
+script = ExtResource("1_mkt")
