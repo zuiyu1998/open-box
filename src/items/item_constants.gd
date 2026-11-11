@@ -162,7 +162,9 @@ const QUALITY_COLORS := {
 # ── ★ v0.22：物品内容的**六档数值阶梯**（🔧 全部是示意值，标定只改这一处）───────────
 ## `value`：几何 ×3（`02-item.md` §6 的价值阶梯）。它是 `M̄ = Σ(pᵢ × vᵢ)` 的唯一输入，
 ##   改这里等于整体缩放期望 ⇒ 07 的 ρ 主力旋钮之一。
-## `size`：仓库占用（核心 D16 示意 1/2/5/10，5–6 档按同精神外推，**待标定**）。
+## `size`：**★ v0.37 已从六档阶梯中删除**——尺寸改为**二维向量**（`ItemDef.size: Vector2i`，
+##   宽 × 高、占格数 = `x*y`），且**与品质无关**（用户裁决）。当前全部物品 `1×1`
+##   （见 `DEFAULT_ITEM_SIZE`）。将来要做"大件占大块"，只改内容配置，**不再走品质阶梯**。
 ## `rarity`：**权重**（越大越常见）——**★ v0.23：它与品质挂钩，品质越高权重必须越低**
 ##   （严格单调，由 `ItemCatalog.validate()` 的 **V9** 在加载期强制）。六档默认阶梯
 ##   60:30:10:5:2:1（🔧 归核心 D19）；生成器按它写内容，标定只改这一行。
@@ -170,9 +172,14 @@ const QUALITY_COLORS := {
 ## **这些表是"内容生成"的唯一数据源**（`tools/gen_item_content.gd` 读它们写 42 个 `.tres`）；
 ## 手改 `.tres` 之前先改这里，否则下次重新生成会被覆盖。
 const QUALITY_VALUE := {1: 1, 2: 3, 3: 9, 4: 27, 5: 81, 6: 243}
-const QUALITY_SIZE := {1: 1, 2: 2, 3: 5, 4: 10, 5: 20, 6: 40}
 const QUALITY_RARITY := {1: 60, 2: 30, 3: 10, 4: 5, 5: 2, 6: 1}
 const QUALITY_SELL_GOLD := {1: 2, 2: 4, 3: 8, 4: 16, 5: 32, 6: 64}
+
+## ★ v0.37：**物品尺寸的默认值**（二维向量：宽 × 高，单位 = 仓库网格的一格）。
+## **尺寸与品质无关**；当前全部 42 个物品都用这个默认值（生成器不再写 `size`，取默认即可）。
+## 将来要给某类物品更大的占位：在 `tools/gen_item_content.gd` 里加一张 `<item_id> -> Vector2i`
+## 覆盖表，**不要**退回"按品质阶梯"的旧口径。
+const DEFAULT_ITEM_SIZE := Vector2i(1, 1)
 
 # ── ★ v0.22：42 个物品的**展示名**（7 类别 × 6 档，下标 0 = 品质 1）──────────────
 ## 内容（名字）与数值（上面四张表）分开：**改名不动平衡，改数不动名字**。
@@ -233,12 +240,9 @@ static func item_name(category: StringName, q: int) -> String:
 
 
 ## 六档数值阶梯的只读查询（内容生成器用；表缺失返回 -1，让"漏配"立刻暴露）。
+## **注意：尺寸不在其中**——`size` 是二维向量且与品质无关（v0.37），见 `DEFAULT_ITEM_SIZE`。
 static func quality_value(q: int) -> int:
 	return int(QUALITY_VALUE.get(q, -1))
-
-
-static func quality_size(q: int) -> int:
-	return int(QUALITY_SIZE.get(q, -1))
 
 
 static func quality_rarity(q: int) -> int:

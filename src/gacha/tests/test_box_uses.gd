@@ -121,7 +121,7 @@ func _mk(id: String, cat: StringName, quality: int) -> ItemDef:
 	d.category = cat
 	d.quality = quality
 	d.value = quality                 # 价值只为可读性；本套件的断言都不看它
-	d.size = 2
+	d.size = Vector2i(2, 1)           # ★ v0.37：二维尺寸（占 2 格）
 	d.rarity = 10                     # 全部相等 ⇒ 基础分布是均等的（便于读摊回后的数字）
 	ItemCatalog.register(d)
 	return d

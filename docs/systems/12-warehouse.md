@@ -14,6 +14,7 @@
 4. **数据源（用户裁决）**：
    - **初始化内容**：`WarehouseService.initialize(state)`——新游戏开局发的持有物（当前 = 一个初始盲盒）；
    - **存档**：`WarehouseService.hydrate(state, data)`——从 10 的存档注入"仓库/邮件里有什么"。
+5. **★ v0.36：仓库页（MVC 整页代码）归本系统**：`src/warehouse/scenes/warehouse_page.tscn` ＋ `warehouse_model` / `warehouse_view` / `warehouse_controller` 三个脚本（从 `src/flow/scenes/` 迁入）。**视觉规格仍归 08**；11 只负责把场景放进 tab。
 
 ## 2. 不负责什么（边界）
 
@@ -24,7 +25,7 @@
 | 物品的**位置**（`warehouse` / `mail`）——**★ v0.36：已从 02 迁入本系统**（`locations` 映射） | **本系统**（`02` 只调 `WarehouseService.location_of()` 等查询） |
 | 盲盒的池子/模块/寿命（`Box` 的业务字段） | `01-gacha.md` |
 | 存档文件的读写、信封、版本、迁移 | `10-progression.md` |
-| 仓库面板长什么样 | `08-ui-panels.md` / `11-flow.md` 的 `warehouse_page` |
+| 仓库面板**长什么样**（视觉规格 / 线框图） | `08-ui-panels.md`（**代码与场景已归本系统**，见 §1 第 5 条） |
 
 ## 3. 数据结构
 
@@ -46,6 +47,19 @@ func reset_locations() -> void
 func locations_to_dict() -> Dictionary           # 存档位置段
 func locations_from_dict(d: Dictionary) -> void  # 读档还原（只认 warehouse / mail）
 ```
+
+**★ v0.36：场景层（从 `src/flow/scenes/` 迁入）**
+
+```gdscript
+# res://src/warehouse/scenes/ —— 仓库页（MVC；页面代码归 12，视觉规格归 08）
+warehouse_page.tscn        # 场景根 WarehousePage（挂 warehouse_view.gd）+ 子节点 Controller
+warehouse_model.gd         # class_name WarehouseModel extends RefCounted —— 只读快照（占用 / 分组 / 盲盒数）
+warehouse_view.gd          # class_name WarehouseView extends VBoxContainer —— 只渲染 snapshot
+warehouse_controller.gd    # class_name WarehouseController extends Node —— 唯一把 Model 与 View 连起来的地方
+```
+
+⚠️ **移动文件后必须重建 Godot 的全局类缓存**（`.godot/global_script_class_cache.cfg` 仍指旧路径会报
+`Class "X" hides a global script class`）：跑一次 `godot --headless --import --path .` 即可重扫。
 
 ## 4. 规则（写死）
 
@@ -98,3 +112,24 @@ func locations_from_dict(d: Dictionary) -> void  # 读档还原（只认 warehou
 > **B4 的落地边界（本次实现口径）**：系统 10（存档层 / `save.json` 封装 / 版本迁移）**在代码里尚未落地**（`src/flow/session.gd` 的 `has_save()` / `load()` 仍是占位，全库没有 `SaveService` / `ProgressionService`）。因此本次 B4 **不新建 10 的存档文件系统、不实现 v7 迁移函数**；只把"位置不再随实例序列化、由 12 输出独立 `locations` 段"这一**形状**落在 `ItemService.to_save_dict()` / `from_save_dict()` 上（该字典就是 10 将来落盘的 `inventory` 块）。`from_save_dict` 对缺 `locations` 段的旧档一律回填默认 `warehouse`。**"存档升 v7 + `migrate_v6_to_v7()`" 留待 10 落地时接上**——那时的迁移只需读旧档实例里的 `location` 键写入 12 的映射。
 
 **注意**：`Box.location`（v0.26 加的）暂留 `Box` 上——它随 `Box` 序列化、容量账已在 12（W1-a），B 的目标是**物品实例**的位置；Box 位置是否同迁留待 B 完成后另行评估。
+
+## 8. ★ v0.37 仓库网格（页面细化）
+
+**用户裁决：仓库页做成网格——每个物品按 `size`（二维尺寸）占一块，格子边长 128×128。**
+
+| 项 | 规格 |
+|---|---|
+| **格子尺寸** | **128 × 128 px**（唯一常量 = `WarehouseModel.CELL_SIZE`；`warehouse_grid.gd` 只读它，别处不得另写一个数） |
+| **画出的空间** | **`warehouse_capacity` 格**（默认 1000 格），`ScrollContainer` 内可滚动、**不缩放** |
+| **占格** | 每个物品占 `size.x × size.y` 格（`ItemDef.size: Vector2i`，★ v0.37 二维、与品质无关，当前全 `1×1`）；盲盒固定 `1×1` |
+| **排布** | 行主序**首次适配**（first-fit）；**列数固定 12**（用户裁决，`GRID_COLUMNS`）；行数 = `ceil(占格总数 / 12)`；仓库侧一定落在容量内（容量账保证），邮件侧不计容量、允许越界继续往后排 |
+| **邮件** | **邮件物品也进网格**，但块被**压暗 + 锁标记**（`locked`），与仓库可用块一眼可辨 |
+| **代码** | 布局算在 `WarehouseModel.grid()`（纯数据、单位=格），绘制在 `WarehouseGrid._draw()`（单位=px），`WarehouseView` 只转交 |
+
+**规则：**
+- **R12-5 网格与容量账同源**：`Σ(块的 w×h) == warehouse_used`（仓库侧），别处不得另算一遍；
+- **R12-6 块不重叠**：首次适配保证任意两块占的格互不相交；
+- **R12-7 尺寸只有一个来源**：占格数一律 `ItemDef.cells()`（`x*y`），`ItemService.warehouse_used` / `_fits` / 事务预演与网格共用它；
+- **R12-8 邮件块不占仓库**：`locked == true` 的块不计入 `warehouse_used`（它与容量账同一口径）。
+
+**测试**：`src/warehouse/tests/test_warehouse_service.gd` 的网格用例（格子 128 / 画满容量格 / 按尺寸占块 / 邮件块 locked / 盲盒 1×1 / 布局确定性 / 块不重叠）；`src/flow/tests/test_game_screen.gd` 断言网格控件真的接进了页面（`grid_view().has_layout()`、块数与模型一致、尺寸 = 列数×行数×128）。

@@ -240,7 +240,7 @@ func clear() -> void:
 ## 返回 { ok: bool, errors: Array[String] }；**只拦非法配置、不改任何数值**。
 ##
 ## V1：`(category, quality) → item_id` 唯一（一个两维键只允许对应一个 item_id）
-## V2：`ItemDef.size > 0`
+## V2（★ v0.37）：`ItemDef.size` 是**二维向量**，两个分量都必须 >= 1（占格数 = `x*y`）
 ## V3：`ItemDef.value > 0`
 ## V4：同一 `item_id` 不得重复注册
 ## V8（★ v0.22）：`ItemDef.quality` ∈ 1..6（白 / 绿 / 蓝 / 紫 / 金 / 红）——越界的品质会让
@@ -265,11 +265,14 @@ func validate() -> Dictionary:
 		else:
 			seen[ck] = def.item_id
 
-	# V2：size > 0
+	# V2（★ v0.37）：**二维尺寸**——`size.x >= 1` 且 `size.y >= 1`。
+	# 任一分量为 0 都会让物品"不占地方"（占格数 = x*y = 0）⇒ 仓库可以无限装，
+	# 容量这个约束当场失效；负值更会让 `warehouse_used` 被反向抵扣。
 	for k in _by_id.keys():
 		var def := _by_id[k] as ItemDef
-		if def.size <= 0:
-			errors.append("V2 非法：`%s`.size = %d，必须 > 0" % [def.item_id, def.size])
+		if not def.has_valid_size():
+			errors.append("V2 非法：`%s`.size = %s，两个分量都必须 >= 1"
+				% [def.item_id, str(def.size)])
 
 	# V3：value > 0
 	# `value` 是每个物品的**固定**价值字段（`ItemDef.value`，口径归本系统、计算归 07）。
@@ -289,9 +292,10 @@ func validate() -> Dictionary:
 		var first: Dictionary = _duplicate_first.get(key, {})
 		var last := _by_id.get(key, null) as ItemDef
 		errors.append(
-			"V4 冲突：`%s` 被重复注册——首次 value=%d/size=%d，末次 value=%d/size=%d"
-			% [id, int(first.get("value", 0)), int(first.get("size", 0)),
-				last.value if last != null else 0, last.size if last != null else 0]
+			"V4 冲突：`%s` 被重复注册——首次 value=%d/size=%s，末次 value=%d/size=%s"
+			% [id, int(first.get("value", 0)), str(first.get("size", Vector2i.ZERO)),
+				last.value if last != null else 0,
+				str(last.size) if last != null else str(Vector2i.ZERO)]
 			+ "。同一 item_id 只允许一个定义：后者会静默覆盖前者，而实例按 item_id 取值，"
 			+ "于是全部现存实例的价值随之改变——**同类物品的价值必须确定**"
 		)

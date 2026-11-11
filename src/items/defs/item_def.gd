@@ -19,7 +19,15 @@ extends Resource
 ## 越界由校验器 **V8** 拦下（`ItemCatalog.validate()`），不是靠 `@export_range`（它只约束检查器）。
 @export_range(1, 6) var quality: int = 1
 @export var value: int = 1                  # 该物品的 TVU 价值 v（本系统定义，07 使用）
-@export var size: int = 1                   # 占仓库多少空间；必须 > 0（§5.12 V2）
+## ★ v0.37：**尺寸改为二维向量**（`宽 × 高`，单位 = 仓库网格的一格）。
+##
+## · **占格数 = `size.x * size.y`**（容量记账按格数：`ItemService.warehouse_used` 就是"已占格数"）；
+## · **容量 `warehouse_capacity` 也按格数计**（默认 1000 格）；
+## · **两个分量都必须 ≥ 1**（校验器 V2），任一分量为 0 会让物品"不占地方"，是配置错误；
+## · **尺寸与品质无关**（用户裁决）：品质只决定 `value` / `rarity` / `sell_gold`，
+##   **不再有"越高档越大"的阶梯**（旧的 `ItemConstants.QUALITY_SIZE` 已删除）；
+## · **当前全部物品默认 `1×1`**（`ItemConstants.DEFAULT_ITEM_SIZE`），要差异化只改内容配置。
+@export var size: Vector2i = Vector2i(1, 1)
 @export_range(1, 100000) var rarity: int = 10
 ## ★ `rarity` 是**权重**，不是「稀有等级」：**数值越大越常见**。
 ## 物品池的产生概率由它归一化而来（`ItemPool.compute_probabilities()`）：
@@ -47,6 +55,17 @@ extends Resource
 ## 派生索引键。它只是索引键，**不是持有量的身份**（身份已由 instance_id 承担）。
 func count_key() -> String:
 	return "%s:%d" % [category, quality]
+
+
+## ★ v0.37：**占格数 = 宽 × 高**（容量记账的唯一口径）。
+## `ItemService` 的 `warehouse_used` / `_fits()` / 事务预演一律用它，**不得各自乘一遍**。
+func cells() -> int:
+	return maxi(size.x, 0) * maxi(size.y, 0)
+
+
+## 是否合法的二维尺寸（两个分量都 ≥ 1）。校验器 V2 与内容生成器共用这一条判据。
+func has_valid_size() -> bool:
+	return size.x >= 1 and size.y >= 1
 
 
 static func make_count_key(p_category: StringName, p_quality: int) -> String:

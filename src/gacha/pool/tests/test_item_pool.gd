@@ -75,7 +75,7 @@ func _mk(item_id: String, rarity: int) -> ItemDef:
 	d.category = &"stardust"
 	d.quality = 2
 	d.value = 3
-	d.size = 2
+	d.size = Vector2i(2, 1)   # ★ v0.37：二维尺寸（占 2 格）
 	d.rarity = rarity
 	return d
 

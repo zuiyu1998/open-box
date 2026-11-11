@@ -9,6 +9,5 @@ display_name = "微处理器"
 category = &"electronic"
 quality = 4
 value = 27
-size = 10
 rarity = 5
 sell_gold = 16

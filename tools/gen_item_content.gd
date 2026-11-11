@@ -4,9 +4,10 @@
 ##   Godot_v4.5.1-stable_win64_console.exe --headless --path . --script res://tools/gen_item_content.gd
 ##
 ## 为什么要有生成器，而不是手写 42 个 `.tres`：
-##   1. **数值只有一个来源**：`ItemConstants.QUALITY_VALUE / QUALITY_SIZE / QUALITY_RARITY /
-##      QUALITY_SELL_GOLD` 是六档阶梯的唯一定义；手写 42 份等于把同一组数字抄 42 遍，
-##      改一处就漏 41 处（而 `value` 直接进 `M̄`，写错是沉默的）。
+##   1. **数值只有一个来源**：`ItemConstants.QUALITY_VALUE / QUALITY_RARITY /
+##      QUALITY_SELL_GOLD` 是六档阶梯的唯一定义（★ v0.37：**`size` 已移出阶梯**——
+##      它是二维向量且与品质无关，全部物品取 `DEFAULT_ITEM_SIZE`）；手写 42 份等于把
+##      同一组数字抄 42 遍，改一处就漏 41 处（而 `value` 直接进 `M̄`，写错是沉默的）。
 ##   2. **名字与数值分开**：`ItemConstants.ITEM_NAMES` 管内容（展示名），上面的四张表管平衡。
 ##   3. **重跑即重建**：**改常量后重跑本脚本**，`.tres` 全量覆盖；**不要手改 `.tres`**。
 ##
@@ -31,12 +32,11 @@ func _init() -> void:
 	for q in range(ItemConstants.QUALITY_MIN, ItemConstants.QUALITY_MAX + 1):
 		# 六档阶梯必须齐全（缺一档就不生成，避免写出半套内容）
 		var value := ItemConstants.quality_value(q)
-		var size := ItemConstants.quality_size(q)
 		var rarity := ItemConstants.quality_rarity(q)
 		var sell_gold := ItemConstants.quality_sell_gold(q)
-		if value <= 0 or size <= 0 or rarity <= 0 or sell_gold < 0:
-			problems.append("品质 %d 的阶梯缺失或不合法（value=%d size=%d rarity=%d sell_gold=%d）"
-				% [q, value, size, rarity, sell_gold])
+		if value <= 0 or rarity <= 0 or sell_gold < 0:
+			problems.append("品质 %d 的阶梯缺失或不合法（value=%d rarity=%d sell_gold=%d）"
+				% [q, value, rarity, sell_gold])
 			continue
 		# ★ v0.23：权重与品质挂钩 ⇒ 阶梯本身就是"越高越低"。低一档存在时先校验一次，
 		#   免得生成出 V9 直接拒绝的内容（生成器与校验器必须说同一件事）。
@@ -57,7 +57,9 @@ func _init() -> void:
 			def.category = StringName(cat)
 			def.quality = q
 			def.value = value
-			def.size = size
+			# ★ v0.37：尺寸是**二维向量**且**与品质无关**（用户裁决）——
+			#   全部物品用同一个默认值 `DEFAULT_ITEM_SIZE`（1×1）；将来要差异化再加覆盖表。
+			def.size = ItemConstants.DEFAULT_ITEM_SIZE
 			def.rarity = rarity
 			def.sell_gold = sell_gold
 			var path := "%s/%s.tres" % [OUT_DIR, def.item_id]

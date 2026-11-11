@@ -129,7 +129,9 @@ func _setup_catalog() -> void:
 		cur.description = "夹具"
 		ItemCatalog.register_currency(cur)
 	# 2 类别 × 3 品质 = 6 个键（切片范围）
-	var sizes := {1: 1, 2: 2, 3: 5}
+	# ★ v0.37：尺寸改为**二维向量**（宽 × 高）。夹具刻意保留"面积 1 / 2 / 5"这三档，
+	#   因为大量容量测试（溢出边界 / 部分领取 / 事务空间预演）依赖它们的相对大小。
+	var sizes := {1: Vector2i(1, 1), 2: Vector2i(2, 1), 3: Vector2i(5, 1)}
 	var values := {1: 1, 2: 3, 3: 9}
 	# ★ v0.23：权重与品质挂钩（品质越高越难出，V9 严格单调）——夹具也必须满足，
 	#   否则"合法配置一律通过"这条断言会被自己的夹具打回。
@@ -219,7 +221,7 @@ func _test_category_content() -> void:
 	orphan.category = &"no_such_category"
 	orphan.quality = 1
 	orphan.value = 1
-	orphan.size = 1
+	orphan.size = Vector2i(1, 1)
 	orphan.rarity = 10
 	ItemCatalog.register(orphan)
 	var rep2 := ItemCatalog.validate()
@@ -263,7 +265,7 @@ func _test_quality_tiers() -> void:
 	d.category = &""          # 留空 ⇒ 不触发"类别未注册"，专测 V8
 	d.quality = 7
 	d.value = 1
-	d.size = 1
+	d.size = Vector2i(1, 1)
 	d.rarity = 10
 	ItemCatalog.register(d)
 	var rep := ItemCatalog.validate()
@@ -315,11 +317,12 @@ func _test_item_content() -> void:
 				"category": String(cat.category_id),
 				"quality": q,
 				"value": ItemConstants.quality_value(q),
-				"size": ItemConstants.quality_size(q),
+				# ★ v0.37：尺寸是**二维向量**且**与品质无关** ⇒ 全部物品都是默认 1×1
+				"size": ItemConstants.DEFAULT_ITEM_SIZE,
 				"rarity": ItemConstants.quality_rarity(q),
 				"sell_gold": ItemConstants.quality_sell_gold(q),
 			}
-			eq(got, want, "`%s` 的六档阶梯逐项正确（名 / 值 / 大小 / 权重 / 售价）" % want["id"])
+			eq(got, want, "`%s` 的六档阶梯逐项正确（名 / 值 / 尺寸 / 权重 / 售价）" % want["id"])
 			checked += 1
 	eq(checked, 42, "42 格全部核过（没有空格、没有重复）")
 	eq(ItemCatalog.all_item_ids().size(), 42, "注册表里 = 42 个定义")
@@ -356,7 +359,7 @@ func _test_rarity_tied_to_quality() -> void:
 	low.category = &"home"
 	low.quality = 1
 	low.value = 1
-	low.size = 1
+	low.size = Vector2i(1, 1)
 	low.rarity = 5          # 白档比绿档还稀有 ⇒ 违反 V9
 	ItemCatalog.register(low)
 	var high := ItemDef.new()
@@ -364,7 +367,7 @@ func _test_rarity_tied_to_quality() -> void:
 	high.category = &"home"
 	high.quality = 2
 	high.value = 3
-	high.size = 2
+	high.size = Vector2i(2, 1)
 	high.rarity = 40        # 绿档反而更常见
 	ItemCatalog.register(high)
 	var rep := ItemCatalog.validate()
@@ -950,22 +953,29 @@ func _test_config_validator() -> void:
 	d.category = &"stardust"
 	d.quality = 1  # 与 stardust_q1 冲突
 	d.value = 1
-	d.size = 1
+	d.size = Vector2i(1, 1)
 	ItemCatalog.register(d)
 	var v := ItemCatalog.validate()
 	eq(v["ok"], false, "V1：两维键冲突 → 校验失败")
 	ok(_errors_contain(v["errors"], "V1"), "V1：错误信息点名冲突")
 
-	# V2：size > 0
+	# V2（★ v0.37）：二维尺寸——任一分量为 0 都非法（占格数 = x*y）
 	ItemCatalog.clear()
 	_setup_catalog()
 	var bad := ItemDef.new()
 	bad.item_id = &"bad_size"
 	bad.category = &"stardust"
 	bad.quality = 5
-	bad.size = 0
+	bad.size = Vector2i(0, 1)
 	ItemCatalog.register(bad)
-	ok(_errors_contain(ItemCatalog.validate()["errors"], "V2"), "V2：size == 0 → 校验失败")
+	ok(_errors_contain(ItemCatalog.validate()["errors"], "V2"), "V2：size = (0,1) → 校验失败")
+	bad.size = Vector2i(1, 0)
+	ok(_errors_contain(ItemCatalog.validate()["errors"], "V2"), "V2：size = (1,0) → 校验失败")
+	bad.size = Vector2i(-2, 1)
+	ok(_errors_contain(ItemCatalog.validate()["errors"], "V2"), "V2：size = (-2,1) → 校验失败")
+	bad.size = Vector2i(3, 2)
+	ok(not _errors_contain(ItemCatalog.validate()["errors"], "V2"),
+		"V2：size = (3,2) 合法（占 6 格）")
 
 	# V3：value > 0 —— value 是每个物品的固定价值字段，为 0 时该物品"抽到也不算数"，
 	# 负值更会反过来拉低 M̄，而 07 无从察觉
@@ -976,7 +986,7 @@ func _test_config_validator() -> void:
 	bad_v.category = &"stardust"
 	bad_v.quality = 5
 	bad_v.value = 0
-	bad_v.size = 1
+	bad_v.size = Vector2i(1, 1)
 	ItemCatalog.register(bad_v)
 	ok(_errors_contain(ItemCatalog.validate()["errors"], "V3"), "V3：value == 0 → 校验失败")
 
@@ -987,7 +997,7 @@ func _test_config_validator() -> void:
 	neg_v.category = &"stardust"
 	neg_v.quality = 5
 	neg_v.value = -3
-	neg_v.size = 1
+	neg_v.size = Vector2i(1, 1)
 	ItemCatalog.register(neg_v)
 	ok(_errors_contain(ItemCatalog.validate()["errors"], "V3"), "V3：value < 0 → 校验失败")
 
@@ -1005,7 +1015,7 @@ func _test_config_validator() -> void:
 	redef.category = &"stardust"
 	redef.quality = 2
 	redef.value = 999                    # 与首次不同
-	redef.size = 2
+	redef.size = Vector2i(3, 3)          # ★ v0.37：与首次不同（首次 = 2×1）
 	ItemCatalog.register(redef)
 
 	eq(ItemCatalog.validate()["ok"], false, "V4：item_id 重复注册 → 校验失败")
@@ -1109,7 +1119,7 @@ func _test_sell_rejects_and_is_atomic() -> void:
 	zero.category = &"stardust"
 	zero.quality = 1
 	zero.value = 1
-	zero.size = 1
+	zero.size = Vector2i(1, 1)
 	zero.rarity = 10
 	zero.sell_gold = 0
 	ItemCatalog.register(zero)
@@ -1157,7 +1167,7 @@ func _test_sell_config_validation() -> void:
 	bad.category = &"stardust"
 	bad.quality = 1
 	bad.value = 1
-	bad.size = 1
+	bad.size = Vector2i(1, 1)
 	bad.rarity = 10
 	bad.sell_gold = -5
 	ItemCatalog.register(bad)

@@ -93,7 +93,7 @@ func _setup() -> void:
 		d.category = cats[i]
 		d.quality = quals[i]
 		d.value = values[i]
-		d.size = 2
+		d.size = Vector2i(2, 1)   # ★ v0.37：二维尺寸（占 2 格）
 		d.rarity = rarities[i]
 		ItemCatalog.register(d)
 		_defs.append(d)

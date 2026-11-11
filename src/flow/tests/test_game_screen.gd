@@ -2,7 +2,8 @@
 ##
 ## 断的是"**这套东西真的能用**"：
 ##   ① **tab 骨架**：两个 tab（仓库 / 许愿机）都是**场景实例**，可切换；
-##   ② **仓库页**（`warehouse_page.tscn`）：只读口径——占用（含盲盒占位）/ 按类别分组的物品聚合 / 盲盒仓库与邮件数；
+##   ② **仓库页**（`src/warehouse/scenes/warehouse_page.tscn`，★ v0.36 已从 `src/flow/scenes/` 迁出）：
+##      只读口径——占用（含盲盒占位）/ 按类别分组的物品聚合 / 盲盒仓库与邮件数；
 ##   ③ **许愿机页**（`wish_machine.tscn`）：**许愿机 = 设备的名字** —— 设备名 / 等级 / 本级两条效果 /
 ##      升级价 + 升级（走 04，真扣原石）/ 原石余额 / 盲盒开盒（走 04）/ 结果文案；
 ##   ④ 降级：没状态时显示「尚未开局」，没盒子时「开一次」置灰。
@@ -153,6 +154,31 @@ func _test_warehouse_page() -> void:
 	var s2: Dictionary = wh.get_node("Controller").snapshot()
 	ok(String(s2["items"]).find("家居物品") >= 0, "物品聚合按类别分组（%s）" % s2["items"])
 	ok(String(s2["items"]).find("白×1") >= 0, "同一行的档位计数（%s）" % s2["items"])
+
+	# ★ v0.37：网格真的接进了页面（模型算得出 ≠ 页面画得出）
+	var gv = wh.grid_view()
+	ok(gv != null, "仓库页有网格控件（Scroll/Grid）")
+	if gv != null:
+		ok(gv.has_layout(), "refresh 后网格拿到布局")
+		var g: Dictionary = s2["grid"]
+		eq(g["cell_size"], 128, "格子边长 128")
+		# 夹具此时 = 1 个盲盒（1×1）+ 1 件物品（1×1）⇒ 2 个块
+		var placed: Array = g["placed"]
+		var n_item := 0
+		var n_box := 0
+		for p in placed:
+			if String(p["kind"]) == "item":
+				n_item += 1
+			elif String(p["kind"]) == "box":
+				n_box += 1
+		eq(gv.placed_count(), placed.size(), "网格控件画出的块数 == 模型的块数")
+		eq(n_item, 1, "1 件物品 ⇒ 1 个物品块")
+		eq(n_box, 1, "1 个盲盒 ⇒ 1 个盲盒块（也占格）")
+		eq(
+			gv.custom_minimum_size,
+			Vector2(int(g["columns"]) * 128, int(g["rows"]) * 128),
+			"网格尺寸 = 列数 × 行数 × 128（画满容量格）"
+		)
 	scr.queue_free()
 	await get_tree().process_frame
 

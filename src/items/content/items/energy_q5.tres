@@ -9,6 +9,5 @@ display_name = "高能电池组"
 category = &"energy"
 quality = 5
 value = 81
-size = 20
 rarity = 2
 sell_gold = 32

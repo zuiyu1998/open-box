@@ -9,6 +9,5 @@ display_name = "铭匠锻具"
 category = &"tool_material"
 quality = 6
 value = 243
-size = 40
 rarity = 1
 sell_gold = 64

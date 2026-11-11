@@ -1,7 +1,8 @@
 ## 游戏场景（★ v0.27 / v0.29：顶层 `TabContainer` 分页，两个 tab）。
 ##
 ## **本脚本只管 tab 骨架**（各页的内容都在自己的场景里）：
-##   · **仓库 tab** → `src/flow/scenes/warehouse_page.tscn`（占用 + 按类别分组的物品聚合 + 盲盒数）
+##   · **仓库 tab** → `src/warehouse/scenes/warehouse_page.tscn`（★ 仓库页归 12：
+##     占用 + 按类别分组的物品聚合 + 盲盒数）
 ##   · **许愿机 tab** → `src/flow/scenes/wish_machine.tscn`
 ##     （★ v0.29 用户裁决：**许愿机就是设备的名字**，把它整个 tabitem 的内容做成一个场景）
 ##
@@ -11,7 +12,8 @@ extends Control
 
 const TAB_WAREHOUSE := "仓库"
 const TAB_WISH := "许愿机"
-const WAREHOUSE_SCENE := "res://src/flow/scenes/warehouse_page.tscn"
+## ★ v0.36：仓库页已迁到 `src/warehouse/scenes/`（内容归 12，本系统只把场景放进 tab）。
+const WAREHOUSE_SCENE := "res://src/warehouse/scenes/warehouse_page.tscn"
 const WISH_SCENE := "res://src/flow/scenes/wish_machine.tscn"
 
 ## 由外部注入的运行时状态（测试 / 读档完成后注入）。

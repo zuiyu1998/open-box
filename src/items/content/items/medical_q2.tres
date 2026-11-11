@@ -9,6 +9,5 @@ display_name = "退烧药片"
 category = &"medical"
 quality = 2
 value = 3
-size = 2
 rarity = 30
 sell_gold = 4

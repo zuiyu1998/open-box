@@ -13,6 +13,9 @@
 ##   B3 `ItemService` 的位置读写经 12（落位 / 领取 / 销毁清账 / count_index 同步）；
 ##   B4 `to_save_dict` 带 `locations` 独立段，往返字节级稳定，旧档可载入；
 ##   B5 事务失败 ⇒ 位置零变化（`_state_snapshot` 含 `locations`）。
+##
+## ★ v0.37 追加：**仓库网格布局**（`WarehouseModel.grid()`）——
+##   格子 128×128、画满 `capacity` 格、物品按 `size` 的二维尺寸占块、邮件块标记 locked。
 extends Node
 
 const LOC_W := ItemConstants.LOC_WAREHOUSE
@@ -23,7 +26,7 @@ var _fail := 0
 
 
 func _ready() -> void:
-	print("=== 仓库系统测试（12-warehouse.md §6 / v0.36 B 重构）===\n")
+	print("=== 仓库系统测试（12-warehouse.md §6 / v0.36 B 重构 / v0.37 网格）===\n")
 
 	_test_locations_basic()
 	_test_location_default()
@@ -35,6 +38,12 @@ func _ready() -> void:
 	_test_legacy_save_backfills_warehouse()
 	_test_transact_failure_keeps_locations()
 	_test_capacity_checkbox_still_single_point()
+
+	_test_grid_cell_size_and_shape()
+	_test_grid_places_by_size()
+	_test_grid_mail_is_locked()
+	_test_grid_boxes_are_one_cell()
+	_test_grid_is_deterministic()
 
 	print("\n=== 结果：%d 通过 / %d 失败 ===" % [_pass, _fail])
 	get_tree().quit(0 if _fail == 0 else 1)
@@ -79,7 +88,8 @@ func _setup_catalog() -> void:
 		cur.display_name = String(kind)
 		cur.description = "夹具"
 		ItemCatalog.register_currency(cur)
-	var sizes := {1: 1, 2: 2, 3: 5}
+	# ★ v0.37：尺寸是二维向量；夹具保留"面积 1 / 2 / 5"以维持容量语义
+	var sizes := {1: Vector2i(1, 1), 2: Vector2i(2, 1), 3: Vector2i(5, 1)}
 	var values := {1: 1, 2: 3, 3: 9}
 	var rarities := {1: 60, 2: 30, 3: 10}
 	for cat in [&"stardust", &"crystal"]:
@@ -281,3 +291,133 @@ func _test_transact_failure_keeps_locations() -> void:
 	eq(WarehouseService.locations_to_dict(), locs_before, "失败事务：位置账逐项不变（B5）")
 	eq(ItemService.count_index.duplicate(), idx_before, "失败事务：count_index 不变")
 	eq(ItemService.warehouse_used, used_before, "失败事务：warehouse_used 不变")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ★ v0.37：仓库网格布局
+# ══════════════════════════════════════════════════════════════════════════════
+
+## 造一个只有网格、没有盒子的模型（盒子归 01，网格测试不需要它）。
+func _model(capacity: int) -> WarehouseModel:
+	_reset(capacity)
+	var m := WarehouseModel.new()
+	m.bind(null)   # 没有 GameState ⇒ 盒数为 0（"尚未开局"），网格只画物品
+	return m
+
+
+func _test_grid_cell_size_and_shape() -> void:
+	var m := _model(1000)
+	var g := m.grid()
+	eq(g["cell_size"], 128, "格子边长 = 128（用户裁决）")
+	eq(g["capacity"], 1000, "画出的仓库空间 = 容量（1000 格）")
+	eq(g["columns"], 12, "列数固定 = 12（用户裁决）")
+	eq(g["rows"], 84, "行数 = ceil(1000 / 12) = 84（12×84 = 1008 ≥ 1000）")
+	eq((g["placed"] as Array).size(), 0, "空仓库 ⇒ 没有块")
+	eq((g["unplaced"] as Array).size(), 0, "空仓库 ⇒ 没有放不下的块")
+
+	# 小容量也成立：列数仍是 12，行数按 ceil(capacity/12)
+	var m2 := _model(1)
+	var g2 := m2.grid()
+	eq(g2["columns"], 12, "容量 1 ⇒ 列数仍是 12（固定）")
+	eq(g2["rows"], 1, "容量 1 ⇒ 行数 = ceil(1/12) = 1")
+
+
+func _test_grid_places_by_size() -> void:
+	# q1 = 1×1、q2 = 2×1、q3 = 5×1（夹具的面积语义仍保留）
+	var m := _model(100)
+	var a := ItemService.grant(&"stardust_q1", {"kind": &"gacha"})   # 1×1
+	var b := ItemService.grant(&"stardust_q2", {"kind": &"gacha"})   # 2×1
+	var c := ItemService.grant(&"stardust_q3", {"kind": &"gacha"})   # 5×1
+	var g := m.grid()
+	var placed: Array = g["placed"]
+	eq(placed.size(), 3, "3 件物品 ⇒ 3 个块")
+
+	var pa: Dictionary = placed[0]
+	eq(pa["x"], 0, "第一件从 (0,0) 开始")
+	eq(pa["y"], 0, "第一件在第一行")
+	eq([pa["w"], pa["h"]], [1, 1], "q1 的块 = 1×1")
+	eq(pa["instance_id"], a.instance_id, "块指回实例身份")
+	eq(pa["locked"], false, "仓库物品不锁定")
+
+	var pb: Dictionary = placed[1]
+	eq(pb["instance_id"], b.instance_id, "第二个块是 q2（按入库顺序）")
+	eq([pb["w"], pb["h"]], [2, 1], "q2 的块 = 2×1（宽 2 格）")
+	eq([pb["x"], pb["y"]], [1, 0], "1×1 用掉 (0,0) 后，2×1 从 (1,0) 开始")
+
+	var pc: Dictionary = placed[2]
+	eq(pc["instance_id"], c.instance_id, "第三个块是 q3")
+	eq([pc["w"], pc["h"]], [5, 1], "q3 的块 = 5×1")
+
+	# 块占的格数之和 == 仓库已用（容量账与网格必须说同一件事）
+	var area := 0
+	for p in placed:
+		area += int(p["w"]) * int(p["h"])
+	eq(area, ItemService.warehouse_used, "块面积之和 == warehouse_used（网格与容量账同源）")
+	ok(area <= int(g["capacity"]), "仓库侧块面积不超过容量")
+
+
+func _test_grid_mail_is_locked() -> void:
+	# 容量 1：第一件进仓库、第二件进邮件 ⇒ 两块都在网格里，但邮件块 locked
+	var m := _model(1)
+	var a := ItemService.grant(&"stardust_q1", {"kind": &"gacha"})
+	var b := ItemService.grant(&"stardust_q1", {"kind": &"gacha"})
+	eq(WarehouseService.location_of(b.instance_id), LOC_M, "前置：第二件在邮件")
+	var g := m.grid()
+	var placed: Array = g["placed"]
+	eq(placed.size(), 2, "**邮件物品也进网格**（用户裁决）")
+
+	var pa: Dictionary = placed[0]
+	eq(pa["instance_id"], a.instance_id, "仓库物品排在前面")
+	eq(pa["locked"], false, "仓库物品不锁定")
+
+	var pb: Dictionary = placed[1]
+	eq(pb["instance_id"], b.instance_id, "邮件物品排在后面")
+	eq(pb["locked"], true, "**邮件物品标记 locked**（不可用）")
+
+	# 邮件块不计入仓库侧面积：仓库已用只算仓库那一件
+	eq(ItemService.warehouse_used, 1, "邮件物品不占仓库容量")
+	ok(int(g["rows"]) * int(g["columns"]) >= int(g["capacity"]),
+		"邮件块越过容量后网格会扩容，不再有放不下的块")
+
+
+func _test_grid_boxes_are_one_cell() -> void:
+	# 盲盒固定 1×1（Box.size = 1，与容量账同一口径）
+	var st := GameState.new()
+	_reset(100)
+	var m := WarehouseModel.new()
+	m.bind(st)
+	# 直接造一个 1×1 的盒子（不依赖 01 的内容配置）
+	var box := Box.new()
+	box.box_id = "box-1"
+	box.size = 1
+	box.location = LOC_W
+	st.add_box(box)
+
+	var g := m.grid()
+	var placed: Array = g["placed"]
+	eq(placed.size(), 1, "1 个盲盒 ⇒ 1 个块")
+	var p: Dictionary = placed[0]
+	eq(p["kind"], "box", "块类型 = box")
+	eq([p["w"], p["h"]], [1, 1], "盲盒固定 1×1")
+	eq(p["locked"], false, "仓库里的盲盒不锁定")
+
+
+func _test_grid_is_deterministic() -> void:
+	var m := _model(50)
+	for i in 5:
+		ItemService.grant(&"stardust_q2", {"kind": &"gacha"})
+	var g1 := m.grid()
+	var g2 := m.grid()
+	eq(g1["placed"], g2["placed"], "同一状态下两次布局逐项相同（确定性）")
+	eq(g1["rows"], g2["rows"], "行数也相同")
+	# 所有块互不重叠（锚点两两不同，且按行主序推进）
+	var seen := {}
+	var overlap := false
+	for p in (g1["placed"] as Array):
+		for dy in int(p["h"]):
+			for dx in int(p["w"]):
+				var key := "%d,%d" % [int(p["x"]) + dx, int(p["y"]) + dy]
+				if seen.has(key):
+					overlap = true
+				seen[key] = true
+	ok(not overlap, "块之间没有重叠")

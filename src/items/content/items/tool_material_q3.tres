@@ -9,5 +9,4 @@ display_name = "淬火钢锭"
 category = &"tool_material"
 quality = 3
 value = 9
-size = 5
 sell_gold = 8

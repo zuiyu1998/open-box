@@ -9,6 +9,5 @@ display_name = "失落典籍"
 category = &"information"
 quality = 6
 value = 243
-size = 40
 rarity = 1
 sell_gold = 64

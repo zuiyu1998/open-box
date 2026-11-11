@@ -9,6 +9,5 @@ display_name = "古董屏风"
 category = &"home"
 quality = 5
 value = 81
-size = 20
 rarity = 2
 sell_gold = 32

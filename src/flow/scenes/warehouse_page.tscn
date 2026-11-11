@@ -1,4 +1,4 @@
-[gd_scene load_steps=3 format=3 uid="uid://cflowwh01"]
+[gd_scene load_steps=3 format=3 uid="uid://bufi7trwv7hdt"]
 
 [ext_resource type="Script" path="res://src/flow/scenes/warehouse_view.gd" id="1_view"]
 [ext_resource type="Script" path="res://src/flow/scenes/warehouse_controller.gd" id="2_ctrl"]
@@ -19,11 +19,9 @@ text = "仓库占用 0%"
 [node name="Items" type="Label" parent="."]
 layout_mode = 2
 autowrap_mode = 3
-text = ""
 
 [node name="Boxes" type="Label" parent="."]
 layout_mode = 2
-text = ""
 
 [node name="Controller" type="Node" parent="."]
 script = ExtResource("2_ctrl")

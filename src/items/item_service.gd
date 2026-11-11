@@ -98,9 +98,17 @@ func _index_sub(key: String, loc: StringName) -> void:
 		idx[key] = n
 
 
+## ★ v0.37：**占格数 = `size.x * size.y`**（`ItemDef.cells()` 的唯一口径，别处不得自己乘）。
 func _size_of(inst: ItemInstance) -> int:
 	var def := ItemCatalog.get_def(inst.item_id)
-	return def.size if def != null else 0
+	return def.cells() if def != null else 0
+
+
+## 二维尺寸的查询（仓库网格要用它决定"占几列 × 几行"）。
+## 定义缺失时返回 `Vector2i.ZERO`（不占格）。
+func cells_of(inst: ItemInstance) -> Vector2i:
+	var def := ItemCatalog.get_def(inst.item_id)
+	return def.size if def != null else Vector2i.ZERO
 
 
 ## ★ v0.36（B3）：位置读取一律经 `WarehouseService`（`inst.location` 已随 B2 删除）。
@@ -225,7 +233,7 @@ func grant(
 			return existing
 
 	# 落位判定**先于**任何状态变更：被拒时不得留下 serial 或实例
-	var fits := _fits(def.size)
+	var fits := _fits(def.cells())
 	if not fits and eff == ItemConstants.OVERFLOW_REJECT:
 		return null  # 主动操作：拒绝整个操作，状态完全不变
 
@@ -443,7 +451,7 @@ func transact(ops: Array) -> Dictionary:
 					return fail.call(ItemConstants.REASON_DUPLICATE_ID)
 				grant_plans.append({
 					"item_id": item_id, "source": (src as Dictionary).duplicate(true),
-					"overflow": eff, "size": def.size, "instance_id": req_id,
+					"overflow": eff, "cells": def.cells(), "instance_id": req_id,
 				})
 
 			ItemConstants.OP_CONSUME, ItemConstants.OP_DISCARD, ItemConstants.OP_SELL:
@@ -502,12 +510,12 @@ func transact(ops: Array) -> Dictionary:
 
 	var mailed_plan: Array[bool] = []
 	for plan in grant_plans:
-		var fits := projected_used + int(plan["size"]) <= warehouse_capacity
+		var fits := projected_used + int(plan["cells"]) <= warehouse_capacity
 		if not fits and StringName(plan["overflow"]) == ItemConstants.OVERFLOW_REJECT:
 			# 主动操作产出放不下 → 整个事务被拒（源实例因此不会被销毁）
 			return fail.call(ItemConstants.REASON_NO_SPACE)
 		if fits:
-			projected_used += int(plan["size"])
+			projected_used += int(plan["cells"])
 		mailed_plan.append(not fits)
 
 	# ── 阶段三：生效（到这里不会再失败）────────────────────────────────────────

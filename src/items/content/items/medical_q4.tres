@@ -9,6 +9,5 @@ display_name = "特效血清"
 category = &"medical"
 quality = 4
 value = 27
-size = 10
 rarity = 5
 sell_gold = 16

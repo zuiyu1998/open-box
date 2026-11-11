@@ -92,7 +92,7 @@ func _setup() -> void:
 		d.category = cats[i]
 		d.quality = quals[i]
 		d.value = 1 + quals[i]
-		d.size = 2
+		d.size = Vector2i(2, 1)   # ★ v0.37：二维尺寸（占 2 格）
 		d.rarity = 10
 		ItemCatalog.register(d)
 		_defs.append(d)
@@ -353,7 +353,7 @@ func _test_level_gate_only_for_opening() -> void:
 		d.category = &"crystal"
 		d.quality = 1 + (i % 3)
 		d.value = 2
-		d.size = 2
+		d.size = Vector2i(2, 1)   # ★ v0.37：二维尺寸（占 2 格）
 		d.rarity = 10
 		ItemCatalog.register(d)
 		defs3.append(d)

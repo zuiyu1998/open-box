@@ -9,6 +9,5 @@ display_name = "不灭良方"
 category = &"medical"
 quality = 6
 value = 243
-size = 40
 rarity = 1
 sell_gold = 64

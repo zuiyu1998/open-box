@@ -9,6 +9,5 @@ display_name = "原始图纸"
 category = &"information"
 quality = 5
 value = 81
-size = 20
 rarity = 2
 sell_gold = 32
