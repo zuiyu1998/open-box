@@ -175,6 +175,10 @@ class_name GachaResult extends Resource   # [补充] Resource 承载，便于按
 @export var quality: int = 1              # 物品品质 1..6（白/绿/蓝/紫/金/红，v0.22）；void 时为 0
 @export var is_void: bool = false         # 本次抽中空洞：仍**消耗一次使用**（`uses_remaining -= 1`——它就是"兑现一次"；**若因此归零，盒子随即被摧毁**）
 @export var is_new: bool = false          # 是否新物品（**收藏口径 `collected`**）；void 时恒 false；**不驱动任何计数器**
+## ★ v0.38：本次产出的**落位**（是否因仓库放不下而进邮件）——由 `redeem` 在提交后读 `transact` 的 `mailed`
+## 回执写回。它是**布尔落位标志、不是 `location` 枚举**（`location` 归 02，本系统仍不认识它）；
+## 只用于让 UI/演出能说出"这件进邮件了"（P5 产出不丢失 + 玩家要知道东西去哪）。void 时恒 false。
+@export var mailed: bool = false
 @export var probability: float = 0.0      # 本次所用分布中该结果的概率（void 时为 void_prob）
 @export var seed: int = 0                 # 本次兑现的种子；即 source.box_seed
 @export var draw_index: int = 0           # **全局单调递增**的兑现序号（不是"批次内序号"）
@@ -506,7 +510,7 @@ static func redeem_batch(state, boxes: Array, gem_costs: Array, k: int, seed_ove
 | **07 数值与期望** | 调用 → | `EvalService.evaluate_pool(pool_state, series) -> PoolEvaluation`（`probs` + `void_prob`）：**唯一权重路径**；**入参一律是"被兑现（或被选中）那个盒子"的池子当前状态**——同一套系的不同盒子会得到不同分布。`headline` / EV / ρ 由 07 产出（口径 = **选中那个盒子的池子**），本系统不产出、08 不另算。**07 的另一个入口是 `compute(state, box_id)`**（供 08 / 09 用，**本系统不调用**；其第一个形参叫 `state`、不叫 `pool_state`） |
 | **池子 / 模块子模块（本文件内）** | 内部 | **`PoolService` 是本系统内唯一的池子写入方**：池子 / 模块的变更一律经其接口（**全部带 `box_id`**），**变更后广播 `pool_changed(box_id, revision)`**；抽取侧（`GachaService`）**只读**经 07 求值的结果，**不写池子、不读 `modules` 内容、不应用模块** |
 | **02 物品** | 调用 → | **`ItemService.grant(item_id, source) -> ItemInstance`**：只传"抽到了哪一件"与溯源三元组，**由 02 创建实例并返回 `instance_id`**；模块**制造**用 `consume(instance_ids)`（**只挑仓库实例**、原子销毁）、**拆卸返还**用 `grant(item_id, { kind = &"refund" })`（新建实例；**`serial` 按判据（带作用域，见 `02` §5.6）：只有开盒分配编号、迁移恢复编号，除这两者外一律 `serial == 0`**）、**替换 = 一次 `transact()`**；返还的 `item_id` 经 `resolve_item_id(category, quality)` 反查。**实例列表的唯一写入方是 02**，本系统只发起请求。**`void` 不产生实例，故不调用 `grant`** |
-| **02 物品（仓库 / 邮件）** | 不调用 · **不感知** | "入库还是进邮件"的判定**只在 02 的 `grant()` 内**发生；本系统**不读 `location` / `warehouse_capacity` / `ItemDef.size` 做溢出判断**（§5.7 的预告只提供 k 与数据引用）；`GachaResult` **不含** `location` 字段。**★ v0.19：原列的"拆卸返还例外"已删**——**拆卸不再产出实例 ⇒ 不需要空间预检**；**但开盒仍然产出实例**（被动产出 ⇒ 放不下进邮件），**且 `02` 是资源余额（原石 / 金币）的唯一写入方** |
+| **02 物品（仓库 / 邮件）** | 不调用 · **不感知** | "入库还是进邮件"的判定**只在 02 的 `grant()` 内**发生；本系统**不读 `location` / `warehouse_capacity` / `ItemDef.size` 做溢出判断**（§5.7 的预告只提供 k 与数据引用）；`GachaResult` **不含 `location` 枚举**——**★ v0.38：但含布尔落位标志 `mailed`**（`redeem` 读 `transact` 的 `mailed` 回执写回，供 UI 说"这件进邮件了"，**不是** `location` 字段、不改 02 的单一判定点）。**★ v0.19：原列的"拆卸返还例外"已删**——**拆卸不再产出实例 ⇒ 不需要空间预检**；**但开盒仍然产出实例**（被动产出 ⇒ 放不下进邮件），**且 `02` 是资源余额（原石 / 金币）的唯一写入方** |
 | **02 物品（容量只读查询）** | 只读 ←（转交 08） | §5.7 的开盒前预告需要 `warehouse_capacity` 与已用空间，**由 02 提供只读查询、由 08 渲染** |
 | **03 任务** | 被调用 ← | `GachaService.grant_box(series_id, count, source)`：奖励发放盲盒入清单。**发放时为每个新盒子生成 `box_id`（`IUuid.v4()`）、`init_pool()` 复制基础池、`modules` 填定长空位、**按该盒所属套系品质初始化 `uses_remaining`（品质 1–4 → 10/15/20/25；＝总寿命预算：镶嵌 −1 / 兑现 −1）**；`box_id` 随盒子落盘，**重放 / 读档 / 迁移读回原值、不重新生成**。**盲盒发放不在物品侧 `transact()` 内**，**不承诺跨系统原子性** |
 | **04 设备** | 工具 → | **设备 = 这两个动作的入口发起方**（**★ v0.17**；新定位见 `04-device.md`）：它经 **`PoolService.socket()`** 装模块——**池子数据的唯一写入方仍是 `PoolService`**，且**每次成功镶嵌消耗该盒 1 点寿命**（§4.3、§1.6）。设备**永不直接写池子**。**★ 硬门槛（裁决，§5.10）**：**没有设备既不能开盒（`redeem`）也不能装模块（`socket`）**——两者**链首先校验"已有一台设备"**，否则**拒绝并报 `no_device`**（**不消耗任何寿命、状态逐项不变**）；**开局由新游戏初始化路径写入一台「基础款」装置**（**v0.17：没有品质档位**）（否则**玩家永远是 0 台**），**定义与入口归 04、发放与落盘归 10（`03` 不涉及）**，**本系统是执行者 + 同一枚码的兜底校验**（**判定无参：持有至少一台即可**；**设备不消耗、不损耗、不绑定盒子、不可离开玩家**——★ 可回滚的默认，见 §5.10） |

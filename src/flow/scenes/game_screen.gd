@@ -30,6 +30,9 @@ func _ready() -> void:
 	if state == null:
 		state = GameSession.state
 	_ensure_tabs()
+	# ★ v0.38：**切 tab 时刷新**——玩家在别的页开盒 / 买进物品后，切回仓库页必须看到最新持有。
+	#   各页的 `refresh()` 是纯重算（读 ItemService / MarketService 当前态），不产生副作用。
+	_tabs.tab_changed.connect(func(_idx: int) -> void: refresh())
 	refresh()
 
 

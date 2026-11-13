@@ -25,6 +25,7 @@ func _ready() -> void:
 	_test_evaluation_invariants_and_headline()
 	_test_x1_5_uses_collected_only()
 	_test_redeem_consumes_box_and_grants_exactly_once()
+	_test_redeem_overflow_goes_to_mail()
 	_test_redeem_void_consumes_box_without_item()
 	_test_redeem_rejects_unregistered_series()
 	_test_batch_redeem_is_ordered_and_contiguous()
@@ -350,7 +351,31 @@ func _test_redeem_consumes_box_and_grants_exactly_once() -> void:
 	eq(int(inst.source.get("draw_index")), 1, "source 含 draw_index")
 	eq(inst.serial, 1, "开盒来源的 serial 从 1 开始（02 内部赋值）")
 	eq(WarehouseService.location_of(inst.instance_id), ItemConstants.LOC_WAREHOUSE, "放得下 ⇒ 进仓库")
+	eq(r.mailed, false, "★ v0.38：放得下 ⇒ r.mailed == false")
 	ok(r.probability > 0.0, "结果带有本次所用分布中该结果的概率（显示与抽取同源）")
+
+
+func _test_redeem_overflow_goes_to_mail() -> void:
+	print("— ★ v0.38 落位可感知：仓库满 ⇒ 产出进邮件、r.mailed == true")
+	var f := _new_state()
+	var st: GameState = f["state"]
+	var bx: Box = f["boxes"][0]
+	# 把仓库容量压到 1：q1 物品 size 1（夹具）→ 第一件占满，后续进邮件
+	ItemService.warehouse_capacity = 1
+	var ev := _eval_of(st, bx)
+	var seed := _find_seed(ev, false)
+	ok(seed >= 0, "找到一个会出物品的 seed")
+	var r := GachaService.redeem(st, bx, 0, seed)
+	ok(r.ok, "兑现成功")
+	ok(not r.is_void, "本次不是 void")
+	eq(r.mailed, true, "仓库放不下 ⇒ r.mailed == true（产出进邮件）")
+	var inst: ItemInstance = ItemService.instances[ItemService.instances.size() - 1]
+	eq(WarehouseService.location_of(inst.instance_id), ItemConstants.LOC_MAIL,
+		"实例确实落在邮件（不是仓库）")
+	eq(ItemService.instances.size(), 1, "产出不丢失（P5）：仍创建了实例")
+	# 第二次也进邮件（持续超出）
+	var r2 := GachaService.redeem(st, bx, 0, _find_seed(ev, false))
+	eq(r2.mailed, true, "持续超出 ⇒ 仍进邮件")
 
 
 func _test_redeem_void_consumes_box_without_item() -> void:

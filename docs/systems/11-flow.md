@@ -70,7 +70,7 @@ signal flow_changed(from, to)            # 只在真转换时发
 5. **信号只发真转换**（被拒的不发，`from` / `to` 正确）。
 6. **三个节点的场景文件都必须存在**（`ResourceLoader.exists`）。
 7. **菜单内容**（`test_flow_service.gd`）：游戏名称 + 四个按钮（**顺序 = 继续 → 新游戏 → 存档 → 设置**）、各自去向；**无档时「继续」不切节点并转发 `continue_unavailable`**（v0.28 语义：读档归 10）。
-8. **游戏场景**（`test_game_screen.gd`，77 条）：三个 tab **都是场景实例**（`src/warehouse/scenes/warehouse_page.tscn` / `src/flow/scenes/wish_machine.tscn` / `src/market/scenes/market_page.tscn`）、`refresh()` **不重建页**（页引用保持有效）；仓库页占用/分组/盲盒数；许愿机页设备名「许愿机」/等级/两条效果/升级真扣原石/余额不足置灰/开盒真产出/下拉只列仓库盒子；市场页金币/刷新倒计时/上架清单/买入真扣金币发实例/卖出真换金币。
+8. **游戏场景**（`test_game_screen.gd`，82 条）：三个 tab **都是场景实例**（`src/warehouse/scenes/warehouse_page.tscn` / `src/flow/scenes/wish_machine.tscn` / `src/market/scenes/market_page.tscn`）、`refresh()` **不重建页**（页引用保持有效）；仓库页占用/分组/盲盒数；许愿机页设备名「许愿机」/等级/两条效果/升级真扣原石/余额不足置灰/开盒真产出/下拉只列仓库盒子；市场页金币/刷新倒计时/上架清单/买入真扣金币发实例/卖出真换金币；**★ v0.38：切 tab 会刷新**（别处加物品后切回仓库页，View 显示最新持有——否则"开盒后仓库页不更新"）。
 9. **旁路写盘**：本机 runner 拿不到 Godot 的 stdout，两个 flow 测试都会另写 `user://test_*.txt`（正常环境只是一次无害的额外写盘）。
 
 ## 7. 待定项

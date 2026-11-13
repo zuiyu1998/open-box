@@ -285,6 +285,12 @@ static func redeem(state: GameState, box: Box, gem_cost: int, seed_override: int
 				return GachaResult.failure(R_CURRENCY_INSUFFICIENT)
 			return GachaResult.failure(R_ITEM_NOT_REGISTERED if reason == ItemConstants.REASON_BAD_OP
 				else R_GRANT_FAILED)
+		# ★ v0.38：读落位回执——`mailed` 非空 ⟺ 本件产出进了邮件（仓库放不下）。
+		#   开盒是**被动产出**（`kind=gacha` ⇒ `overflow=mail`），永不丢失（P5）；
+		#   单次 redeem 只产 1 个实例，故 `mailed.size() > 0` 即本件落邮件。
+		if not r.is_void:
+			var mailed: Array = res.get("mailed", [])
+			r.mailed = not mailed.is_empty()
 
 	# ★ v0.14：**成功兑现消耗一次使用**（与装模块**共用同一个计数器**）；**归零即摧毁盒子**
 	var destroyed := state.spend_use(box)

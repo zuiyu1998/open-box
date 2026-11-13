@@ -13,6 +13,12 @@ extends Resource
 @export var quality: int = 1              # 物品品质 1..6（白/绿/蓝/紫/金/红，v0.22）；void 时为 0
 @export var is_void: bool = false         # 本次抽中空洞：仍消耗一个 Box
 @export var is_new: bool = false          # 是否新物品（收藏口径 collected）；void 时恒 false
+## ★ v0.38：本次产出的**落位**——是否因为仓库放不下而进了邮件。
+##
+## 由 `GachaService.redeem()` 在提交后读 `transact` 的 `mailed` 回执写回。
+## 开盒是**被动产出**（`kind=gacha` ⇒ `overflow=mail`），放不下 ⇒ 进邮件（**永不丢失**，P5）；
+## UI 据此提示玩家"这件进了邮件，去仓库页领取"。`void` 时恒 false（没有产出）。
+@export var mailed: bool = false
 @export var probability: float = 0.0      # 本次所用分布中该结果的概率（void 时为 void_prob）
 @export var seed: int = 0                 # 本次兑现的种子；即 source.box_seed
 @export var draw_index: int = 0           # **全局单调递增**的兑现序号（不是"批次内序号"）

@@ -32,6 +32,8 @@ func _ready() -> void:
 	await _test_wish_machine_open()
 	_reset_world()
 	await _test_market_page()
+	_reset_world()
+	await _test_tab_switch_refreshes()
 	FlowService.auto_scene_change = true
 	var summary := "=== 结果：%d 通过 / %d 失败 ===" % [_pass, _fail]
 	print("\n" + summary)
@@ -349,5 +351,38 @@ func _test_market_page() -> void:
 	ok(String(s4["result"]).find("卖出成功") >= 0, "卖出成功（%s）" % s4["result"])
 	ok(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD) > gold_before_sell, "金币真增")
 	ok(ItemService.instances.size() < inst_before_sell, "实例被销毁")
+	scr.queue_free()
+	await get_tree().process_frame
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ⑥ 切 tab 刷新（★ v0.38：修复"仓库页不显示新物品"）
+# ══════════════════════════════════════════════════════════════════════════════
+
+func _test_tab_switch_refreshes() -> void:
+	print("— §3.4 切 tab 刷新：别处加物品后切回仓库页能看到")
+	_reset_world()
+	var st := GameState.new_game()
+	var scr = await _make_screen()
+	scr.bind_state(st)
+	await get_tree().process_frame
+	var wh: Node = scr.page_node("WarehousePage")
+	var items_lbl: Label = wh.get_node("Items")
+
+	ok(String(items_lbl.text).find("还没有物品") >= 0, "前置：开局仓库无物品（View 已渲染）")
+
+	# 直接 grant 一件物品（不经过 scr.refresh()）——模拟在别的页开盒 / 买进物品
+	ItemService.grant(&"home_q1", {"kind": ItemConstants.KIND_UNLOCK})
+	# ★ View 的 Label 文本是上次 render 写的，未切 tab 不更新
+	ok(String(items_lbl.text).find("还没有物品") >= 0, "未切 tab ⇒ View 仍是旧值（尚未刷新）")
+
+	# 切到许愿机再切回仓库 ⇒ tab_changed 触发 refresh ⇒ View 重新渲染出新物品
+	var tabs: TabContainer = scr.get_node("Tabs")
+	tabs.current_tab = 1
+	await get_tree().process_frame
+	tabs.current_tab = 0
+	await get_tree().process_frame
+	ok(String(items_lbl.text).find("家居物品") >= 0, "切回仓库页 ⇒ View 显示新物品")
+	ok(String(items_lbl.text).find("白×1") >= 0, "档位计数也更新")
 	scr.queue_free()
 	await get_tree().process_frame

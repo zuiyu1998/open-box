@@ -131,6 +131,7 @@ func open(times: int, box_index: int) -> void:
 
 	var hit: Array[String] = []
 	var voids := 0
+	var mailed := 0
 	var opened := 0
 	for _i in times:
 		var r := DeviceService.redeem(state, box)
@@ -148,11 +149,20 @@ func open(times: int, box_index: int) -> void:
 			voids += 1
 		else:
 			var d := ItemCatalog.get_def(r.item_id)
-			hit.append("%s（%s）" % [
+			var name := "%s（%s）" % [
 				d.display_name if d != null else String(r.item_id),
 				ItemConstants.quality_name(d.quality if d != null else 1),
-			])
+			]
+			# ★ v0.38：**落位可感知**——仓库放不下 ⇒ 进邮件。文案要说得出来（P5：产出永不丢失，
+			#   但玩家得知道它去哪了，否则"东西凭空消失"的错觉比真丢还糟）。
+			if r.mailed:
+				mailed += 1
+				hit.append("%s → 邮件" % name)
+			else:
+				hit.append(name)
 
 	var head := "开出：" if times == 1 else "%d 连开出 %d 件：" % [times, hit.size()]
 	var tail := "" if voids == 0 else "、void %d 次" % voids
+	if mailed > 0:
+		tail += "、%d 件存入邮件" % mailed
 	open_result = head + ("、".join(hit) if hit.size() > 0 else "什么都没有") + tail
