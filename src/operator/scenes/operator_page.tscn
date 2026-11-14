@@ -1,0 +1,46 @@
+[gd_scene load_steps=3 format=3 uid="uid://cob0oprpage1"]
+
+[ext_resource type="Script" path="res://src/operator/scenes/operator_view.gd" id="1_view"]
+[ext_resource type="Script" path="res://src/operator/scenes/operator_controller.gd" id="2_ctrl"]
+
+[node name="OperatorPage" type="VBoxContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 10
+script = ExtResource("1_view")
+
+[node name="Level" type="Label" parent="."]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "干员 Lv.1 / Lv.5"
+
+[node name="Route" type="Label" parent="."]
+layout_mode = 2
+text = "养成路线：精准线"
+
+[node name="Bans" type="Label" parent="."]
+layout_mode = 2
+autowrap_mode = 3
+text = "排除：—"
+
+[node name="Sep" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="ToggleButton" type="Button" parent="."]
+layout_mode = 2
+text = "出战中"
+
+[node name="UpgradeButton" type="Button" parent="."]
+layout_mode = 2
+text = "升级"
+
+[node name="Result" type="Label" parent="."]
+layout_mode = 2
+autowrap_mode = 3
+text = ""
+
+[node name="Controller" type="Node" parent="."]
+script = ExtResource("2_ctrl")

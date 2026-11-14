@@ -59,6 +59,16 @@ static var bus: ChangeBus = ChangeBus.new()
 static var _states: Dictionary = {}
 
 
+## ★ v0.40（15 干员）：**出战干员的额外排除回调**。
+##
+## 干员为许愿机提供"类似模块、但无代价"的 BAN 效果——它**不写池子数据**，
+## 只注入这个回调；`_compute` 在算派生状态时 `call()` 它拿 `Array[StringName]`（额外排除目标），
+## 与模块 BAN 走**同一条** 40% 蒸发 / 60% 摊回的零和路径。
+## 注入方 = `OperatorService._ready()`（与 `ItemService.series_item_provider` 同一模式）。
+## 未注入（`is_valid() == false`）⇒ 无额外排除，行为与旧版完全一致。
+static var extra_ban_provider: Callable = Callable()
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  建档：为新盒子产出 Box.item_pool（基础池副本）+ 定长空位数组
 # ══════════════════════════════════════════════════════════════════════════════
@@ -393,6 +403,16 @@ static func _compute_with(pool: ItemPool, modules: Array[Module], revision: int)
 				boost_ops.append(d)
 			ModuleDef.OpType.RECOVER:
 				pass  # 第二切片：本版仅定义接口（socket() 已在定义级拒绝它）
+	# ★ v0.40（15 干员）：出战干员的额外排除——**走与模块 BAN 完全相同的路径**
+	#   （`freed` 累加 ⇒ 下方 40% 蒸发 / 60% 摊回零和自动复用）。
+	#   干员是"无代价被动"：不占盒子槽位、不改 `modules`，只在求值时注入排除集合。
+	if extra_ban_provider.is_valid():
+		var extra: Array = extra_ban_provider.call()
+		for t in extra:
+			var tn := StringName(t)
+			if w.has(tn) and not banned.has(tn):
+				banned.append(tn)
+				freed += int(w[tn])
 	# 逐模块切分"可回收质量"：AUTO 的块按基础权重摊给其余物品，TARGETED 的块全给其目标
 	var surviving: Array[StringName] = []
 	for id in ids:

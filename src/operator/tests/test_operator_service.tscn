@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cob0testopr1"]
+
+[ext_resource type="Script" path="res://src/operator/tests/test_operator_service.gd" id="1_opr"]
+
+[node name="TestOperatorService" type="Node"]
+script = ExtResource("1_opr")
