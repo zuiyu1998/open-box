@@ -34,6 +34,8 @@ func _ready() -> void:
 	await _test_market_page()
 	_reset_world()
 	await _test_tab_switch_refreshes()
+	_reset_world()
+	await _test_company_page()
 	FlowService.auto_scene_change = true
 	var summary := "=== 结果：%d 通过 / %d 失败 ===" % [_pass, _fail]
 	print("\n" + summary)
@@ -65,6 +67,8 @@ func _reset_world() -> void:
 	GameSession.clear()
 	ItemService.reset()
 	ItemService.warehouse_capacity = 100
+	CompanyService.reset()
+	MarketService.reset()
 
 
 func _make_screen():
@@ -83,23 +87,26 @@ func _make_screen():
 # ══════════════════════════════════════════════════════════════════════════════
 
 func _test_structure() -> void:
-	print("— §3.0 顶层 tab：仓库 / 许愿机 / 市场")
+	print("— §3.0 顶层 tab：仓库 / 许愿机 / 市场 / 公司")
 	var scr = await _make_screen()
 	if scr == null:
 		return
 	var titles: Array = scr.tab_titles()
-	eq(titles.size(), 3, "三个 tab")
+	eq(titles.size(), 4, "四个 tab")
 	eq(titles[0], "仓库", "第 1 个 tab = 仓库")
 	eq(titles[1], "许愿机", "第 2 个 tab = 许愿机")
 	eq(titles[2], "市场", "第 3 个 tab = 市场（★ v0.38）")
+	eq(titles[3], "公司", "第 4 个 tab = 公司（★ v0.39）")
 
 	# ★ v0.30：tab 的内容都是**独立场景实例**（MVC：页 = View + 子节点 Controller）
 	var wh: Node = scr.page_node("WarehousePage")
 	var wish: Node = scr.page_node("WishPage")
 	var mkt: Node = scr.page_node("MarketPage")
+	var cmp: Node = scr.page_node("CompanyPage")
 	ok(wh != null, "仓库页存在")
 	ok(wish != null, "许愿机页存在")
 	ok(mkt != null, "市场页存在")
+	ok(cmp != null, "公司页存在")
 	if wh != null:
 		ok(String(wh.get_script().resource_path).ends_with("warehouse_view.gd"),
 			"仓库页根 = warehouse_view（View）（%s）" % wh.get_script().resource_path)
@@ -117,12 +124,20 @@ func _test_structure() -> void:
 		var mkt_ctrl: Node = mkt.get_node_or_null("Controller")
 		ok(mkt_ctrl != null and String(mkt_ctrl.get_script().resource_path).ends_with("market_controller.gd"),
 			"市场页有 Controller 子节点（%s）" % (mkt_ctrl.get_script().resource_path if mkt_ctrl else "nil"))
+	if cmp != null:
+		ok(String(cmp.get_script().resource_path).ends_with("company_view.gd"),
+			"公司页根 = company_view（View）（%s）" % cmp.get_script().resource_path)
+		var cmp_ctrl: Node = cmp.get_node_or_null("Controller")
+		ok(cmp_ctrl != null and String(cmp_ctrl.get_script().resource_path).ends_with("company_controller.gd"),
+			"公司页有 Controller 子节点（%s）" % (cmp_ctrl.get_script().resource_path if cmp_ctrl else "nil"))
 
 	var tabs: TabContainer = scr.get_node("Tabs")
 	tabs.current_tab = 1
 	eq(tabs.current_tab, 1, "可以切到「许愿机」")
 	tabs.current_tab = 2
 	eq(tabs.current_tab, 2, "可以切到「市场」")
+	tabs.current_tab = 3
+	eq(tabs.current_tab, 3, "可以切到「公司」")
 	tabs.current_tab = 0
 	eq(tabs.current_tab, 0, "可以切回「仓库」")
 
@@ -384,5 +399,62 @@ func _test_tab_switch_refreshes() -> void:
 	await get_tree().process_frame
 	ok(String(items_lbl.text).find("家居物品") >= 0, "切回仓库页 ⇒ View 显示新物品")
 	ok(String(items_lbl.text).find("白×1") >= 0, "档位计数也更新")
+	scr.queue_free()
+	await get_tree().process_frame
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ⑦ 公司页
+# ══════════════════════════════════════════════════════════════════════════════
+
+func _test_company_page() -> void:
+	print("— §3.5 公司页：显示等级 / 路线 / 升级配方 / 产出 / 库存 / 金币")
+	_reset_world()
+	CompanyService.reset()
+	var st := GameState.new_game()
+	var scr = await _make_screen()
+	scr.bind_state(st)
+	await get_tree().process_frame
+	var cmp: Node = scr.page_node("CompanyPage")
+	var ctrl: Node = cmp.get_node("Controller")
+	var s: Dictionary = ctrl.snapshot()
+
+	ok(String(s["level"]).find("Lv.1 / Lv.5") >= 0, "显示公司等级（%s）" % s["level"])
+	ok(String(s["route"]).find("标准线") >= 0, "显示培养路线（%s）" % s["route"])
+	ok(String(s["upgrade_text"]).find("升级") >= 0, "显示升级按钮文案（%s）" % s["upgrade_text"])
+	ok(String(s["gold"]).find("金币") >= 0, "显示金币余额（%s）" % s["gold"])
+
+	print("— §3.5 公司页：升级真提交物品")
+	# 开局仓库无物品 ⇒ 升级置灰（配方物品不足）
+	eq(s["upgrade_disabled"], true, "配方物品不足 ⇒ 升级置灰")
+	# 提交配方物品（home_q1 ×1）
+	ItemService.grant(&"home_q1", {"kind": ItemConstants.KIND_UNLOCK})
+	scr.refresh()
+	await get_tree().process_frame
+	var s2: Dictionary = ctrl.snapshot()
+	eq(s2["upgrade_disabled"], false, "配方物品够 ⇒ 升级可点")
+	var up_btn: Button = cmp.get_node("UpgradeButton")
+	up_btn.pressed.emit()
+	await get_tree().process_frame
+	var s3: Dictionary = ctrl.snapshot()
+	ok(String(s3["result"]).find("升级成功") >= 0, "升级成功（%s）" % s3["result"])
+	ok(String(s3["level"]).find("Lv.2") >= 0, "面板等级刷新（%s）" % s3["level"])
+
+	print("— §3.5 公司页：买盲盒真扣金币发盒")
+	# 产出库存 + 给金币
+	CompanyService.ensure_produced(1000)
+	ItemService.grant_currency(ItemConstants.CURRENCY_GOLD, 100000,
+		ItemConstants.CURRENCY_SOURCE_INIT)
+	scr.refresh()
+	await get_tree().process_frame
+	var s4: Dictionary = ctrl.snapshot()
+	eq(s4["buy_disabled"], false, "有库存 + 金币够 ⇒ 买盲盒可点")
+	var box_before := st.box_count()
+	var buy_btn: Button = cmp.get_node("BuyButton")
+	buy_btn.pressed.emit()
+	await get_tree().process_frame
+	var s5: Dictionary = ctrl.snapshot()
+	ok(String(s5["result"]).find("买入成功") >= 0, "买盲盒成功（%s）" % s5["result"])
+	eq(st.box_count(), box_before + 1, "盲盒 +1（发进清单）")
 	scr.queue_free()
 	await get_tree().process_frame

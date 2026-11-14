@@ -1,0 +1,53 @@
+[gd_scene load_steps=3 format=3 uid="uid://cob0cmppage1"]
+
+[ext_resource type="Script" path="res://src/company/scenes/company_view.gd" id="1_view"]
+[ext_resource type="Script" path="res://src/company/scenes/company_controller.gd" id="2_ctrl"]
+
+[node name="CompanyPage" type="VBoxContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 10
+script = ExtResource("1_view")
+
+[node name="Level" type="Label" parent="."]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "公司 Lv.1 / Lv.5"
+
+[node name="Route" type="Label" parent="."]
+layout_mode = 2
+text = "培养路线：标准线"
+
+[node name="Sep" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="Countdown" type="Label" parent="."]
+layout_mode = 2
+text = ""
+
+[node name="Stock" type="Label" parent="."]
+layout_mode = 2
+text = "库存：空"
+
+[node name="Gold" type="Label" parent="."]
+layout_mode = 2
+text = "金币 0"
+
+[node name="UpgradeButton" type="Button" parent="."]
+layout_mode = 2
+text = "升级"
+
+[node name="BuyButton" type="Button" parent="."]
+layout_mode = 2
+text = "买一盒"
+
+[node name="Result" type="Label" parent="."]
+layout_mode = 2
+autowrap_mode = 3
+text = ""
+
+[node name="Controller" type="Node" parent="."]
+script = ExtResource("2_ctrl")

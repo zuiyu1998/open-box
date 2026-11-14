@@ -25,6 +25,7 @@ DeviceCatalog="*res://src/devices/device_catalog.gd"
 FlowService="*res://src/flow/flow_service.gd"
 GameSession="*res://src/flow/session.gd"
 MarketService="*res://src/market/market_service.gd"
+CompanyService="*res://src/company/company_service.gd"
 _mcp_game_helper="*res://addons/godot_ai/runtime/game_helper.gd"
 
 [editor_plugins]

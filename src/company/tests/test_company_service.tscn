@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cob0testcmp1"]
+
+[ext_resource type="Script" path="res://src/company/tests/test_company_service.gd" id="1_cmp"]
+
+[node name="TestCompanyService" type="Node"]
+script = ExtResource("1_cmp")
