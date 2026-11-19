@@ -12,64 +12,186 @@ grow_vertical = 2
 theme_override_constants/separation = 10
 script = ExtResource("1_view")
 
-[node name="DeviceName" type="Label" parent="."]
+[node name="Header" type="HBoxContainer" parent="."]
 layout_mode = 2
-theme_override_font_sizes/font_size = 32
+theme_override_constants/separation = 12
+
+[node name="DeviceName" type="Label" parent="Header"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
 text = "许愿机"
 
-[node name="DeviceDesc" type="Label" parent="."]
+[node name="DeviceDesc" type="Label" parent="Header"]
 layout_mode = 2
+size_flags_horizontal = 3
 autowrap_mode = 3
 text = ""
 
-[node name="LevelLine" type="Label" parent="."]
+[node name="LevelLine" type="Label" parent="Header"]
 layout_mode = 2
 text = ""
 
-[node name="EffectLine" type="Label" parent="."]
+[node name="EffectLine" type="Label" parent="Header"]
 layout_mode = 2
 text = ""
 
-[node name="GemLine" type="Label" parent="."]
+[node name="GemLine" type="Label" parent="Header"]
 layout_mode = 2
 text = ""
 
-[node name="UpgradeButton" type="Button" parent="."]
+[node name="UpgradeButton" type="Button" parent="Header"]
 layout_mode = 2
 text = "升级"
 
 [node name="Sep" type="HSeparator" parent="."]
 layout_mode = 2
 
-[node name="BoxUses" type="Label" parent="."]
+[node name="Columns" type="HBoxContainer" parent="."]
 layout_mode = 2
-text = "剩余开盒次数 —"
+size_flags_vertical = 3
+theme_override_constants/separation = 16
 
-[node name="BoxExpectation" type="Label" parent="."]
-layout_mode = 2
-text = "数学期望 M̄ —"
-
-[node name="BoxPicker" type="OptionButton" parent="."]
-layout_mode = 2
-
-[node name="OpenButtons" type="HBoxContainer" parent="."]
-layout_mode = 2
-theme_override_constants/separation = 12
-
-[node name="OpenOne" type="Button" parent="OpenButtons"]
+[node name="Left" type="VBoxContainer" parent="Columns"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "开一次"
+theme_override_constants/separation = 10
 
-[node name="OpenTen" type="Button" parent="OpenButtons"]
+[node name="BoxSection" type="VBoxContainer" parent="Columns/Left"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="BoxTitle" type="Label" parent="Columns/Left/BoxSection"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "① 盲盒选择"
+
+[node name="BoxPicker" type="OptionButton" parent="Columns/Left/BoxSection"]
+layout_mode = 2
+
+[node name="ModuleSection" type="VBoxContainer" parent="Columns/Left"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="ModuleTitle" type="Label" parent="Columns/Left/ModuleSection"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "② 模块镶嵌"
+
+[node name="SlotDetail" type="Label" parent="Columns/Left/ModuleSection"]
+layout_mode = 2
+autowrap_mode = 3
+text = "先选一个盲盒"
+
+[node name="SlotPicker" type="OptionButton" parent="Columns/Left/ModuleSection"]
+layout_mode = 2
+
+[node name="ModulePicker" type="OptionButton" parent="Columns/Left/ModuleSection"]
+layout_mode = 2
+
+[node name="ModuleButtons" type="HBoxContainer" parent="Columns/Left/ModuleSection"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="SocketButton" type="Button" parent="Columns/Left/ModuleSection/ModuleButtons"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "开 10 次"
+text = "镶嵌"
 
-[node name="ResultLine" type="Label" parent="."]
+[node name="UnsocketButton" type="Button" parent="Columns/Left/ModuleSection/ModuleButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "拆卸"
+
+[node name="ResultSection" type="VBoxContainer" parent="Columns/Left"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="ResultTitle" type="Label" parent="Columns/Left/ResultSection"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "③ 生成物品"
+
+[node name="ResultLine" type="Label" parent="Columns/Left/ResultSection"]
 layout_mode = 2
 autowrap_mode = 3
 text = ""
+
+[node name="Spacer" type="Control" parent="Columns/Left"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Middle" type="VBoxContainer" parent="Columns"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="OperatorTitle" type="Label" parent="Columns/Middle"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "干员"
+
+[node name="OperatorLevel" type="Label" parent="Columns/Middle"]
+layout_mode = 2
+text = "干员 Lv.1 / Lv.5"
+
+[node name="OperatorRoute" type="Label" parent="Columns/Middle"]
+layout_mode = 2
+text = "路线：—"
+
+[node name="OperatorBans" type="Label" parent="Columns/Middle"]
+layout_mode = 2
+autowrap_mode = 3
+text = "排除：无"
+
+[node name="OperatorToggle" type="Button" parent="Columns/Middle"]
+layout_mode = 2
+text = "出战中"
+
+[node name="Spacer" type="Control" parent="Columns/Middle"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Right" type="VBoxContainer" parent="Columns"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="InfoSection" type="VBoxContainer" parent="Columns/Right"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="InfoTitle" type="Label" parent="Columns/Right/InfoSection"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "盲盒信息"
+
+[node name="BoxUses" type="Label" parent="Columns/Right/InfoSection"]
+layout_mode = 2
+text = "剩余开盒次数 —"
+
+[node name="BoxExpectation" type="Label" parent="Columns/Right/InfoSection"]
+layout_mode = 2
+text = "数学期望 M̄ —"
+
+[node name="OpenButtons" type="VBoxContainer" parent="Columns/Right"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="OpenOne" type="Button" parent="Columns/Right/OpenButtons"]
+layout_mode = 2
+text = "开启一次"
+
+[node name="OpenTen" type="Button" parent="Columns/Right/OpenButtons"]
+layout_mode = 2
+text = "开启 10 次"
+
+[node name="OpenAll" type="Button" parent="Columns/Right/OpenButtons"]
+layout_mode = 2
+text = "开启全部"
+
+[node name="Spacer" type="Control" parent="Columns/Right"]
+layout_mode = 2
+size_flags_vertical = 3
 
 [node name="Controller" type="Node" parent="."]
 script = ExtResource("2_ctrl")

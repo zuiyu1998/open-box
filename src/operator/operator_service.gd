@@ -86,12 +86,19 @@ func active_bans() -> Array[StringName]:
 
 
 ## 是否出战（`set_active` / `toggle_active` 改它）。
+##
+## ★ **必须同时丢弃池子派生状态缓存**：`PoolService` 的缓存键是 `(box_id, revision)`，
+##   而干员的排除**不改 `revision`**（它不写 `Box.modules`）⇒ 不丢缓存就会拿到
+##   "上一次出战状态"算出来的 `PoolState`，于是**切换完全不生效**（且开盒会用旧分布）。
 func set_active(v: bool) -> void:
+	if active == v:
+		return
 	active = v
+	PoolService.drop_all_cached_states()
 
 
 func toggle_active() -> void:
-	active = not active
+	set_active(not active)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -99,10 +106,14 @@ func toggle_active() -> void:
 # ══════════════════════════════════════════════════════════════════════════════
 
 ## 切换路线（互斥）。未知 id → false、状态不变。
+## 与 `set_active` 同理：路线决定 `ban_targets`，切换后**必须丢缓存**，否则分布不更新。
 func select_route(id: StringName) -> bool:
 	if not ROUTES.has(id):
 		return false
+	if route_id == id:
+		return true
 	route_id = id
+	PoolService.drop_all_cached_states()
 	return true
 
 

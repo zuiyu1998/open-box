@@ -21,6 +21,12 @@ var _modules: Dictionary = {}
 ## 所以**物品内容必须先于套系内容就位**（否则 `validate()` 会报 `null_item` / 引用不存在）。
 const SERIES_CONTENT_DIR := "res://src/gacha/content"
 
+## ★ v0.41：**模块内容目录**——`ModuleDef` 的 `.tres` 放这里，`_ready()` 自动载入。
+## **加一个模块 = 加一个 `.tres`，不改代码**（与套系 / 物品 / 货币三个内容目录同一纪律）。
+## 模块的 `targets` 必须指向**池内物品**（`s01_XX` 之类），否则 `PoolService` 会以
+## `unknown_target` 拒绝镶嵌——所以内容里的目标要跟套系池子对得上。
+const MODULE_CONTENT_DIR := "res://src/gacha/content/modules"
+
 
 ## ★ v0.26：从内容目录载入全部 `SeriesDef`（幂等；同 id 覆盖）。返回载入条数。
 func load_series_content() -> int:
@@ -46,8 +52,36 @@ func load_series_content() -> int:
 	return n
 
 
+## ★ v0.41：从内容目录载入全部 `ModuleDef`（幂等；同 id 覆盖）。返回载入条数。
+##
+## **必须排在套系之后**不是硬要求（模块只引用 `item_id`），但排在物品之后就够了；
+## 目录不存在 / 载入失败**只告警、不崩**（没有模块内容时"模块镶嵌"区会是空的，那是合法状态）。
+func load_module_content() -> int:
+	var n := 0
+	var dir := DirAccess.open(MODULE_CONTENT_DIR)
+	if dir == null:
+		push_warning(
+			"GachaCatalog: 打不开模块内容目录 `%s`（没有模块内容时是正常的）" % MODULE_CONTENT_DIR
+		)
+		return 0
+	dir.list_dir_begin()
+	var fname := dir.get_next()
+	while fname != "":
+		if not dir.current_is_dir() and fname.ends_with(".tres"):
+			var path := MODULE_CONTENT_DIR + "/" + fname
+			if ResourceLoader.exists(path):
+				var res = load(path)
+				if res is ModuleDef:
+					register_module(res as ModuleDef)
+					n += 1
+		fname = dir.get_next()
+	dir.list_dir_end()
+	return n
+
+
 func _ready() -> void:
 	load_series_content()
+	load_module_content()   # ★ v0.41：模块内容（许愿机「模块镶嵌」区要用）
 
 
 func register_series(def: SeriesDef) -> void:

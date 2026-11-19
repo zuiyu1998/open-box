@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>许愿机 · 方向二 暖纸朱批</title>
+<style>
+  :root{
+    --paper:#EDE0BC; --paper2:#E6D6AC; --ink:#241c14; --ink2:#5a4a35;
+    --red:#B03A2E; --gold:#8a6b3f;
+    --serif:"Noto Serif SC","Source Han Serif SC","Songti SC","SimSun",serif;
+    --sans:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:1920px;height:1080px;overflow:hidden}
+  body{
+    background:
+      repeating-linear-gradient(90deg, rgba(36,28,20,.020) 0 1px, transparent 1px 3px),
+      repeating-linear-gradient(0deg, rgba(36,28,20,.014) 0 1px, transparent 1px 4px),
+      radial-gradient(1400px 900px at 50% 40%, #F2E7C6 0%, var(--paper) 55%, var(--paper2) 100%);
+    color:var(--ink); font-family:var(--serif);
+    -webkit-font-smoothing:antialiased;
+  }
+  .frame{position:absolute;inset:30px;border:2px solid var(--ink);padding:5px}
+  .frame-in{height:100%;border:1px solid var(--ink);padding:28px 40px 20px;display:flex;flex-direction:column}
+  /* 顶栏 */
+  header{display:flex;align-items:flex-end;gap:24px;padding-bottom:12px;
+         border-bottom:1px solid var(--ink)}
+  .name{font-size:52px;letter-spacing:.10em;line-height:1}
+  .sub{font-size:15px;color:var(--ink2);letter-spacing:.20em;padding-bottom:8px}
+  .spacer{flex:1}
+  .gem{text-align:right;padding-bottom:2px}
+  .gem .k{font-size:12px;letter-spacing:.26em;color:var(--red)}
+  .gem .v{font-size:30px;letter-spacing:.04em;line-height:1.15;font-variant-numeric:tabular-nums}
+  .seal-up{background:var(--red);color:#F6EBD0;border:none;font-family:var(--serif);
+           font-size:14px;letter-spacing:.10em;padding:12px 10px;line-height:1.35;
+           width:92px;text-align:center}
+  /* 三栏 */
+  main{flex:1;display:grid;grid-template-columns:660px 288px 1fr;padding-top:16px;min-height:0}
+  .col{position:relative;padding:8px 30px 0 0;min-height:0}
+  .col+.col{border-left:1px solid var(--ink);padding-left:52px}
+  /* 栏题：贴在分栏线内侧、垂直居中，做"页码式"标记 */
+  /* 栏题：贴在本栏右内侧、垂直居中，做"页码式"标记（不放分栏线上，避免两栏撞在一起） */
+  .vmark{position:absolute;right:24px;top:50%;transform:translateY(-50%);
+         writing-mode:vertical-rl;font-size:15px;letter-spacing:.42em;
+         color:var(--ink2);background:var(--paper);padding:14px 0}
+  .body{padding-right:22px;height:100%;display:flex;flex-direction:column;min-height:0}
+  /* 盲盒 */
+  .pick{border-bottom:1px solid var(--ink);padding-bottom:12px;display:flex;
+        align-items:baseline;gap:16px}
+  .pick .id{font-family:var(--sans);font-size:22px;letter-spacing:.16em}
+  .pick .life{font-size:14px;color:var(--red);letter-spacing:.10em}
+  /* 模块 */
+  .blocks{display:flex;gap:12px;margin-top:18px}
+  .blk{width:84px;height:84px;border:1px solid var(--ink);display:flex;align-items:center;
+       justify-content:center;font-size:13px;color:var(--ink2);line-height:1.35;text-align:center}
+  .blk.on{background:var(--ink);color:#EFE4C4;border-color:var(--ink)}
+  .meta{font-size:13px;color:var(--ink2);letter-spacing:.08em;margin-top:10px}
+  .cands{margin-top:16px;border-top:1px solid rgba(36,28,20,.35)}
+  .cands .row{display:flex;align-items:baseline;gap:10px;font-size:19px;padding:13px 0;
+              border-bottom:1px dotted rgba(36,28,20,.28)}
+  .cands .row .dots{flex:1;border-bottom:1px dotted rgba(36,28,20,.45);transform:translateY(-5px)}
+  .cands .row .price{font-size:15px;color:var(--red);letter-spacing:.06em}
+  .cands .row.sel{font-weight:600}
+  .acts{display:flex;gap:10px;margin-top:16px}
+  .thin{flex:1;background:transparent;border:1px solid var(--ink);font-family:var(--serif);
+        font-size:16px;letter-spacing:.16em;padding:11px 0;color:var(--ink)}
+  /* 产出 */
+  .quote{margin-top:30px;border-top:1px solid var(--ink);padding-top:14px}
+  .quote .k{font-size:12px;letter-spacing:.26em;color:var(--red)}
+  .quote .v{font-size:31px;letter-spacing:.06em;margin-top:8px;
+            border-bottom:2px solid var(--red);display:inline-block;padding-bottom:4px}
+  .note-line{margin-top:auto;font-size:12.5px;color:var(--ink2);letter-spacing:.06em;
+             line-height:1.9;border-top:1px solid rgba(36,28,20,.30);padding-top:12px}
+  /* 干员 */
+  .op dl{margin-top:2px}
+  .op dt{font-size:12px;letter-spacing:.26em;color:var(--red);margin-top:18px}
+  .op dd{font-size:21px;letter-spacing:.06em;margin-top:5px}
+  .op .on{margin-top:22px;border:1px solid var(--red);color:var(--red);background:transparent;
+          font-family:var(--serif);font-size:15px;letter-spacing:.12em;padding:12px 6px;width:100%}
+  /* 右栏：旁注式读数 */
+  .note .k{font-size:12px;letter-spacing:.26em;color:var(--red)}
+  .note .v{font-size:92px;line-height:1.02;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+  .note .v small{font-size:24px;letter-spacing:.10em;color:var(--ink2);margin-left:8px}
+  .note.alt{margin-top:22px;border-top:1px solid rgba(36,28,20,.30);padding-top:16px}
+  .note.alt .v{font-size:62px}
+  .bar{text-decoration:overline;text-decoration-thickness:2px}
+  .clip{margin-top:auto;border-top:1px solid var(--ink);padding-top:14px}
+  .clip .t{font-size:12px;letter-spacing:.24em;color:var(--ink2)}
+  .opens{margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .opens .wide{grid-column:1 / -1}
+  .ticket{border:1px solid var(--ink);background:transparent;font-family:var(--serif);
+          font-size:17px;letter-spacing:.16em;padding:15px 0;color:var(--ink)}
+  .ticket.main{background:var(--red);border-color:var(--red);color:#F6EBD0;font-size:21px;
+               letter-spacing:.22em;padding:18px 0}
+  .tip{margin-top:12px;font-size:12.5px;color:var(--ink2);letter-spacing:.04em;line-height:1.8}
+  /* 页脚 */
+  footer{margin-top:10px;display:flex;justify-content:space-between;align-items:baseline;
+         font-size:12.5px;letter-spacing:.18em;color:var(--ink2);border-top:1px solid var(--ink);
+         padding-top:9px}
+</style>
+</head>
+<body>
+<div class="frame"><div class="frame-in">
+
+  <header>
+    <div class="name">许愿机</div>
+    <div class="sub">设备面板　等级 Lv.1 / Lv.3</div>
+    <div class="spacer"></div>
+    <div class="gem"><div class="k">原石</div><div class="v">10000</div></div>
+    <button class="seal-up">升级<br>40 原石</button>
+  </header>
+
+  <main>
+    <!-- 左栏 -->
+    <section class="col">
+      <div class="vmark">盲盒选择　模块镶嵌</div>
+      <div class="body">
+        <div class="pick">
+          <span class="id">3f2c8a51</span>
+          <span class="life">寿命 15</span>
+        </div>
+
+        <div class="blocks">
+          <div class="blk on">排除<br>旧木凳</div>
+          <div class="blk">空位</div>
+          <div class="blk">空位</div>
+        </div>
+        <div class="meta">共 3 位　已占 1　选中位 1</div>
+
+        <div class="cands">
+          <div class="row sel"><span>排除 · 旧木凳</span><span class="dots"></span><span class="price">20 金币</span></div>
+          <div class="row"><span>提升 · 干电池 ×2</span><span class="dots"></span><span class="price">30 金币</span></div>
+        </div>
+        <div class="acts">
+          <button class="thin">镶嵌</button>
+          <button class="thin">拆卸</button>
+        </div>
+
+        <div class="quote">
+          <div class="k">生成物品</div>
+          <div class="v">铜制水壶（蓝）</div>
+        </div>
+
+        <p class="note-line">套系 series_01　共 8 件物品<br>镶嵌与开盒共用同一份寿命，归零即摧毁盒子</p>
+      </div>
+    </section>
+
+    <!-- 中栏 -->
+    <section class="col">
+      <div class="vmark">干员</div>
+      <div class="body op">
+        <dl>
+          <dt>等级</dt><dd>Lv.1 / Lv.5</dd>
+          <dt>路线</dt><dd>精准线</dd>
+          <dt>排除</dt><dd>传世茶案</dd>
+        </dl>
+        <button class="on">出战中　点击撤回</button>
+        <p class="note-line">出战即生效，不占盒子位子<br>也不花费金币或寿命</p>
+      </div>
+    </section>
+
+    <!-- 右栏 -->
+    <section class="col">
+      <div class="vmark">开启</div>
+      <div class="body">
+        <div class="note">
+          <div class="k">剩余开盒次数</div>
+          <div class="v">15<small>次</small></div>
+        </div>
+        <div class="note alt">
+          <div class="k">数学期望 <span class="bar">M</span></div>
+          <div class="v">≈ 1.29</div>
+        </div>
+
+        <div class="clip">
+          <div class="t">开启</div>
+          <div class="opens">
+            <button class="ticket">开启一次</button>
+            <button class="ticket">开启 10 次</button>
+            <button class="ticket main wide">开启全部</button>
+          </div>
+          <p class="tip">开启全部会把这个盒子剩下的 15 次一次开完；寿命归零时盒子随即被摧毁。</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>Open Box　许愿机</span>
+    <span>可开套系品质 ≤ 2　　开盒成本 100%</span>
+    <span>一</span>
+  </footer>
+
+</div></div>
+</body>
+</html>

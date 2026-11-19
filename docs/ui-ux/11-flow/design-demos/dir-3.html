@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>许愿机 · 方向三 赭红海报</title>
+<style>
+  :root{
+    --brick:#7A2E1D; --brick-d:#5E2113; --coal:#1E1713; --cream:#F2E6D0;
+    --ochre:#E08A2E; --ink:#1E1713;
+    --serif:"Noto Serif SC","Source Han Serif SC","Songti SC","SimSun",serif;
+    --sans:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:1920px;height:1080px;overflow:hidden}
+  body{background:var(--cream);color:var(--ink);font-family:var(--sans);
+       -webkit-font-smoothing:antialiased}
+  .bands{display:grid;grid-template-columns:768px 412px 1fr;height:1080px}
+  .bar{text-decoration:overline;text-decoration-thickness:2px}
+
+  /* A 赭红 */
+  .a{background:linear-gradient(180deg,var(--brick) 0%,var(--brick-d) 100%);
+     color:var(--cream);padding:52px 56px 44px;display:flex;flex-direction:column}
+  .title{font-family:var(--serif);font-size:112px;line-height:.94;letter-spacing:-.02em}
+  .meta{margin-top:14px;font-size:16px;letter-spacing:.08em;color:rgba(242,230,208,.72)}
+  .rowline{margin-top:38px;border-top:2px solid rgba(242,230,208,.35);padding-top:14px}
+  .lbl{font-size:14px;letter-spacing:.26em;color:rgba(242,230,208,.66)}
+  .pick{margin-top:10px;display:flex;align-items:baseline;justify-content:space-between}
+  .pick .id{font-size:26px;letter-spacing:.10em}
+  .pick .life{font-size:16px;letter-spacing:.08em;color:var(--ochre)}
+  .slots{margin-top:14px;display:flex;gap:14px}
+  .s{width:96px;height:96px;border:2px solid rgba(242,230,208,.55);display:flex;
+     align-items:center;justify-content:center;font-size:14px;line-height:1.3;
+     text-align:center;color:rgba(242,230,208,.62)}
+  .s.on{background:var(--cream);color:var(--brick);border-color:var(--cream);font-weight:700}
+  .cands{margin-top:20px}
+  .cands .r{display:flex;justify-content:space-between;font-size:20px;padding:13px 0;
+            border-bottom:1px solid rgba(242,230,208,.22)}
+  .cands .r .p{color:var(--ochre);font-variant-numeric:tabular-nums}
+  .acts{margin-top:18px;display:flex;gap:12px}
+  .acts button{flex:1;background:transparent;border:2px solid rgba(242,230,208,.62);
+               color:var(--cream);font-family:var(--sans);font-size:18px;letter-spacing:.16em;
+               padding:14px 0}
+  .out{margin-top:30px;border-top:2px solid rgba(242,230,208,.35);padding-top:14px}
+  .out .k{font-size:14px;letter-spacing:.26em;color:rgba(242,230,208,.66)}
+  .out .v{font-family:var(--serif);font-size:44px;line-height:1.15;margin-top:8px}
+  .afoot{margin-top:auto;font-size:13px;line-height:1.9;letter-spacing:.05em;
+         color:rgba(242,230,208,.55);border-top:1px solid rgba(242,230,208,.22);padding-top:12px}
+
+  /* B 炭黑 —— Lv.1 当作图形居中 */
+  .b{background:var(--coal);color:var(--cream);padding:52px 40px 44px;
+     display:flex;flex-direction:column}
+  .b .lbl{color:rgba(242,230,208,.55)}
+  .b .glyph{flex:1;display:flex;flex-direction:column;justify-content:center}
+  .lvl{font-size:104px;line-height:.9;letter-spacing:-.05em;font-variant-numeric:tabular-nums}
+  .sub{margin-top:8px;font-size:16px;letter-spacing:.12em;color:rgba(242,230,208,.55)}
+  .b dl{border-top:1px solid rgba(242,230,208,.22);padding-top:16px}
+  .b dt{font-size:13px;letter-spacing:.26em;color:rgba(242,230,208,.5);margin-top:16px}
+  .b dd{font-size:25px;letter-spacing:.06em;margin-top:5px}
+  .onair{margin-top:20px;background:var(--ochre);color:var(--coal);border:none;
+         font-family:var(--sans);font-size:18px;font-weight:700;letter-spacing:.10em;
+         padding:18px 0}
+  .bfoot{margin-top:auto;font-size:13px;line-height:1.9;letter-spacing:.04em;
+         color:rgba(242,230,208,.5);border-top:1px solid rgba(242,230,208,.18);padding-top:12px}
+
+  /* C 米白 */
+  .c{padding:52px 56px 44px;display:flex;flex-direction:column}
+  .gem .k{font-size:14px;letter-spacing:.26em;color:rgba(30,23,19,.55)}
+  .gem .v{font-size:66px;line-height:.95;letter-spacing:-.03em;font-variant-numeric:tabular-nums;
+          margin-top:2px}
+  .up{margin-top:12px;background:var(--brick);color:var(--cream);border:none;
+      font-family:var(--sans);font-size:17px;letter-spacing:.14em;padding:15px 0;width:100%}
+  .uses{margin-top:44px;border-top:3px solid var(--ink);padding-top:16px}
+  .uses .k{font-size:14px;letter-spacing:.26em;color:rgba(30,23,19,.55)}
+  .uses .v{font-size:168px;line-height:.86;letter-spacing:-.055em;color:var(--brick);
+           font-variant-numeric:tabular-nums;margin-top:2px}
+  .uses .v small{font-size:32px;letter-spacing:.02em;color:var(--ink);margin-left:10px}
+  .exp{margin-top:22px}
+  .exp .k{font-size:14px;letter-spacing:.26em;color:rgba(30,23,19,.55)}
+  .exp .v{font-size:82px;line-height:1;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
+  .opens{margin-top:auto;border-top:1px solid rgba(30,23,19,.5);padding-top:16px}
+  .opens .t{font-size:14px;letter-spacing:.26em;color:rgba(30,23,19,.55);margin-bottom:12px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .row button{font-family:var(--sans);font-size:19px;letter-spacing:.14em;padding:20px 0;
+              border:2px solid var(--ink);background:transparent;color:var(--ink)}
+  .row .ten{background:var(--ochre);border-color:var(--ochre)}
+  .opens .wide{margin-top:12px;width:100%;background:var(--coal);border:2px solid var(--coal);
+               color:var(--cream);font-family:var(--sans);font-size:23px;font-weight:700;
+               letter-spacing:.20em;padding:21px 0}
+  .tip{margin-top:14px;font-size:13px;line-height:1.9;letter-spacing:.04em;
+       color:rgba(30,23,19,.6)}
+</style>
+</head>
+<body>
+<div class="bands">
+
+  <!-- A -->
+  <section class="a">
+    <div class="title">许愿机</div>
+    <div class="meta">等级 Lv.1 / Lv.3　　可开套系品质 ≤ 2　　开盒成本 100%</div>
+
+    <div class="rowline">
+      <div class="lbl">盲盒选择</div>
+      <div class="pick"><span class="id">3f2c8a51</span><span class="life">寿命 15</span></div>
+    </div>
+
+    <div class="rowline">
+      <div class="lbl">模块镶嵌</div>
+      <div class="slots">
+        <div class="s on">排除<br>旧木凳</div>
+        <div class="s">空位</div>
+        <div class="s">空位</div>
+      </div>
+      <div class="cands">
+        <div class="r"><span>排除 · 旧木凳</span><span class="p">20 金币</span></div>
+        <div class="r"><span>提升 · 干电池 ×2</span><span class="p">30 金币</span></div>
+      </div>
+      <div class="acts">
+        <button>镶嵌</button>
+        <button>拆卸</button>
+      </div>
+    </div>
+
+    <div class="out">
+      <div class="k">生成物品</div>
+      <div class="v">铜制水壶</div>
+    </div>
+
+    <p class="afoot">套系 series_01　共 8 件物品<br>镶嵌与开盒共用同一份寿命，归零即摧毁盒子</p>
+  </section>
+
+  <!-- B -->
+  <section class="b">
+    <div class="lbl">干员</div>
+    <div class="glyph">
+      <div class="lvl">Lv.1</div>
+      <div class="sub">精准线　出战即生效</div>
+    </div>
+    <dl>
+      <dt>等级</dt><dd>Lv.1 / Lv.5</dd>
+      <dt>路线</dt><dd>精准线</dd>
+      <dt>排除</dt><dd>传世茶案</dd>
+    </dl>
+    <button class="onair">出战中，点击撤回</button>
+    <p class="bfoot">不占盒子位子<br>不花费金币或寿命</p>
+  </section>
+
+  <!-- C -->
+  <section class="c">
+    <div class="gem">
+      <div class="k">原石</div>
+      <div class="v">10000</div>
+    </div>
+    <button class="up">升级（40 原石）</button>
+
+    <div class="uses">
+      <div class="k">剩余开盒次数</div>
+      <div class="v">15<small>次</small></div>
+    </div>
+
+    <div class="exp">
+      <div class="k">数学期望 <span class="bar">M</span></div>
+      <div class="v">≈ 1.29</div>
+    </div>
+
+    <div class="opens">
+      <div class="t">开启</div>
+      <div class="row">
+        <button>开启一次</button>
+        <button class="ten">开启 10 次</button>
+      </div>
+      <button class="wide">开启全部</button>
+      <p class="tip">开启全部会把这个盒子剩下的 15 次一次开完；寿命归零时盒子随即被摧毁。</p>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

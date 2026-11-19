@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>许愿机 · 六张方向缩略图</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{width:1560px;background:#15120f;color:#e9dcc2;
+       font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;padding:26px 26px 30px}
+  h1{font-size:19px;font-weight:600;letter-spacing:.16em;color:#c8a274;margin-bottom:4px}
+  p.lead{font-size:13px;color:#8d7a60;margin-bottom:18px;letter-spacing:.04em}
+  .grid{display:grid;grid-template-columns:repeat(3,480px);gap:20px}
+  .cell{width:480px;height:300px;position:relative;overflow:hidden;border:1px solid #3a2f24}
+  .cap{position:absolute;left:0;bottom:0;right:0;background:rgba(10,8,6,.82);
+       font-size:12px;letter-spacing:.08em;padding:7px 10px;color:#cbb79b}
+  .nm{font-family:"Noto Serif SC","Songti SC",serif}
+  /* 1 Scher */
+  .c1{background:#F2E6D0;color:#1E1713;display:grid;grid-template-columns:52% 20% 1fr}
+  .c1 .brick{background:#7A2E1D;color:#F2E6D0;padding:16px}
+  .c1 .coal{background:#1E1713;color:#F2E6D0;padding:10px 8px;font-size:10px;letter-spacing:.1em}
+  .c1 .cream{padding:16px 12px}
+  .c1 .h{font-size:30px;line-height:1;letter-spacing:-.02em}
+  .c1 .n{font-size:64px;line-height:.9;color:#7A2E1D;letter-spacing:-.05em}
+  /* 2 服部 */
+  .c2{background:#F6F1E4;color:#2a241c;padding:26px 24px}
+  .c2 .h{font-size:44px;letter-spacing:.28em}
+  .c2 .line{height:1px;background:#2a241c;margin:18px 0;opacity:.5}
+  .c2 .sm{font-size:11px;letter-spacing:.26em;color:#8a7b64}
+  .c2 .red{display:inline-block;width:8px;height:8px;background:#B03A2E;margin-left:6px}
+  /* 3 暖褐铜光 */
+  .c3{background:radial-gradient(300px 200px at 76% 96%, rgba(221,90,47,.35), transparent 60%),
+      linear-gradient(160deg,#2b1a0f,#140c07);color:#f5e7cd;padding:16px;
+      display:grid;grid-template-columns:1fr 96px 1fr;gap:10px}
+  .c3 .panel{border:1px solid rgba(214,150,90,.4);padding:8px}
+  .c3 .k{font-size:9px;letter-spacing:.2em;color:#c98a4b}
+  .c3 .v{font-size:46px;color:#f2a63c;font-weight:600;letter-spacing:-.03em}
+  .c3 .h{font-family:"Noto Serif SC",serif;font-size:20px;letter-spacing:.06em}
+  .c3 .btn{margin-top:5px;border:1px solid rgba(214,150,90,.5);font-size:9px;text-align:center;padding:4px}
+  .c3 .btn.all{background:linear-gradient(180deg,#f6b352,#dd5a2f);color:#1a0d05;border:none}
+  /* 4 Pentiment */
+  .c4{background:#E8DCC0;color:#241c14;padding:18px;
+      border:6px double #241c14;display:flex;flex-direction:column;gap:6px}
+  .c4 .h{font-family:"Noto Serif SC",serif;font-size:26px;letter-spacing:.1em}
+  .c4 .cols{display:flex;gap:12px;flex:1}
+  .c4 .col{flex:1;border-left:1px solid #241c14;padding-left:8px;font-size:9px;line-height:1.7}
+  .c4 .seal{background:#B03A2E;color:#F6EBD0;font-size:10px;padding:5px 6px;align-self:flex-start}
+  /* 5 吕敬人 */
+  .c5{background:#EDE0BC;color:#241c14;padding:14px 16px;display:grid;
+      grid-template-columns:1fr 90px 1fr;gap:12px;border:2px solid #241c14}
+  .c5 .vt{writing-mode:vertical-rl;font-family:"Noto Serif SC",serif;font-size:13px;
+          letter-spacing:.3em;color:#5a4a35;justify-self:end}
+  .c5 .h{font-family:"Noto Serif SC",serif;font-size:24px;letter-spacing:.1em}
+  .c5 .k{font-size:8px;letter-spacing:.2em;color:#B03A2E}
+  .c5 .v{font-size:34px;line-height:1;font-variant-numeric:tabular-nums}
+  .c5 .seal{background:#B03A2E;color:#F6EBD0;text-align:center;font-size:10px;padding:6px 0}
+  /* 6 CSS 几何 */
+  .c6{background:radial-gradient(circle at 50% 52%, #ffb266 0%, #c9611f 42%, #3a1a0c 100%);
+      display:flex;align-items:center;justify-content:center;color:#fff8ec}
+  .c6 .ring{width:170px;height:170px;border-radius:50%;border:6px solid rgba(255,248,236,.85);
+            display:flex;align-items:center;justify-content:center;
+            box-shadow:0 0 60px rgba(255,200,120,.55), inset 0 0 40px rgba(255,255,255,.25)}
+  .c6 .ring2{width:96px;height:96px;border-radius:50%;border:3px dashed rgba(255,248,236,.7);
+             display:flex;align-items:center;justify-content:center;font-size:13px;letter-spacing:.2em}
+</style>
+</head>
+<body>
+  <h1>许愿机页 · 六个方向候选</h1>
+  <p class="lead">上排为准备做完整版的三张（1 / 3 / 5 已出 1920×1080 完整稿）；下排三张是备选，未做完整版。</p>
+
+  <div class="grid">
+    <!-- 1 -->
+    <div class="cell c1">
+      <div class="brick"><div class="h nm">许愿机</div>
+        <div style="font-size:9px;letter-spacing:.12em;margin-top:8px;opacity:.8">Lv.1 / Lv.3　原石 10000</div>
+        <div style="margin-top:16px;font-size:10px;letter-spacing:.1em;border-top:1px solid rgba(242,230,208,.4);padding-top:8px">盲盒 3f2c8a51　寿命 15</div>
+        <div style="margin-top:10px;font-size:9px;letter-spacing:.1em">模块镶嵌　排除 · 旧木凳</div>
+        <div style="margin-top:auto;font-size:18px;font-family:'Noto Serif SC',serif">铜制水壶</div>
+      </div>
+      <div class="coal">干员<br>Lv.1<br><br>精准线<br>传世茶案</div>
+      <div class="cream"><div style="font-size:9px;letter-spacing:.2em;opacity:.6">剩余开盒次数</div>
+        <div class="n">15</div>
+        <div style="margin-top:8px;font-size:9px;letter-spacing:.2em;opacity:.6">数学期望</div>
+        <div style="font-size:26px;letter-spacing:-.03em">≈1.29</div>
+        <div style="margin-top:14px;font-size:9px;text-align:center;border:1px solid #1E1713;padding:4px">开启一次</div>
+        <div style="margin-top:4px;font-size:9px;text-align:center;background:#E08A2E;padding:4px">开启 10 次</div>
+        <div style="margin-top:4px;font-size:9px;text-align:center;background:#1E1713;color:#F2E6D0;padding:5px">开启全部</div>
+      </div>
+      <div class="cap">1　赭红海报（最佳设计师 A｜Paula Scher）</div>
+    </div>
+
+    <!-- 2 -->
+    <div class="cell c2">
+      <div class="h nm">许愿机</div>
+      <div class="line"></div>
+      <div class="sm">盲盒选择</div>
+      <div style="font-size:18px;letter-spacing:.08em;margin-top:6px">3f2c8a51　<span style="color:#B03A2E;font-size:11px">寿命 15</span></div>
+      <div class="line"></div>
+      <div class="sm">模块镶嵌<span class="red"></span></div>
+      <div style="margin-top:8px;font-size:11px;letter-spacing:.06em">排除 · 旧木凳　20 金币</div>
+      <div class="line"></div>
+      <div class="sm">生成物品</div>
+      <div style="font-size:24px;font-family:'Noto Serif SC',serif;margin-top:6px">铜制水壶</div>
+      <div class="cap">2　留白极简（最佳设计师 B｜服部一成）　备选</div>
+    </div>
+
+    <!-- 3 -->
+    <div class="cell c3">
+      <div class="panel">
+        <div class="k">盲盒选择</div>
+        <div class="h">3f2c8a51</div>
+        <div class="k" style="margin-top:12px">模块镶嵌</div>
+        <div style="display:flex;gap:5px;margin-top:6px">
+          <div style="width:26px;height:26px;border:1px solid #c98a4b;background:rgba(201,138,75,.25);font-size:7px;display:flex;align-items:center;justify-content:center">旧木凳</div>
+          <div style="width:26px;height:26px;border:1px solid rgba(214,150,90,.4)"></div>
+          <div style="width:26px;height:26px;border:1px solid rgba(214,150,90,.4)"></div>
+        </div>
+        <div class="k" style="margin-top:12px">生成物品</div>
+        <div class="h" style="font-size:17px">铜制水壶</div>
+      </div>
+      <div class="panel"><div class="k">干员</div>
+        <div style="font-size:13px;font-family:'Noto Serif SC',serif;margin-top:6px">Lv.1 / Lv.5</div>
+        <div style="font-size:9px;color:#b08e6b;margin-top:6px">精准线<br>排除 传世茶案</div>
+      </div>
+      <div class="panel"><div class="k">剩余开盒次数</div><div class="v">15</div>
+        <div class="k" style="margin-top:8px">数学期望</div>
+        <div style="font-size:26px;letter-spacing:-.03em">≈1.29</div>
+        <div class="btn" style="margin-top:10px">开启一次</div>
+        <div class="btn">开启 10 次</div>
+        <div class="btn all">开启全部</div>
+      </div>
+      <div class="cap">3　暖褐铜光（现实参照 A｜暖色面板语言）</div>
+    </div>
+
+    <!-- 4 -->
+    <div class="cell c4">
+      <div class="h">许愿机</div>
+      <div class="cols">
+        <div class="col"><span style="color:#B03A2E">盲盒</span><br>3f2c8a51<br>寿命 15<br><br><span style="color:#B03A2E">模块</span><br>排除 · 旧木凳</div>
+        <div class="col"><span style="color:#B03A2E">干员</span><br>精准线<br>传世茶案</div>
+        <div class="col"><span style="color:#B03A2E">开启</span><br>15 次<br>≈1.29<div class="seal" style="margin-top:8px">开启全部</div></div>
+      </div>
+      <div class="cap">4　木刻手抄（现实参照 B｜手抄本语言）　备选</div>
+    </div>
+
+    <!-- 5 -->
+    <div class="cell c5">
+      <div>
+        <div class="h">许愿机</div>
+        <div class="k" style="margin-top:8px">盲盒选择</div>
+        <div style="font-size:15px;letter-spacing:.1em">3f2c8a51</div>
+        <div class="k" style="margin-top:10px">模块镶嵌</div>
+        <div style="font-size:10px;border-bottom:1px dotted #241c14;padding-bottom:3px">排除 · 旧木凳　20 金币</div>
+        <div style="font-size:10px;border-bottom:1px dotted #241c14;padding-bottom:3px;margin-top:4px">提升 · 干电池 ×2　30 金币</div>
+        <div style="font-family:'Noto Serif SC',serif;font-size:19px;margin-top:12px;border-bottom:2px solid #B03A2E;display:inline-block">铜制水壶</div>
+      </div>
+      <div class="vt">操作</div>
+      <div>
+        <div class="k">剩余开盒次数</div>
+        <div class="v">15</div>
+        <div class="k" style="margin-top:8px">数学期望</div>
+        <div style="font-size:26px;letter-spacing:-.02em">≈1.29</div>
+        <div class="seal" style="margin-top:12px">开启全部</div>
+      </div>
+      <div class="cap">5　暖纸朱批（秒数轮盘｜东亚 1 号 吕敬人）</div>
+    </div>
+
+    <!-- 6 -->
+    <div class="cell c6">
+      <div class="ring"><div class="ring2">许愿机</div></div>
+      <div class="cap">6　纯 CSS 几何机器（秒数轮盘｜网页 5 号）　备选</div>
+    </div>
+  </div>
+</body>
+</html>

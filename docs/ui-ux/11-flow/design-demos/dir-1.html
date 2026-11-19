@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>许愿机 · 方向一 暖褐铜光</title>
+<style>
+  :root{
+    --bg0:#140c07; --bg1:#2b1a0f;
+    --line:rgba(214,150,90,.26); --line-strong:rgba(214,150,90,.52);
+    --copper:#c98a4b; --amber:#f2a63c; --ember:#dd5a2f;
+    --text:#f5e7cd; --dim:#b08e6b;
+    --serif:"Noto Serif SC","Source Han Serif SC","Songti SC","SimSun",serif;
+    --sans:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:1920px;height:1080px;overflow:hidden}
+  body{
+    background:
+      radial-gradient(1200px 640px at 74% 108%, rgba(221,90,47,.20), transparent 62%),
+      radial-gradient(900px 520px at 18% -10%, rgba(242,166,60,.10), transparent 60%),
+      linear-gradient(160deg, var(--bg1) 0%, var(--bg0) 58%, #0b0603 100%);
+    color:var(--text); font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;
+  }
+  .frame{position:absolute;inset:0;padding:44px 64px 36px;display:flex;flex-direction:column}
+  /* 顶栏 */
+  header{display:flex;align-items:flex-end;gap:30px;padding-bottom:20px;
+         border-bottom:1px solid var(--line-strong)}
+  .name{font-family:var(--serif);font-size:44px;letter-spacing:.06em;line-height:1}
+  .lvl{font-size:17px;color:var(--dim);letter-spacing:.04em;padding-bottom:4px}
+  .eff{margin-left:auto;font-size:17px;color:var(--dim);letter-spacing:.03em;padding-bottom:4px}
+  .vline{width:1px;height:26px;background:var(--line-strong);margin-bottom:2px}
+  .gem{display:flex;align-items:baseline;gap:10px;padding-bottom:2px}
+  .gem b{font-size:34px;font-weight:600;color:var(--amber);
+         font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+  .gem span{font-size:15px;color:var(--dim)}
+  .up{border:1px solid var(--line-strong);color:var(--text);background:transparent;
+      font-family:var(--sans);font-size:15px;letter-spacing:.05em;
+      padding:11px 20px;border-radius:2px}
+  /* 三栏 */
+  main{flex:1;display:grid;grid-template-columns:760px 420px 516px;gap:48px;padding-top:34px;min-height:0}
+  .col{position:relative;display:flex;flex-direction:column;min-height:0}
+  h2{font-family:var(--serif);font-size:20px;font-weight:500;letter-spacing:.14em;color:var(--copper);
+     padding-bottom:12px;border-bottom:1px solid var(--line);margin-bottom:18px}
+  /* 左栏 */
+  .pick{display:flex;align-items:center;justify-content:space-between;
+        border:1px solid var(--line-strong);padding:16px 18px;border-radius:2px;
+        background:rgba(255,213,160,.035)}
+  .pick code{font-family:var(--sans);font-size:20px;letter-spacing:.10em;color:var(--text)}
+  .chip{font-size:15px;color:var(--amber);border:1px solid rgba(242,166,60,.42);
+        padding:5px 11px;border-radius:2px;letter-spacing:.04em}
+  .slots{display:flex;gap:14px;margin:20px 0 8px}
+  .slot{width:96px;height:96px;border:1px solid var(--line);border-radius:2px;
+        display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:14px;
+        background:rgba(0,0,0,.30)}
+  .slot.on{border-color:var(--copper);color:var(--text);background:
+           linear-gradient(180deg,rgba(201,138,75,.20),rgba(201,138,75,.06))}
+  .slot.on i{font-style:normal;font-size:16px;line-height:1.25;text-align:center;padding:0 6px}
+  .slotmeta{font-size:15px;color:var(--dim);letter-spacing:.03em}
+  .cand{margin-top:20px;border-top:1px dashed var(--line);padding-top:8px}
+  .cand .row{display:flex;align-items:center;justify-content:space-between;font-size:18px;
+             padding:14px 0;color:var(--text)}
+  .cand .row em{font-style:normal;color:var(--amber);font-variant-numeric:tabular-nums}
+  .cand .row.sel{color:var(--amber)}
+  .acts{display:flex;gap:12px;margin-top:18px}
+  .ghost{flex:1;border:1px solid var(--line-strong);background:transparent;color:var(--text);
+         font-family:var(--sans);font-size:16px;letter-spacing:.08em;padding:13px 0;border-radius:2px}
+  /* 产出：紧跟模块区，不再吊底 */
+  .out{margin-top:34px;border-top:1px solid var(--line-strong);padding-top:18px}
+  .out .k{font-size:15px;color:var(--dim);letter-spacing:.08em;margin-bottom:12px}
+  .out .v{font-family:var(--serif);font-size:34px;letter-spacing:.02em}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;
+       background:#4FA3E3;margin-right:12px;vertical-align:3px}
+  .foot{margin-top:auto;font-size:14px;color:#7d6045;letter-spacing:.04em;line-height:1.7;
+        border-top:1px solid var(--line);padding-top:14px}
+  /* 中栏 */
+  .op{flex:1;border:1px solid var(--line);border-radius:2px;
+      background:linear-gradient(180deg,rgba(255,213,160,.06),rgba(0,0,0,.28));
+      padding:24px 26px;display:flex;flex-direction:column}
+  .op h3{font-family:var(--serif);font-size:26px;letter-spacing:.20em;font-weight:500;
+         color:var(--text);padding-bottom:18px;border-bottom:1px solid var(--line)}
+  .op dl{margin-top:6px}
+  .op .kv{display:flex;align-items:baseline;justify-content:space-between;
+          padding:18px 0;border-bottom:1px solid rgba(214,150,90,.14)}
+  .op .kv dt{color:var(--dim);letter-spacing:.06em;font-size:16px}
+  .op .kv dd{color:var(--text);font-size:19px;letter-spacing:.02em}
+  .on-air{margin-top:22px;border:1px solid rgba(242,166,60,.55);color:var(--amber);
+          background:rgba(242,166,60,.10);font-family:var(--sans);font-size:16px;letter-spacing:.06em;
+          padding:15px 0;border-radius:2px}
+  .op .foot{margin-top:auto;border-top:1px solid var(--line);padding-top:14px}
+  /* 右栏 */
+  .read{border:1px solid var(--line);border-radius:2px;padding:24px 26px;
+        background:rgba(0,0,0,.26)}
+  .read .k{font-size:15px;color:var(--dim);letter-spacing:.10em}
+  .read .v{font-family:var(--sans);font-size:96px;font-weight:600;line-height:1.02;
+           color:var(--amber);font-variant-numeric:tabular-nums;letter-spacing:-.03em;margin-top:6px}
+  .read .v small{font-size:30px;color:var(--copper);letter-spacing:0;margin-left:6px}
+  .read.alt{margin-top:16px}
+  .read.alt .v{font-size:76px;color:var(--text)}
+  .bar{text-decoration:overline;text-decoration-thickness:2px;text-underline-offset:0}
+  .open{display:flex;flex-direction:column;gap:13px;margin-top:26px}
+  .open button{font-family:var(--sans);font-size:19px;letter-spacing:.12em;padding:19px 0;
+               border-radius:2px;border:1px solid var(--line-strong);background:transparent;
+               color:var(--text)}
+  .open .all{border:none;color:#1a0d05;font-size:22px;font-weight:700;
+             background:linear-gradient(180deg,#f6b352,#dd5a2f);
+             box-shadow:0 10px 34px rgba(221,90,47,.30), inset 0 1px 0 rgba(255,255,255,.35)}
+  .hint{margin-top:auto;font-size:14px;color:#8a6d51;letter-spacing:.03em;line-height:1.7;
+        border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="frame">
+  <header>
+    <div class="name">许愿机</div>
+    <div class="lvl">等级 Lv.1 / Lv.3</div>
+    <div class="eff">可开套系品质 ≤ 2　　开盒成本 100%</div>
+    <div class="vline"></div>
+    <div class="gem"><span>原石</span><b>10000</b></div>
+    <button class="up">升级（40 原石）</button>
+  </header>
+
+  <main>
+    <!-- 左栏 -->
+    <section class="col">
+      <h2>盲盒选择</h2>
+      <div class="pick">
+        <code>3f2c8a51</code>
+        <span class="chip">寿命 15</span>
+      </div>
+
+      <h2 style="margin-top:32px">模块镶嵌</h2>
+      <div class="slotmeta">共 3 位 · 已占 1 · 选中位 1</div>
+      <div class="slots">
+        <div class="slot on"><i>排除<br>旧木凳</i></div>
+        <div class="slot">空位</div>
+        <div class="slot">空位</div>
+      </div>
+      <div class="cand">
+        <div class="row sel"><span>排除 · 旧木凳</span><em>20 金币</em></div>
+        <div class="row"><span>提升 · 干电池 ×2</span><em>30 金币</em></div>
+      </div>
+      <div class="acts">
+        <button class="ghost">镶嵌</button>
+        <button class="ghost">拆卸</button>
+      </div>
+
+      <div class="out">
+        <div class="k">生成物品</div>
+        <div class="v"><span class="dot"></span>铜制水壶</div>
+      </div>
+
+      <p class="foot">套系 series_01　共 8 件物品<br>镶嵌与开盒共用同一份寿命，归零即摧毁盒子</p>
+    </section>
+
+    <!-- 中栏 -->
+    <section class="col">
+      <div class="op">
+        <h3>干员</h3>
+        <dl>
+          <div class="kv"><dt>等级</dt><dd>Lv.1 / Lv.5</dd></div>
+          <div class="kv"><dt>路线</dt><dd>精准线</dd></div>
+          <div class="kv"><dt>排除</dt><dd>传世茶案</dd></div>
+        </dl>
+        <button class="on-air">出战中（点击撤回）</button>
+        <p class="foot">出战即生效，不占盒子位子，也不花费金币或寿命</p>
+      </div>
+    </section>
+
+    <!-- 右栏 -->
+    <section class="col">
+      <div class="read">
+        <div class="k">剩余开盒次数</div>
+        <div class="v">15<small>次</small></div>
+      </div>
+      <div class="read alt">
+        <div class="k">数学期望 <span class="bar">M</span></div>
+        <div class="v">≈ 1.29</div>
+      </div>
+
+      <div class="open">
+        <button>开启一次</button>
+        <button>开启 10 次</button>
+        <button class="all">开启全部</button>
+      </div>
+
+      <p class="hint">开启全部会把这个盒子剩下的 15 次一次开完；寿命归零时盒子随即被摧毁。</p>
+    </section>
+  </main>
+</div>
+</body>
+</html>

@@ -31,6 +31,8 @@ func _ready() -> void:
 	_reset_world()
 	await _test_wish_machine_open()
 	_reset_world()
+	await _test_wish_machine_layout()
+	_reset_world()
 	await _test_market_page()
 	_reset_world()
 	await _test_tab_switch_refreshes()
@@ -253,7 +255,7 @@ func _test_wish_machine_device() -> void:
 	print("— §3.2 升级：真扣原石、真升等级、面板跟着刷新")
 	var gem_before := ItemService.currency_balance(ItemConstants.CURRENCY_GEM)
 	var lv_before: int = DeviceService.primary_device(st).level
-	var btn: Button = wish.get_node("UpgradeButton")
+	var btn: Button = wish.get_node("Header/UpgradeButton")
 	btn.pressed.emit()
 	await get_tree().process_frame
 	eq(DeviceService.primary_device(st).level, lv_before + 1, "等级 +1")
@@ -295,11 +297,13 @@ func _test_wish_machine_open() -> void:
 	eq(s["box_options"].size(), 1, "下拉里出现 1 个仓库盒子")
 	eq(s["open_disabled"], false, "有盒子 ⇒ 两个开盒按钮可点")
 
-	var one: Button = wish.get_node("OpenButtons/OpenOne")
-	var ten: Button = wish.get_node("OpenButtons/OpenTen")
-	ok(one != null and ten != null, "两个开盒按钮存在")
-	eq(one.text, "开一次", "按钮文案 = 开一次")
-	eq(ten.text, "开 10 次", "按钮文案 = 开 10 次")
+	var one: Button = wish.get_node("Columns/Right/OpenButtons/OpenOne")
+	var ten: Button = wish.get_node("Columns/Right/OpenButtons/OpenTen")
+	var all_btn: Button = wish.get_node("Columns/Right/OpenButtons/OpenAll")
+	ok(one != null and ten != null and all_btn != null, "三个开启按钮都存在")
+	eq(one.text, "开启一次", "按钮文案 = 开启一次")
+	eq(ten.text, "开启 10 次", "按钮文案 = 开启 10 次")
+	eq(all_btn.text, "开启全部", "按钮文案 = 开启全部")
 	one.pressed.emit()
 	await get_tree().process_frame
 	var s2: Dictionary = ctrl.snapshot()
@@ -307,6 +311,18 @@ func _test_wish_machine_open() -> void:
 		"结果要么是物品名、要么是 void 文案（%s）" % s2["result"])
 	eq(bx.uses_remaining, uses_before - 1, "寿命 −1")
 	ok(ItemService.instances.size() >= inst_before, "非 void ⇒ 至少多一个实例")
+
+	print("— §3.2 开启全部：把该盒剩余次数一次开完（寿命归零 ⇒ 盒子被摧毁）")
+	var remaining := bx.uses_remaining
+	eq(remaining > 0, true, "前置：还有剩余次数（%d）" % remaining)
+	ItemService.grant_currency(ItemConstants.CURRENCY_GEM, 1000000,
+		ItemConstants.CURRENCY_SOURCE_INIT)   # 给足原石，避免中途因余额不足停下
+	scr.refresh()
+	await get_tree().process_frame
+	all_btn.pressed.emit()
+	await get_tree().process_frame
+	eq(st.box_count(), 0, "全部开完 ⇒ 盒子寿命归零、已从清单移除")
+	ok(ItemService.instances.size() >= inst_before, "产出仍在（不因盒子摧毁而丢失）")
 	scr.queue_free()
 	await get_tree().process_frame
 
@@ -323,6 +339,90 @@ func _test_wish_machine_open() -> void:
 	var wish2: Node = scr2.page_node("WishPage")
 	eq(wish2.get_node("Controller").snapshot()["box_options"].size(), 1, "下拉**只列仓库里的盒子**（不含邮件那个）")
 	scr2.queue_free()
+	await get_tree().process_frame
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ④b 许愿机页：三栏布局（★ v0.41）
+# ══════════════════════════════════════════════════════════════════════════════
+
+func _test_wish_machine_layout() -> void:
+	print("— §3.2b 许愿机三栏：左=盲盒/模块/产出，中=干员，右=信息/三按钮")
+	_reset_world()
+	OperatorService.reset()
+	var st := GameState.new_game()
+	var boxes := GachaService.grant_box(st, &"series_01", 1, &"test")
+	var bx: Box = boxes[0]
+	var scr = await _make_screen()
+	scr.bind_state(st)
+	await get_tree().process_frame
+	var wish: Node = scr.page_node("WishPage")
+
+	# ── 三栏骨架 ──────────────────────────────────────────────────────────────
+	var left: Node = wish.get_node_or_null("Columns/Left")
+	var middle: Node = wish.get_node_or_null("Columns/Middle")
+	var right: Node = wish.get_node_or_null("Columns/Right")
+	ok(left != null and middle != null and right != null, "从左至右三栏都存在（Left / Middle / Right）")
+	# 左栏三段（顶层盲盒选择 / 中层模块镶嵌 / 下层生成物品）
+	ok(left.get_node_or_null("BoxSection/BoxPicker") != null, "左栏顶层 = 盲盒选择")
+	ok(left.get_node_or_null("ModuleSection/ModulePicker") != null, "左栏中层 = 模块镶嵌")
+	ok(left.get_node_or_null("ResultSection/ResultLine") != null, "左栏下层 = 生成物品显示")
+	# 中栏 = 干员
+	ok(middle.get_node_or_null("OperatorToggle") != null, "中栏 = 干员（含出战切换）")
+	# 右栏上层信息 / 下层三按钮
+	ok(right.get_node_or_null("InfoSection/BoxUses") != null, "右栏上层 = 盲盒信息（使用次数）")
+	ok(right.get_node_or_null("InfoSection/BoxExpectation") != null, "右栏上层 = 盲盒信息（数学期望）")
+	eq(right.get_node("OpenButtons").get_child_count(), 3, "右栏下层 = 3 个开启按钮")
+
+	# ── 右栏信息读真实值 ──────────────────────────────────────────────────────
+	var ctrl: Node = wish.get_node("Controller")
+	var s: Dictionary = ctrl.snapshot()
+	ok(String(s["box_uses"]).find("剩余开盒次数") >= 0, "使用次数读得到（%s）" % s["box_uses"])
+	ok(String(s["box_expectation"]).find("数学期望") >= 0, "数学期望读得到（%s）" % s["box_expectation"])
+
+	# ── 左栏中段：模块镶嵌（真镶嵌、真扣金币、真进位子）─────────────────────────
+	print("— §3.2b 模块镶嵌：位子按 socket_count 渲染，镶嵌真扣金币")
+	eq((s["slot_options"] as Array).size(), bx.modules.size(), "位子数 == 该盒 socket_count")
+	# ⚠️ `"%s" % 数组` 会被 GDScript 当成**参数列表**展开（元素多于一就报
+	#    "not all arguments converted"）⇒ 打印数组必须先 `str()`。
+	ok((s["module_options"] as Array).size() > 0, "有可镶嵌的模块（%s）" % str(s["module_options"]))
+	eq(s["unsocket_disabled"], true, "空位子 ⇒ 拆卸置灰")
+
+	var gold_before := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
+	var rev_before := bx.item_pool.revision
+	var socket_btn: Button = left.get_node("ModuleSection/ModuleButtons/SocketButton")
+	socket_btn.pressed.emit()
+	await get_tree().process_frame
+	var s2: Dictionary = ctrl.snapshot()
+	ok(String(s2["result"]).find("镶嵌成功") >= 0, "镶嵌成功（%s）" % s2["result"])
+	ok(bx.modules[0] != null, "第 1 位真的装上了模块")
+	eq(bx.item_pool.revision, rev_before + 1, "revision +1（池子编辑的唯一失效依据）")
+	ok(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD) < gold_before, "金币真扣")
+	eq(s2["unsocket_disabled"], false, "位子已占用 ⇒ 拆卸可点")
+
+	print("— §3.2b 拆卸：置空且零返还")
+	var gold_mid := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
+	var unsocket_btn: Button = left.get_node("ModuleSection/ModuleButtons/UnsocketButton")
+	unsocket_btn.pressed.emit()
+	await get_tree().process_frame
+	var s3: Dictionary = ctrl.snapshot()
+	ok(String(s3["result"]).find("已拆卸") >= 0, "拆卸成功（%s）" % s3["result"])
+	eq(bx.modules[0], null, "位子被置空")
+	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD), gold_mid, "拆卸不返还金币（D8）")
+
+	# ── 中栏：干员出战切换（免费、即时影响排除）───────────────────────────────
+	print("— §3.2b 中栏干员：出战切换影响排除目标")
+	var op0: Dictionary = ctrl.snapshot()["operator"]
+	eq(op0["active"], true, "默认出战")
+	ok(String(op0["bans"]).find("排除：") >= 0, "显示排除目标（%s）" % op0["bans"])
+	ok(String(op0["bans"]).find("无") < 0, "出战时排除目标非空")
+	var toggle: Button = middle.get_node("OperatorToggle")
+	toggle.pressed.emit()
+	await get_tree().process_frame
+	var op1: Dictionary = ctrl.snapshot()["operator"]
+	eq(op1["active"], false, "点击后撤回")
+	ok(String(op1["bans"]).find("无") >= 0, "未出战 ⇒ 排除目标清空（%s）" % op1["bans"])
+	scr.queue_free()
 	await get_tree().process_frame
 
 

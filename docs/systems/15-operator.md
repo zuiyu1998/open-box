@@ -86,6 +86,11 @@ operator_controller.gd    # class_name OperatorController extends Node —— �
 
 - **R15-1 干员不写池子数据**：效果经 `extra_ban_provider` 注入、在求值时生效，
   **不改 `Box.modules`、不推进 `revision`、不占槽位**（`PoolService` 仍是唯一写入方）。
+- **R15-7 切换必须失效池子缓存（★ 实现级硬约束）**：`PoolService` 的派生状态缓存键是
+  `(box_id, revision)`，而干员切换**不改 `revision`** ⇒ `set_active()` / `select_route()`
+  **必须调 `PoolService.drop_all_cached_states()`**。否则会拿到"上一次出战状态"算出的
+  `PoolState`：**分栏显示的期望不更新，更严重的是开盒会用旧分布**（干员效果整个不生效）。
+  这条是 v0.41 接三栏时实测发现的缺陷，**不得**为了省一次重算把它去掉。
 - **R15-2 出战才生效**：`active == false` ⇒ `active_bans()` 返回空 ⇒ 求值无任何排除。
 - **R15-3 无代价**：与模块不同，干员**不花金币、不扣寿命、不需要设备**（它只是被动）。
 - **R15-4 养成路线互斥**：`select_route` 一次只存一个 `route_id`；未知路线拒绝、状态不变。
