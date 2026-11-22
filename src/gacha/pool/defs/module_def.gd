@@ -23,7 +23,7 @@ enum RedistributeMode { AUTO, TARGETED }
 ##
 ## ★ 旧字段 `item_cost: Array[ModuleCost]`（物品需求向量）与 `ModuleCost` 类型**已整族删除**：
 ##   **模块不再消耗任何物品**（核心 §3 / §4.5 / §15 D8 / §16.14）⇒ **物品的唯一出口是交付任务**。
-## ★ 价格口径不在本类：**标定归核心 D25**；扣款由 `PoolService.socket()` 经 `02` 的一次
+## ★ 价格口径不在本类：**标定归核心 D25**；扣款由 `PoolBuff.apply_module()` 经 `02` 的一次
 ##   `transact([{ op=&"currency", kind=&"gold", delta=-gold_cost }])` 落地（`01-gacha.md` §5.8）。
 @export var gold_cost: int = 0
 @export var exclusive_tags: Array[StringName] = []       # 互斥标记（V6）

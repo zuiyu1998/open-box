@@ -30,7 +30,15 @@ const OPERATOR_SCENE := "res://src/operator/scenes/operator_page.tscn"
 ## 由外部注入的运行时状态（测试 / 读档完成后注入）。
 var state: GameState = null
 
+## ★ v0.43：tab 头的尺寸。默认（16px 字体 + 窄内边距）在 1920×1080 上小到看不清，
+## 点起来也费劲。这三个常量是 tab 条的**唯一尺寸来源**，别在场景里另写一套。
+const TAB_FONT_SIZE := 21
+const TAB_MARGIN_H := 24
+const TAB_MARGIN_V := 12
+
 @onready var _tabs: TabContainer = $Tabs
+@onready var _gold_lbl: Label = $TopBar/Gold
+@onready var _gem_lbl: Label = $TopBar/Gem
 
 
 func _ready() -> void:
@@ -41,6 +49,36 @@ func _ready() -> void:
 	#   各页的 `refresh()` 是纯重算（读 ItemService / MarketService 当前态），不产生副作用。
 	_tabs.tab_changed.connect(func(_idx: int) -> void: refresh())
 	refresh()
+
+
+## ★ v0.43：**加大 tab 头**。
+##
+## 两条实测结论（见 `_rt/probe.gd` 的探针）：
+##   · **`Theme` 继承不到内部 `TabBar`**：把 `TabBar` 条目塞进 `Theme` 赋给 `Tabs`，
+##     字体仍是 16（TabContainer 的内部子节点不吃祖先 theme 的 `TabBar` 类型条目）。
+##   · **直接对 `get_tab_bar()` 加覆盖有效**，但**必须在 tab 建好之后**打
+##     （在 `_ready` 里、`_ensure_tabs()` 之前打会丢）。
+## 因此：`refresh()` 里、`_ensure_tabs()` 之后调用本方法；用**字体已是目标值**做幂等判据，
+## 这样 TabBar 若被重建（新实例、字体回到 16）会**自动重装**，而已装好时不会把内边距叠加变大。
+func _style_tabs() -> void:
+	var bar := _tabs.get_tab_bar()
+	if bar == null:
+		return
+	if bar.get_theme_font_size("font_size") == TAB_FONT_SIZE:
+		return
+	bar.add_theme_font_size_override("font_size", TAB_FONT_SIZE)
+	for sb_name in ["tab_selected", "tab_unselected", "tab_hovered", "tab_disabled", "tab_focus"]:
+		var base := bar.get_theme_stylebox(sb_name)
+		if base == null:
+			continue
+		var sb := base.duplicate() as StyleBox
+		if sb == null:
+			continue
+		sb.content_margin_left = maxf(sb.content_margin_left, 0.0) + TAB_MARGIN_H
+		sb.content_margin_right = maxf(sb.content_margin_right, 0.0) + TAB_MARGIN_H
+		sb.content_margin_top = maxf(sb.content_margin_top, 0.0) + TAB_MARGIN_V
+		sb.content_margin_bottom = maxf(sb.content_margin_bottom, 0.0) + TAB_MARGIN_V
+		bar.add_theme_stylebox_override(sb_name, sb)
 
 
 func bind_state(s: GameState) -> void:
@@ -63,6 +101,7 @@ func page_node(node_name: String) -> Node:
 
 func refresh() -> void:
 	_ensure_tabs()
+	_style_tabs()   # ★ v0.43：必须在 tab 建好之后（见该函数的注释）
 	for page_name in ["WarehousePage", "WishPage", "MarketPage", "CompanyPage", "OperatorPage"]:
 		var page := page_node(page_name)
 		if page == null:
@@ -74,6 +113,19 @@ func refresh() -> void:
 			target = ctrl
 		if target.has_method("bind_state"):
 			target.bind_state(state)
+	_refresh_currency()
+
+
+## ★ v0.43：右上角的**金币 / 原石**读数。
+##
+## 只读 `ItemService.currency_balance()`——02 是资源余额的唯一写入方，
+## 本层**不缓存、不做加减**（与 04 / 13 / 14 对 02 的同一纪律）。
+## 每次 `refresh()`（切 tab / 换局）都会重取，因此开盒、买盲盒、升级后切一次 tab 就是最新值。
+func _refresh_currency() -> void:
+	if _gold_lbl != null:
+		_gold_lbl.text = "金币 %d" % ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
+	if _gem_lbl != null:
+		_gem_lbl.text = "原石 %d" % ItemService.currency_balance(ItemConstants.CURRENCY_GEM)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

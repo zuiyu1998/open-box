@@ -19,6 +19,11 @@ var socket_count: int = 0                # 从该盒 item_pool 冻结（C4）
 var regular_count: int = 0               # 从该盒 item_pool 冻结（C6 的依据）
 var weights_bp: Dictionary = {}          # item_id -> **当前**权重（整数万分比；被排除项为 0，仍在表内）
 var void_mass_bp: int = 0                # 当前不可回收质量（同单位同精度；**每个池子各自累积**）
+## ★ v0.45：**被玩家「隐藏」的物品**（仍参与抽取、仍有权重，只是不在池子面板列出）。
+## 它不影响分布——留在这里纯为让 UI 拿到一份派生视图（避免 UI 另外去翻 `ItemPool`）。
+var hidden_ids: Array[StringName] = []
+## ★ v0.45：**被玩家「禁用」的物品**（不参与抽取 ⇒ **不在 `weights_bp` 里**）。
+var disabled_ids: Array[StringName] = []
 
 
 func item_mass_bp() -> int:
@@ -35,6 +40,15 @@ func is_zero_sum() -> bool:
 
 func weight_of(item_id: StringName) -> int:
 	return int(weights_bp.get(item_id, 0))
+
+
+## ★ v0.47：**参与抽取的物品 id，按池内顺序**（= `weights_bp` 的键序；已排除禁用项）。
+## 求值链用它取范围——**不要再回到 `series.item_ids()`**（池子可追加物品，两者不再等价）。
+func item_ids() -> Array[StringName]:
+	var out: Array[StringName] = []
+	for k in weights_bp.keys():
+		out.append(StringName(k))
+	return out
 
 
 ## **可产出物品数**（权重 > 0 的物品）。C6 的下限（≥ 3）判的就是它。

@@ -20,7 +20,10 @@ signal upgrade_requested
 ## `times`：1 / 10；**0 = 开启全部**（由 Model 解释成"该盒剩余次数"）。
 signal open_requested(times: int)
 signal socket_requested
-signal unsocket_requested
+## ★ v0.44：`unsocket_requested` 已随"拆卸"一起删除——**模块镶上即永久锁定**。
+## ★ v0.45：池子成员与三态（可编辑字段，不走模块）
+signal pool_cycle_requested
+signal pool_add_requested
 signal operator_toggle_requested
 ## 选中的盲盒变了（右栏信息 / 中栏位子都要跟着重算）。
 signal box_changed
@@ -37,7 +40,12 @@ signal box_changed
 @onready var _slot_picker: OptionButton = $Columns/Left/ModuleSection/SlotPicker
 @onready var _module_picker: OptionButton = $Columns/Left/ModuleSection/ModulePicker
 @onready var _socket_btn: Button = $Columns/Left/ModuleSection/ModuleButtons/SocketButton
-@onready var _unsocket_btn: Button = $Columns/Left/ModuleSection/ModuleButtons/UnsocketButton
+@onready var _pool_summary: Label = $Columns/Left/PoolSection/PoolSummary
+@onready var _pool_picker: OptionButton = $Columns/Left/PoolSection/PoolPicker
+@onready var _pool_state: Label = $Columns/Left/PoolSection/PoolState
+@onready var _pool_cycle_btn: Button = $Columns/Left/PoolSection/PoolButtons/PoolCycleButton
+@onready var _add_picker: OptionButton = $Columns/Left/PoolSection/AddRow/AddPicker
+@onready var _add_btn: Button = $Columns/Left/PoolSection/AddRow/AddButton
 @onready var _result_lbl: Label = $Columns/Left/ResultSection/ResultLine
 
 @onready var _op_level: Label = $Columns/Middle/OperatorLevel
@@ -58,7 +66,8 @@ func _ready() -> void:
 	_open_ten.pressed.connect(func() -> void: open_requested.emit(10))
 	_open_all.pressed.connect(func() -> void: open_requested.emit(0))
 	_socket_btn.pressed.connect(func() -> void: socket_requested.emit())
-	_unsocket_btn.pressed.connect(func() -> void: unsocket_requested.emit())
+	_pool_cycle_btn.pressed.connect(func() -> void: pool_cycle_requested.emit())
+	_add_btn.pressed.connect(func() -> void: pool_add_requested.emit())
 	_op_toggle.pressed.connect(func() -> void: operator_toggle_requested.emit())
 	_picker.item_selected.connect(func(_i: int) -> void: box_changed.emit())
 
@@ -75,6 +84,15 @@ var slot_index: int:
 var module_index: int:
 	get:
 		return _module_picker.selected
+
+## ★ v0.45：池内物品下标 / 可添加物品下标。
+var pool_index: int:
+	get:
+		return _pool_picker.selected
+
+var add_index: int:
+	get:
+		return _add_picker.selected
 
 
 ## 用 Model 的快照渲染（调用方保证 @onready 已就绪——见 Controller 的 call_deferred）。
@@ -96,7 +114,14 @@ func render(s: Dictionary) -> void:
 	_refill(_slot_picker, s.get("slot_options", []))
 	_refill(_module_picker, s.get("module_options", []))
 	_socket_btn.disabled = bool(s.get("socket_disabled", true))
-	_unsocket_btn.disabled = bool(s.get("unsocket_disabled", true))
+
+	# ── 左栏 · 池子（★ v0.45）─────────────────────────────────────────────────
+	_pool_summary.text = String(s.get("pool_summary", ""))
+	_pool_state.text = String(s.get("pool_state_text", ""))
+	_refill(_pool_picker, s.get("pool_options", []))
+	_refill(_add_picker, s.get("add_options", []))
+	_pool_cycle_btn.disabled = bool(s.get("pool_cycle_disabled", true))
+	_add_btn.disabled = bool(s.get("pool_add_disabled", true))
 
 	# ── 左栏 · 下：生成物品 ───────────────────────────────────────────────────
 	_result_lbl.text = String(s.get("result", ""))

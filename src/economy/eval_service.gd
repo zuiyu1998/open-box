@@ -61,7 +61,11 @@ const TOTAL_BP := ItemPool.TOTAL_BP              # 10000：全部质量（含 vo
 static func evaluate_pool(pool_state: PoolState, series: SeriesDef) -> PoolEvaluation:
 	if pool_state == null or series == null:
 		return null
-	var ids := series.item_ids()
+	# ★ v0.47：**范围 = 该盒池子里当前参与抽取的物品**，不再是"套系固定列表"。
+	#   理由：v0.45 起池子可以**追加物品**、可以**禁用**物品；若仍按 `series.regular_items` 取范围，
+	#   追加的物品会**整个漏出分布**（Σp 掉到 1 以下 ⇒ `is_normalized` 假 ⇒ `roll()` 直接拒开），
+	#   而且 M̄ 也会算小。`weights_bp` 的键序就是池内顺序、且已排除禁用项，因此直接用它。
+	var ids := pool_state.item_ids()
 	if ids.is_empty():
 		return null
 	var ev := PoolEvaluation.new()
@@ -107,41 +111,82 @@ static func is_collected(item_id: StringName) -> bool:
 
 ## `m̄ = Σ (probs[i] × v_i)`（07 §5.2）——**void 的 `v = 0`，不贡献**。
 ## 求和范围是**概率分布**，与持有形态 / 位置无关（v0.8 / v0.9 的同一不变量）。
-static func m_bar(ev: PoolEvaluation, series: SeriesDef) -> float:
-	if ev == null or series == null:
+##
+## ★ v0.47：取值改为**按 `ev.item_ids` 逐件查 `ItemCatalog`**（原来按下标对
+## `series.regular_items`）。池子可追加物品之后，"分布下标"与"套系列表下标"不再一一对应，
+## 按下标取会把值安到错的物品上。`series` 参数保留只为签名兼容（不再参与计算）。
+static func m_bar(ev: PoolEvaluation, _series: SeriesDef = null) -> float:
+	if ev == null:
 		return 0.0
 	var total := 0.0
-	var defs := series.regular_items
-	for i in mini(ev.probs.size(), defs.size()):
-		var d := defs[i]
+	for i in ev.item_ids.size():
+		if i >= ev.probs.size():
+			break
+		var d := ItemCatalog.get_def(ev.item_ids[i])
 		if d == null:
 			continue
 		total += float(ev.probs[i]) * float(d.value)
 	return total
 
 
+## ★ v0.47：**金币口径的期望**——`Σ probs[i] × sell_gold_i`（不可售物品 `sell_gold = 0`，贡献 0）。
+##
+## 与 `m_bar()` 的区别：`m_bar` 是 TVU 账面价值（07 的 ρ 用它），**本方法才是"能换回多少金币"**。
+## 许愿机页右栏显示的"数学期望"用的是这一条（用户裁决：期望改成金币数）。
+static func m_bar_gold(ev: PoolEvaluation) -> float:
+	if ev == null:
+		return 0.0
+	var total := 0.0
+	for i in ev.item_ids.size():
+		if i >= ev.probs.size():
+			break
+		var d := ItemCatalog.get_def(ev.item_ids[i])
+		if d == null:
+			continue
+		total += float(ev.probs[i]) * float(d.sell_gold)
+	return total
+
+
+## ★ v0.47：某个盒子里**已镶嵌模块花掉的金币总额**（= Σ `ModuleDef.gold_cost`）。
+##
+## 模块是一次性买断、镶上即永久（v0.44），所以这笔钱是**这个盒子的沉没成本**——
+## 面板上的"净期望"要把它一次性全额扣掉（用户裁决：不按次数摊）。
+static func module_gold_cost(box: Box) -> int:
+	if box == null:
+		return 0
+	var total := 0
+	for m in box.modules:
+		if m == null:
+			continue
+		var d := GachaCatalog.get_module(m.module_id)
+		if d != null:
+			total += maxi(d.gold_cost, 0)
+	return total
+
+
 ## `headline` 的两个数字（01 §6 / 07 §4 的 `Headline`）。
 ## **候选集 = 该盒池中仍可产出的全部物品**（被排除项不算）——v0.13 无隐藏款；
 ## 同一套系的两个盒子可以有不同 `best_item`（某盒排除了原本的头奖）。
-## 只返回这两个数字 + `ev`；`Headline` 类型的其余字段归 07 的后续落地。
-static func headline(ev: PoolEvaluation, series: SeriesDef) -> Dictionary:
-	var out := {"best_item_id": &"", "best_item_prob": 0.0, "ev": 0.0}
-	if ev == null or series == null:
+## ★ v0.47：与 `m_bar` 同理，改为**按 `ev.item_ids` 逐件查表**（池子可追加物品后，
+## 下标不再等于套系列表下标）；`series` 参数保留只为签名兼容。
+static func headline(ev: PoolEvaluation, _series: SeriesDef = null) -> Dictionary:
+	var out := {"best_item_id": &"", "best_item_prob": 0.0, "ev": 0.0, "gold": 0.0}
+	if ev == null:
 		return out
 	var best_v := -1
 	var best_i := -1
-	var defs := series.regular_items
-	for i in mini(ev.probs.size(), defs.size()):
-		if ev.probs[i] <= 0.0:
+	for i in ev.item_ids.size():
+		if i >= ev.probs.size() or ev.probs[i] <= 0.0:
 			continue
-		var d := defs[i]
+		var d := ItemCatalog.get_def(ev.item_ids[i])
 		if d == null:
 			continue
 		if d.value > best_v:
 			best_v = d.value
 			best_i = i
 	if best_i >= 0:
-		out["best_item_id"] = defs[best_i].item_id
+		out["best_item_id"] = ev.item_ids[best_i]
 		out["best_item_prob"] = ev.probs[best_i]
-	out["ev"] = m_bar(ev, series)
+	out["ev"] = m_bar(ev)
+	out["gold"] = m_bar_gold(ev)
 	return out

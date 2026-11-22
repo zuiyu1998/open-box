@@ -13,8 +13,8 @@
 ##   `has_device(state)`（无参，**镶嵌侧**）与 `can_open(state, box)`（带盒子，**开盒侧**，含等级门控）。
 ##   **实现只有一处**（本类），`01` 侧的两条入口调同一个事实做兜底。
 ##
-## ★ **门槛与门控都不得加宽**：等级门控**只作用于开盒**——镶嵌不看等级，拆卸（`01` 侧）
-##   既不看等级也不看设备（核心 §4.4 的裁定⑪）。
+## ★ **门槛与门控都不得加宽**：等级门控**只作用于开盒**——镶嵌不看等级（核心 §4.4 的裁定⑪）。
+## ★ **v0.44：本类只剩两个镶嵌侧动作里的一个**——`socket()`；`replace()` 已随"拆卸"一起删除。
 ##
 ## ★ 本类是**静态类**（与 `GachaService` / `PoolService` 同型）：它不持有任何状态，
 ##   全部事实来自 `GameState` / `DeviceCatalog` / `ItemService`。故**不需要注册 autoload**。
@@ -196,11 +196,12 @@ static func _batch_failure(k: int, reason: StringName) -> Array[GachaResult]:
 #  职责二：镶嵌模块（核心 §4.5；成本 = 该模块的金币）
 # ══════════════════════════════════════════════════════════════════════════════
 
-## **镶嵌入口**（空位）：校验"有设备" ＋ "金币够" ⇒ 转发 `PoolService.socket()`。
+## **镶嵌入口**（空位）：校验"有设备" ＋ "金币够" ⇒ 转发 `PoolBuff.apply_module()`。
 ##
 ## ★ **成本 = 该模块的 `ModuleDef.gold_cost`**（数额完全由模块字段决定；`01` / `02` 在那里扣）。
 ## ★ **镶嵌不看设备等级、也不花原石**（等级门控只作用于开盒）。
-## ★ **替换请用 `replace()`**——`socket()` 遇到占用位一律 `slot_occupied`（不做隐式覆盖）。
+## ★ **v0.44：位子被占用时就是终局拒绝**（`slot_occupied`）——**模块镶上即永久锁定**，
+##   不再有"替换"这条路（见下方 `replace()` 的墓碑）。
 static func socket(
 	state: GameState,
 	box_id: String,
@@ -210,29 +211,22 @@ static func socket(
 	var gate := _module_gate(state, module_id)
 	if gate["ok"] != true:
 		return gate
-	return PoolService.socket(state, box_id, module_id, slot)
+	return PoolBuff.apply_module(state, box_id, module_id, slot)
 
 
-## **替换入口**：**替换 = 拆卸 + 重新镶嵌**（本文件与核心 §3.3 的唯一定义）。
+## ── 墓碑：`replace()` 已于 **v0.44 删除**（用户裁决）───────────────────────────────────
 ##
-## · 语义上由**本类编排**（先 `unsocket` 再 `socket`），两次都是 `01` 的入口；
-## · **拆卸什么都不返还**（金币不退、也没有物品可退，核心 §15 D8）⇒ 玩家**再付一次新模块的金币**
-##   且**再扣 1 次寿命**（`m` 是历史累计）；
-## · 任一步失败 ⇒ 立刻返回该步的失败（**不做"回滚半个替换"**：`unsocket` 成功而 `socket` 失败时，
-##   盘面是"位子被拆空"——这与"拆卸是一个独立合法动作"一致，UI 必须先确认再调用）。
-static func replace(
-	state: GameState,
-	box_id: String,
-	module_id: StringName,
-	slot: int
-) -> Dictionary:
-	var gate := _module_gate(state, module_id)
-	if gate["ok"] != true:
-		return gate
-	var off := PoolService.unsocket(state, box_id, slot)
-	if off["ok"] != true:
-		return off
-	return PoolService.socket(state, box_id, module_id, slot)
+## 旧定义是 **"替换 = 拆卸 + 重新镶嵌"**（本文件与核心 §3.3 的唯一定义）。既然
+## **拆卸本身被取消**（`PoolService.unsocket()` 同批删除），编排它的这条路径也就没有半句可留：
+## 它做的一半（拆空）已经不存在，剩下的"覆盖写入"也不是被裁决的行为。
+##
+## **后果（已确认并接受）**：**模块一旦镶嵌就永久绑定那个位子，直到盒子被寿命归零摧毁**——
+## 玩家在"往哪个位子塞哪个模块"上的决定因此是**一次性的**，没有反悔路径。
+## 这也让 D20② 那句"换掉谁的价格 = 一次开盒机会"失去对象：**换不掉谁**。
+##
+## **不要把它加回来**。若将来要恢复"可替换"，必须是一条**新裁决 + 新的显式写入路径**
+## （例如"覆盖式镶嵌：占用位直接换新，付金币 + 1 次寿命，旧模块作废"），
+## 并且要有自己的 UI 确认与断言——不能靠复活 `unsocket()` / `replace()`。
 
 
 ## 镶嵌侧的共同前置：**有设备 ／ 模块已注册 ／ 金币够**（三条都在任何写入之前）。

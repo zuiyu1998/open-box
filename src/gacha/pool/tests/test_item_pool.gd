@@ -28,6 +28,9 @@ func _ready() -> void:
 	_test_twelve_items()
 	_test_invalid_pools()
 	_test_tiny_rarity_rounds_to_zero()
+	_test_item_states_hidden_still_rolls()
+	_test_item_states_disabled_renormalizes()
+	_test_add_item_grows_pool()
 
 	print("\n=== 结果：%d 通过 / %d 失败 ===" % [_pass, _fail])
 	get_tree().quit(0 if _fail == 0 else 1)
@@ -96,8 +99,7 @@ func _pool(rarities: Array) -> ItemPool:
 
 func _sum_bp(bp: PackedInt32Array) -> int:
 	var t := 0
-	for v in bp:
-		t += v
+	for v in bp:		t += v
 	return t
 
 
@@ -271,3 +273,63 @@ func _test_tiny_rarity_rounds_to_zero() -> void:
 	eq(zero_items.size(), 1, "zero_bp_items() 报出 1 件")
 	eq(zero_items[0], &"s01_01", "报出的正是那一件")
 	ok(p.validate().is_empty(), "注意：这种配置**能过** validate()——它是配置质量问题，不是结构非法")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ★ v0.45：物品三态（显示 / 隐藏 / 禁用）与"添加物品"
+# ══════════════════════════════════════════════════════════════════════════════
+
+func _test_item_states_hidden_still_rolls() -> void:
+	print("— ★ v0.45 隐藏：**仍参与抽取**，只是不在面板列出（分布一点不变）")
+	var p := _pool([10, 20, 30, 40])
+	var before := p.compute_weights_bp()
+	eq(p.state_of(&"s01_02"), ItemPool.ItemState.SHOWN, "默认状态 = 显示")
+	ok(p.set_state(&"s01_02", ItemPool.ItemState.HIDDEN), "设为隐藏成功")
+	eq(p.state_of(&"s01_02"), ItemPool.ItemState.HIDDEN, "状态已变")
+	var after := p.compute_weights_bp()
+	eq(after, before, "**隐藏不改变任何一个权重**（它照样参与抽取）")
+	eq(p.enabled_count(), 4, "可产出数不变（4）")
+	eq(p.hidden_ids().size(), 1, "hidden_ids() 报出 1 件")
+	ok(p.probability_of(&"s01_02") > 0.0, "它仍有非零概率")
+	ok(p.set_state(&"s01_02", ItemPool.ItemState.SHOWN), "改回显示成功")
+	eq(p.item_states.has("s01_02"), false, "改回显示时**删键**（保持稀疏，存档不膨胀）")
+
+
+func _test_item_states_disabled_renormalizes() -> void:
+	print("— ★ v0.45 禁用：退出候选集、其余物品**重新归一**、不产生 void")
+	var p := _pool([10, 30, 60])          # 合计 100 ⇒ 1000 / 3000 / 6000 bp
+	var base := p.compute_weights_bp()
+	eq(base[0], 1000, "基线：1000")
+	eq(base[1], 3000, "基线：3000")
+	eq(base[2], 6000, "基线：6000")
+
+	ok(p.set_state(&"s01_01", ItemPool.ItemState.DISABLED), "禁用第 1 件")
+	var bp := p.compute_weights_bp()
+	eq(bp[0], 0, "被禁用项权重 = 0")
+	eq(bp[1], 3333, "第 2 件重新归一：3000/9000 → 3333 bp")
+	eq(bp[2], 6667, "第 3 件：6000/9000 → 6667 bp")
+	eq(_sum_bp(bp), 10000, "**Σ 仍精确 == 10000**（C1 零和）")
+	eq(p.enabled_count(), 2, "可产出数降为 2")
+	eq(p.disabled_ids().size(), 1, "disabled_ids() 报出 1 件")
+	eq(p.probability_of(&"s01_01"), 0.0, "它的概率为 0")
+	eq(p.zero_bp_items().size(), 0, "被禁用**不算**「被取整抹平」（zero_bp_items 不报它）")
+	ok(p.set_state(&"s01_01", ItemPool.ItemState.SHOWN), "可以随时改回显示（可逆，与模块不同）")
+	eq(p.compute_weights_bp(), base, "改回后分布**逐项回到基线**")
+
+
+func _test_add_item_grows_pool() -> void:
+	print("— ★ v0.45 添加：从已注册物品里挑一件加进池子（权重用它自己的 rarity）")
+	var p := _pool([10, 30, 60])          # regular_count = 3
+	eq(p.regular_count, 3, "基线：3 件")
+	var extra := _mk("s01_04", 100)       # 新物品，rarity 100
+	ok(p.add_item(extra), "加入成功")
+	eq(p.base_items.size(), 4, "池子 3 → 4")
+	eq(p.regular_count, 4, "regular_count 同步 +1（C6 / V5 的口径跟着池子走）")
+	eq(p.extra_item_ids.size(), 1, "记进 extra_item_ids（要落盘）")
+	eq(p.item_ids()[3], &"s01_04", "排在末尾（产出顺序 = base_items 顺序）")
+	eq(p.state_of(&"s01_04"), ItemPool.ItemState.SHOWN, "新物品默认显示")
+	ok(not p.add_item(extra), "重复加同一件 ⇒ false（不重复进池）")
+	var bp := p.compute_weights_bp()
+	eq(_sum_bp(bp), 10000, "加完后 Σ 仍 == 10000")
+	eq(bp[3], 5000, "新物品按 rarity 100/(10+30+60+100) 分到 5000 bp")
+	eq(p.enabled_count(), 4, "可产出 4 件")

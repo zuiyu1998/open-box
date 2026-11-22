@@ -20,7 +20,7 @@ func _ready() -> void:
 
 	_test_initial_uses_curve()
 	_test_three_draws_then_box_disappears()
-	_test_unsocket_refunds_no_uses()
+	_test_module_cost_is_permanent()
 	_test_snapshot_per_draw()
 	_test_edit_applies_to_next_draw()
 	_test_validation_failure_consumes_no_use()
@@ -326,19 +326,18 @@ func _test_three_draws_then_box_disappears() -> void:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  ②b 拆卸不退还次数（裁决："unsocket 不退还次数"）
+#  ②b 装模块的寿命成本（★ v0.44：拆卸已删除 ⇒ 只测"装"这一半）
 # ══════════════════════════════════════════════════════════════════════════════
 
-## **语义锁定**：`socket()` 扣 1 次，`unsocket()` **既不扣、也不退**。
+## **语义锁定**：`socket()` 每装一个扣 1 次；**没有 `unsocket` 可退**——
+## 模块镶上即永久锁定（v0.44 用户裁决：拆卸与替换一并删除）。
 ##
-## 为什么必须用断言钉住：在代码里"**没扣**"与"**没退**"长得一模一样——
-## 将来有人给 `unsocket` 加一句"退还一次"，经济会被**静默**改变，而没有任何断言会拦下它。
-##
-## ★ 派生语义：**"替换一个模块"的增量成本 == 1 次**——那个位子历史上一共花掉 2 次
-##   （原装 1 + 新装 1）；**拆卸本身零成本、也不退还**，它是**沉没成本**，
-##   与"模块是消耗品、拆卸只返还 50% 材料"是同一条设计意图。
-func _test_unsocket_refunds_no_uses() -> void:
-	print("— ②b 拆卸**不退还**次数（裁决）：unsocket 零成本不退；替换的增量成本 == 1 次")
+## 为什么必须用断言钉住：**"沉没成本"是这条规则的立身之本**——
+## 将来若有人偷偷恢复"拆下来退一次"，经济会被**静默**改变，而没有任何断言会拦下它。
+## 现在能拦它的东西有两层：`PoolService.unsocket()` **根本不存在**（编译期），
+## 以及下面这条"装满 3 个 = 只剩 17 次、且再也拿不回来"的账面断言（运行期）。
+func _test_module_cost_is_permanent() -> void:
+	print("— ②b 装模块的寿命成本**不可退**（v0.44：拆卸已删除 ⇒ 沉没成本）")
 	var f := _new_box(&"series_q3")          # 品质 3 ⇒ 真实预算 20 次 / 4 个位
 	var st: GameState = f["state"]
 	var bx: Box = f["box"]
@@ -346,35 +345,34 @@ func _test_unsocket_refunds_no_uses() -> void:
 	eq(uses0, SeriesDef.expected_initial_uses(3), "起点 == 品质 3 的预算（20）")
 
 	# ── 装 3 个模块：每个各扣 1 次 ──────────────────────────────────────────────
-	var s1 := PoolService.socket(st, bx.box_id, &"mod_ban_sd1", 0)
+	var s1 := PoolBuff.apply_module(st, bx.box_id, &"mod_ban_sd1", 0)
 	eq(uses0 - bx.uses_remaining, 1, "装第 1 个：−1")
-	var s2 := PoolService.socket(st, bx.box_id, &"mod_ban_cr3", 1)
+	var s2 := PoolBuff.apply_module(st, bx.box_id, &"mod_ban_cr3", 1)
 	eq(uses0 - bx.uses_remaining, 2, "装第 2 个：累计 −2")
-	var s3 := PoolService.socket(st, bx.box_id, &"mod_ban_sd2", 2)
+	var s3 := PoolBuff.apply_module(st, bx.box_id, &"mod_ban_sd2", 2)
 	ok(s1["ok"] and s2["ok"] and s3["ok"], "三次镶嵌都成功")
 	eq(bx.occupied_count(), 3, "3 个位被占用")
 	var uses_installed := bx.uses_remaining
 	eq(uses0 - uses_installed, 3, "**装模块的累计成本 == 3 次**")
+	eq(st.total_remaining_uses(), uses_installed, "全局剩余次数同步（这里是唯一一个盒子）")
 
-	# ── 逐个拆卸：**次数一次都不变**（既不扣、也不退）────────────────────────────
-	var u1 := PoolService.unsocket(st, bx.box_id, 0)
-	eq(bx.uses_remaining, uses_installed, "拆第 1 个后：次数**一次没变**（不退也不扣）")
-	eq(u1["destroyed"], false, "拆卸的 `destroyed` 恒为 false")
-	var u2 := PoolService.unsocket(st, bx.box_id, 1)
-	eq(bx.uses_remaining, uses_installed, "拆第 2 个后：仍不变")
-	var u3 := PoolService.unsocket(st, bx.box_id, 2)
-	ok(u1["ok"] and u2["ok"] and u3["ok"], "三次拆卸都成功")
-	eq(bx.uses_remaining, uses_installed, "拆完全部 3 个：**前后逐项相等，一次都没退**")
-	eq(bx.occupied_count(), 0, "位子都空了")
-	eq(st.total_remaining_uses(), uses_installed, "全局剩余次数也不变")
+	# ── 没有"取下"的路径 ⇒ 这 3 次就是**沉没成本** ───────────────────────────────
+	#    （能证明它的只有：占用数恒定 + 次数恒定 + 底层没有 unsocket 这个函数）
+	var rev := bx.item_pool.revision
+	ok(not PoolBuff.apply_module(st, bx.box_id, &"mod_ban_sd1", 0)["ok"], "占用位再镶 ⇒ 拒绝")
+	eq(bx.item_pool.revision, rev, "被拒后 revision 不变")
+	eq(bx.uses_remaining, uses_installed, "被拒也不扣次数")
+	eq(bx.occupied_count(), 3, "占用数恒定（没有任何办法让它下降）")
 
-	# ── 再装一个（替换语义）：只减 1 ───────────────────────────────────────────
-	var s4 := PoolService.socket(st, bx.box_id, &"mod_ban_sd1", 0)
-	ok(s4["ok"], "重新装一个模块")
-	eq(bx.occupied_count(), 1, "拆卸确实生效过（归零 → 现在 1）⇒ 上面的「次数不变」不是因为什么都没发生")
-	eq(uses_installed - bx.uses_remaining, 1, "**替换的增量成本 == 1 次**（不是 2、也不是 0）")
-	eq(uses0 - bx.uses_remaining, 4, "该位子历史上一共花掉 2 次（原装 1 + 新装 1），连另外两件共 4 次")
-	eq(bx.uses_remaining, uses0 - 4, "总账：预算 20 − 4 次实际消耗 = 16（**拆卸没有退回任何一次**）")
+	# ── 第 4 个空位仍在，但**没有第 4 个不冲突的模块** ⇒ 用一条冲突镶嵌证明"被拒也不动账" ──
+	#    （`mod_boost_sd1` 与 `mod_ban_sd1` 打同一个目标 ⇒ V2 `ban_boost_conflict`）
+	var s4 := PoolBuff.apply_module(st, bx.box_id, &"mod_boost_sd1", 3)
+	ok(not s4["ok"], "冲突模块被拒（V2：同一目标不能既 ban 又 boost）")
+	eq(s4["reason"], PoolService.R_BAN_BOOST_CONFLICT, "原因码 = ban_boost_conflict")
+	eq(bx.occupied_count(), 3, "占用数仍为 3（被拒不写入）")
+	eq(bx.uses_remaining, uses_installed, "被拒也不扣次数")
+	eq(bx.uses_remaining, uses0 - 3, "总账：预算 20 − 3 次实际消耗 = 17（**没有任何一次被退回**）")
+	eq(bx.modules.size(), 4, "定长列表仍是 4 位，最后一个仍为空")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -400,7 +398,7 @@ func _test_snapshot_per_draw() -> void:
 		"第 1 份快照 == **那一刻**的 PoolState 权重（逐项）")
 
 	# ★ 两次使用之间编辑池子
-	ok(PoolService.socket(st, bx.box_id, &"mod_ban_sd1", 0)["ok"], "第 2 次之前排除 stardust_q1")
+	ok(PoolBuff.apply_module(st, bx.box_id, &"mod_ban_sd1", 0)["ok"], "第 2 次之前排除 stardust_q1")
 	var ps1 := PoolService.get_pool_state(st, bx.box_id)
 	eq(ps1.revision, 1, "编辑后 revision == 1")
 	eq(ps1.void_mass_bp, int(floor(float(banned_before) * 0.4)),
@@ -448,7 +446,7 @@ func _test_edit_applies_to_next_draw() -> void:
 	var w_sd2_before := ps_before.weight_of(&"stardust_q2")
 	var r1 := GachaService.redeem(st, bx, 0, 7)
 	ok(r1.ok, "第 1 次成功")
-	ok(PoolService.socket(st, bx.box_id, &"mod_ban_sd1", 0)["ok"], "第 1 次之后排除 stardust_q1")
+	ok(PoolBuff.apply_module(st, bx.box_id, &"mod_ban_sd1", 0)["ok"], "第 1 次之后排除 stardust_q1")
 
 	var ps := PoolService.get_pool_state(st, bx.box_id)
 	eq(ps.weight_of(&"stardust_q1"), 0, "该物品权重归零")
@@ -539,14 +537,14 @@ func _test_validation_failure_consumes_no_use() -> void:
 	var f3 := _new_box(&"series_q2")
 	var st3: GameState = f3["state"]
 	var bx3: Box = f3["box"]
-	ok(PoolService.socket(st3, bx3.box_id, &"mod_ban_sd1", 0)["ok"], "先成功镶一个（15 → 14）")
+	ok(PoolBuff.apply_module(st3, bx3.box_id, &"mod_ban_sd1", 0)["ok"], "先成功镶一个（15 → 14）")
 	var uses_now := bx3.uses_remaining
 	eq(uses_now, SeriesDef.expected_initial_uses(2) - 1, "成功镶嵌扣 1 次（品质 2 的 15 → 14）")
-	var dup := PoolService.socket(st3, bx3.box_id, &"mod_ban_sd2", 0)     # 往占用位放 ⇒ V3
+	var dup := PoolBuff.apply_module(st3, bx3.box_id, &"mod_ban_sd2", 0)     # 往占用位放 ⇒ V3
 	ok(not dup["ok"], "往占用位镶嵌 ⇒ 拒绝")
 	eq(dup["reason"], PoolService.R_SLOT_OCCUPIED, "原因码 slot_occupied（V3）")
 	eq(bx3.uses_remaining, uses_now, "**失败不扣次数**")
-	var unknown := PoolService.socket(st3, bx3.box_id, &"no_such_module", 1)
+	var unknown := PoolBuff.apply_module(st3, bx3.box_id, &"no_such_module", 1)
 	ok(not unknown["ok"], "未注册模块 ⇒ 拒绝")
 	eq(unknown["reason"], PoolService.R_UNKNOWN_MODULE, "原因码 unknown_module（V7）")
 	eq(bx3.uses_remaining, uses_now, "仍不扣次数")
@@ -554,13 +552,13 @@ func _test_validation_failure_consumes_no_use() -> void:
 	eq(bx3.item_pool.revision, 1, "revision 只被成功的那次推进")
 
 	# V2：同一物品既排除又提升 ⇒ 拒绝，**不扣次数**
-	var conflict := PoolService.socket(st3, bx3.box_id, &"mod_boost_sd1", 1)
+	var conflict := PoolBuff.apply_module(st3, bx3.box_id, &"mod_boost_sd1", 1)
 	ok(not conflict["ok"], "与已排除物品冲突的提升 ⇒ 拒绝")
 	eq(conflict["reason"], PoolService.R_BAN_BOOST_CONFLICT, "原因码 ban_boost_conflict（V2）")
 	eq(bx3.uses_remaining, uses_now, "V2 拒绝不扣次数")
 
 	# V5：一次排除 6 件 > ban_limit（8 − 3 = 5）⇒ 拒绝，**不扣次数**
-	var over := PoolService.socket(st3, bx3.box_id, &"mod_ban_many6", 1)
+	var over := PoolBuff.apply_module(st3, bx3.box_id, &"mod_ban_many6", 1)
 	ok(not over["ok"], "排除数超过 ban_limit ⇒ 拒绝")
 	eq(over["reason"], PoolService.R_BAN_LIMIT, "原因码 ban_limit_exceeded（V5）")
 	eq(bx3.uses_remaining, uses_now, "V5 拒绝不扣次数")
@@ -579,7 +577,7 @@ func _test_modules_live_until_exhausted() -> void:
 	var f := _new_box_with_budget(&"series_q3", 4)   # 夹具预算 4（真实曲线品质 3 = 20）：够走到摧毁
 	var st: GameState = f["state"]
 	var bx: Box = f["box"]
-	ok(PoolService.socket(st, bx.box_id, &"mod_ban_sd1", 0)["ok"], "镶一个排除模块（4 → 3）")
+	ok(PoolBuff.apply_module(st, bx.box_id, &"mod_ban_sd1", 0)["ok"], "镶一个排除模块（4 → 3）")
 	var sig := _modules_sig(bx)
 	eq(bx.occupied_count(), 1, "1 个已占用位")
 	eq(bx.uses_remaining, 3, "镶嵌扣掉 1 次")
@@ -592,14 +590,11 @@ func _test_modules_live_until_exhausted() -> void:
 		"编辑仍然生效（**不是「兑现就重置」**）")
 	eq(PoolService.get_modules(st, bx.box_id).size(), 4, "get_modules 仍能读到该盒的定长列表（品质 3 ⇒ 4 位）")
 
-	# 摧毁前**可以继续编辑**：再镶一个（也扣 1 次）、再拆掉（不扣）
-	ok(PoolService.socket(st, bx.box_id, &"mod_ban_cr3", 1)["ok"], "还可以继续镶嵌（2 → 1）")
+	# 摧毁前**可以继续编辑**：再镶一个空位（也扣 1 次）；★ v0.44 拆卸已删除 ⇒ 已镶的取不下来
+	ok(PoolBuff.apply_module(st, bx.box_id, &"mod_ban_cr3", 1)["ok"], "还可以继续镶嵌空位（2 → 1）")
 	eq(bx.occupied_count(), 2, "两个模块在位")
 	eq(bx.uses_remaining, 1, "第二次镶嵌也扣 1 次")
-	ok(PoolService.unsocket(st, bx.box_id, 1)["ok"], "也可以拆掉（模块可拆卸）")
-	eq(bx.occupied_count(), 1, "回到 1 个模块")
-	eq(bx.uses_remaining, 1, "**拆卸不消耗次数**（消耗点只有镶嵌与兑现）")
-	eq(_modules_sig(bx), sig, "拆掉后与最初逐项一致")
+	eq(bx.modules[1].module_id, &"mod_ban_cr3", "第 1 位装上了，且**取不下来**（v0.44 无拆卸）")
 
 	var r2 := GachaService.redeem(st, bx, 0, 6)
 	ok(r2.ok, "第 2 次兑现成功（1 → 0）")
@@ -607,7 +602,7 @@ func _test_modules_live_until_exhausted() -> void:
 	ok(not st.has_box(bx.box_id), "**归零即摧毁：盒子已从清单移除 ⇒ 它的 modules 随之消失**")
 	eq(st.box_count(), 0, "清单空")
 	eq(PoolService.get_modules(st, bx.box_id).size(), 0, "对已摧毁的盒子读模块 ⇒ 空")
-	ok(not PoolService.socket(st, bx.box_id, &"mod_ban_sd1", 0)["ok"], "对已摧毁的盒子镶嵌 ⇒ 拒绝")
+	ok(not PoolBuff.apply_module(st, bx.box_id, &"mod_ban_sd1", 0)["ok"], "对已摧毁的盒子镶嵌 ⇒ 拒绝")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -740,9 +735,9 @@ func _test_conservation() -> void:
 	eq(st3.total_remaining_uses(), 8, "两个盒子共 8 次（夹具：各 4 次）")
 	var sockets := 0
 	var draws2 := 0
-	ok(PoolService.socket(st3, pair[0].box_id, &"mod_ban_sd1", 0)["ok"], "A 镶嵌 #1")
+	ok(PoolBuff.apply_module(st3, pair[0].box_id, &"mod_ban_sd1", 0)["ok"], "A 镶嵌 #1")
 	sockets += 1
-	ok(PoolService.socket(st3, pair[0].box_id, &"mod_ban_cr3", 1)["ok"], "A 镶嵌 #2")
+	ok(PoolBuff.apply_module(st3, pair[0].box_id, &"mod_ban_cr3", 1)["ok"], "A 镶嵌 #2")
 	sockets += 1
 	ok(GachaService.redeem(st3, pair[0], 0, 1).ok, "A 兑现 #1")
 	draws2 += 1
@@ -764,12 +759,16 @@ func _test_uses_remaining_is_persisted() -> void:
 	var f := _new_box_with_budget(&"series_q2", 3)    # 夹具预算 3（真实曲线品质 2 = 15）
 	var st: GameState = f["state"]
 	var bx: Box = f["box"]
-	ok(PoolService.socket(st, bx.box_id, &"mod_ban_sd1", 0)["ok"], "镶一个模块（3 → 2）")
+	ok(PoolBuff.apply_module(st, bx.box_id, &"mod_ban_sd1", 0)["ok"], "镶一个模块（3 → 2）")
 	ok(GachaService.redeem(st, bx, 0, 42).ok, "再兑现一次（2 → 1）")
 
 	var d := bx.to_dict()
 	eq(int(d["uses_remaining"]), 1, "落盘里含 uses_remaining（镶嵌 −1、兑现 −1 ⇒ 3 → 1）")
-	eq(d["item_pool"].size(), 5, "池子只落**五项子集**（box_id / series_id / regular_count / socket_count / revision）")
+	# ★ v0.45：池子子集从 5 键变 **7 键**——追加物品与三态必须落盘，
+	#   否则"玩家加进池子的物品 / 设的隐藏禁用"会在读档时静默丢失。
+	eq(d["item_pool"].size(), 7, "池子落**七项子集**（原五项 + extra_item_ids + item_states）")
+	eq(d["item_pool"]["extra_item_ids"], [] as Array[StringName], "本盒没加过物品 ⇒ 空数组")
+	eq(d["item_pool"]["item_states"], {}, "本盒没改过三态 ⇒ 空字典（缺键 = 显示）")
 	eq(int(d["item_pool"]["revision"]), 1, "revision 入档 == 1")
 	eq(d["modules"].size(), 1, "模块落**稀疏序列**（1 条）")
 	eq(int(d["modules"][0]["index"]), 0, "稀疏序列带下标")
@@ -825,7 +824,7 @@ func _test_two_spend_points_share_counter() -> void:
 	var bx: Box = f["box"]
 	eq(bx.uses_remaining, 4, "初始 4 次（夹具预算）")
 
-	var s1 := PoolService.socket(st, bx.box_id, &"mod_ban_sd1", 0)
+	var s1 := PoolBuff.apply_module(st, bx.box_id, &"mod_ban_sd1", 0)
 	ok(s1["ok"], "镶嵌成功")
 	eq(bx.uses_remaining, 3, "**装模块 −1**（4 → 3）")
 	eq(s1["destroyed"], false, "还有 3 次 ⇒ 没有摧毁")
@@ -834,15 +833,12 @@ func _test_two_spend_points_share_counter() -> void:
 	ok(r1.ok, "兑现成功")
 	eq(bx.uses_remaining, 2, "**兑现 −1**（3 → 2）")
 
-	ok(PoolService.socket(st, bx.box_id, &"mod_ban_cr3", 1)["ok"], "再装一个模块")
+	ok(PoolBuff.apply_module(st, bx.box_id, &"mod_ban_cr3", 1)["ok"], "再装一个模块")
 	eq(bx.uses_remaining, 1, "3 → 2 → 1：**两个动作打在同一个计数器上**")
 	ok(st.has_box(bx.box_id), "还剩 1 次 ⇒ 盒子仍在清单里")
-
-	var u := PoolService.unsocket(st, bx.box_id, 1)
-	ok(u["ok"], "拆卸成功")
-	eq(bx.uses_remaining, 1, "**拆卸不消耗次数**（消耗点只有「装模块」与「兑现」两个）")
-	eq(u["destroyed"], false, "拆卸的 `destroyed` 恒为 false")
 	eq(st.total_remaining_uses(), 1, "全局剩余次数 == 1")
+	# ★ v0.44：拆卸已删除 ⇒ 这 1 次只能被"兑现"或"再镶一格"花掉，没有退还路径
+	eq(bx.occupied_count(), 2, "两个模块都还在（取不下来）")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -864,16 +860,16 @@ func _test_zero_by_socket_destroys_box() -> void:
 	var inst_ids_before := _instance_ids()
 	eq(bx.uses_remaining, 3, "初始 3 次")
 
-	var a1 := PoolService.socket(st, bx.box_id, &"mod_ban_sd1", 0)
+	var a1 := PoolBuff.apply_module(st, bx.box_id, &"mod_ban_sd1", 0)
 	ok(a1["ok"] and not a1["destroyed"], "第 1 次镶嵌（3 → 2），未摧毁")
 	eq(bx.uses_remaining, 2, "剩 2 次")
 	eq(st.box_count(), 1, "盒子还在")
-	var a2 := PoolService.socket(st, bx.box_id, &"mod_ban_cr3", 1)
+	var a2 := PoolBuff.apply_module(st, bx.box_id, &"mod_ban_cr3", 1)
 	ok(a2["ok"] and not a2["destroyed"], "第 2 次镶嵌（2 → 1），未摧毁")
 	eq(bx.uses_remaining, 1, "剩 1 次")
 	ok(st.has_box(bx.box_id), "还剩 1 次 ⇒ 仍在清单里")
 
-	var a3 := PoolService.socket(st, bx.box_id, &"mod_ban_sd2", 2)
+	var a3 := PoolBuff.apply_module(st, bx.box_id, &"mod_ban_sd2", 2)
 	ok(a3["ok"], "第 3 次镶嵌成功（**没有被防御性拒绝**：归零前镶嵌是合法的）")
 	eq(a3["destroyed"], true, "**返回里明确报告这次镶嵌摧毁了盒子**")
 	eq(bx.uses_remaining, 0, "次数归零")
@@ -884,7 +880,7 @@ func _test_zero_by_socket_destroys_box() -> void:
 	eq(ItemService.instances.size(), inst_before, "没有产生任何实例")
 	eq(PoolService.get_modules(st, bx.box_id).size(), 0, "它的 modules 随之消失")
 	eq(PoolService.get_pool_state(st, bx.box_id), null, "对已摧毁的盒子取状态 ⇒ null")
-	ok(not PoolService.socket(st, bx.box_id, &"mod_ban_sd1", 0)["ok"], "对已摧毁的盒子再镶嵌 ⇒ 拒绝")
+	ok(not PoolBuff.apply_module(st, bx.box_id, &"mod_ban_sd1", 0)["ok"], "对已摧毁的盒子再镶嵌 ⇒ 拒绝")
 	ok(_same_ids(inst_ids_before, _instance_ids()), "**实例账逐项不变**（从未兑现 ⇒ 一件都没产出）")
 	ok(ItemService.check_conservation(), "02 的守恒等式仍成立")
 	eq(st.pending_boxes.size(), 0, "`pending_boxes` 空（盒子是被移除，不是被标记）")
@@ -893,7 +889,7 @@ func _test_zero_by_socket_destroys_box() -> void:
 	var st2 := GameState.new_game()
 	var bx2 := GachaService.grant_box(st2, &"series_q2", 1, &"test")[0]
 	bx2.uses_remaining = 3           # 夹具预算 3（真实曲线品质 2 = 15）
-	ok(PoolService.socket(st2, bx2.box_id, &"mod_ban_sd1", 0)["ok"], "装模块一次（3 → 2）")
+	ok(PoolBuff.apply_module(st2, bx2.box_id, &"mod_ban_sd1", 0)["ok"], "装模块一次（3 → 2）")
 	var ids2_before := _instance_ids()
 	var r_a := GachaService.redeem(st2, bx2, 0, 9)
 	ok(r_a.ok, "兑现一次（2 → 1）")
@@ -953,7 +949,7 @@ func _test_box_is_a_held_thing() -> void:
 	eq(ItemService.instances.size(), 0, "被拒 ⇒ 不产出实例")
 
 	# 邮件里的盒子：**不可镶嵌**
-	var sock := PoolService.socket(st, b3.box_id, &"mod_ban_sd1", 0)
+	var sock := PoolBuff.apply_module(st, b3.box_id, &"mod_ban_sd1", 0)
 	eq(sock["ok"], false, "邮件盒子镶嵌被拒")
 	eq(sock["reason"], ItemConstants.REASON_BOX_IN_MAIL, "原因码同样是 box_in_mail")
 	eq(b3.modules[0], null, "被拒 ⇒ modules 未写入")
@@ -1025,7 +1021,7 @@ func _test_device_gate() -> void:
 	eq(bare.draw_index, idx_before, "draw_index 不变")
 	eq(bare.box_count(), 1, "盒子仍在清单里")
 
-	var s := PoolService.socket(bare, bx.box_id, &"mod_ban_sd1", 0)
+	var s := PoolBuff.apply_module(bare, bx.box_id, &"mod_ban_sd1", 0)
 	ok(not s["ok"], "**无设备 ⇒ 装模块被拒**")
 	eq(s["reason"], PoolService.R_NO_DEVICE, "原因码同样是 no_device（两侧同名同义）")
 	eq(bx.uses_remaining, uses_before, "寿命仍未被消耗")
@@ -1045,7 +1041,7 @@ func _test_device_gate() -> void:
 	eq(armed.device_count(), 1, "正好一台")
 	var bx2: Box = GachaService.grant_box(armed, &"series_q2", 1, &"test")[0]
 	eq(bx2.uses_remaining, SeriesDef.expected_initial_uses(2), "新盒子拿到完整预算（15）")
-	ok(PoolService.socket(armed, bx2.box_id, &"mod_ban_sd1", 0)["ok"], "有设备 ⇒ **装模块放行**")
+	ok(PoolBuff.apply_module(armed, bx2.box_id, &"mod_ban_sd1", 0)["ok"], "有设备 ⇒ **装模块放行**")
 	eq(bx2.uses_remaining, SeriesDef.expected_initial_uses(2) - 1, "放行后照常扣 1 次寿命")
 	var rd := GachaService.redeem(armed, bx2, 0, 7)
 	ok(rd.ok, "有设备 ⇒ **开盒放行**")

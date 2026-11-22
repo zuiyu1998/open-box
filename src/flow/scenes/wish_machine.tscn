@@ -97,15 +97,52 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "镶嵌"
 
-[node name="UnsocketButton" type="Button" parent="Columns/Left/ModuleSection/ModuleButtons"]
+[node name="PoolSection" type="VBoxContainer" parent="Columns/Left"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="PoolTitle" type="Label" parent="Columns/Left/PoolSection"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "③ 池子（显示 / 隐藏 / 禁用）"
+
+[node name="PoolSummary" type="Label" parent="Columns/Left/PoolSection"]
+layout_mode = 2
+autowrap_mode = 3
+text = "先选一个盲盒"
+
+[node name="PoolPicker" type="OptionButton" parent="Columns/Left/PoolSection"]
+layout_mode = 2
+
+[node name="PoolState" type="Label" parent="Columns/Left/PoolSection"]
+layout_mode = 2
+autowrap_mode = 3
+text = ""
+
+[node name="PoolButtons" type="HBoxContainer" parent="Columns/Left/PoolSection"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="PoolCycleButton" type="Button" parent="Columns/Left/PoolSection/PoolButtons"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "拆卸"
+text = "切换状态（显示 → 隐藏 → 禁用）"
+
+[node name="AddRow" type="HBoxContainer" parent="Columns/Left/PoolSection"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="AddPicker" type="OptionButton" parent="Columns/Left/PoolSection/AddRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="AddButton" type="Button" parent="Columns/Left/PoolSection/AddRow"]
+layout_mode = 2
+text = "添加到池子"
 
 [node name="ResultSection" type="VBoxContainer" parent="Columns/Left"]
 layout_mode = 2
 theme_override_constants/separation = 6
-
 [node name="ResultTitle" type="Label" parent="Columns/Left/ResultSection"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 18

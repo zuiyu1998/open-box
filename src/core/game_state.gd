@@ -65,7 +65,7 @@ func mail_boxes() -> Array[Box]:
 
 ## **v0.14：归零即移除（含镶嵌导致）——盒子离开清单的唯一原因就是"使用次数归零"。**
 ## 本方法把盒子连同它的 `item_pool` 与 `modules` 一起移除、**不再存在**。
-## 两条导致归零的路径**共用** `spend_use()`：**装模块**（`PoolService.socket()`）与**兑现**
+## 两条导致归零的路径**共用** `spend_use()`：**装模块**（`PoolBuff.apply_module()`）与**兑现**
 ## （`GachaService.redeem()`）。**不存在"用尽才消耗"的缓冲**：镶嵌把次数扣到 0 时立即移除，
 ## 哪怕这个盒子从未被兑现过（那是**合法路径**，不做防御性拦截）。
 ## ★ v0.26：盒子被摧毁 ⇒ **释放它占的仓库容量**（盲盒与物品共用同一份容量账）。
@@ -84,7 +84,7 @@ func remove_box(box_id: String) -> bool:
 
 ## **v0.14：消耗一次使用 + 归零即摧毁。**
 ##
-## 两个消耗点**共用同一个计数器**：`PoolService.socket()`（装模块）与 `GachaService.redeem()`（兑现）。
+## 两个消耗点**共用同一个计数器**：`PoolBuff.apply_module()`（装模块）与 `GachaService.redeem()`（兑现）。
 ## 返回**是否因此被摧毁**（`uses_remaining` 归零 ⇒ 从 `pending_boxes` 移除，连同该盒自己的
 ## `item_pool` 与 `modules`）。
 ##

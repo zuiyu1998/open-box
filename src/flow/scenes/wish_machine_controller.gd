@@ -24,7 +24,8 @@ func _ready() -> void:
 	view.upgrade_requested.connect(_on_upgrade)
 	view.open_requested.connect(_on_open)
 	view.socket_requested.connect(_on_socket)
-	view.unsocket_requested.connect(_on_unsocket)
+	view.pool_cycle_requested.connect(_on_pool_cycle)
+	view.pool_add_requested.connect(_on_pool_add)
 	view.operator_toggle_requested.connect(_on_operator_toggle)
 	view.box_changed.connect(refresh)
 	call_deferred("refresh")   # ★ 首次 render 推迟到 View 的 @onready 就绪之后
@@ -36,12 +37,18 @@ func bind_state(s: GameState) -> void:
 
 
 func refresh() -> void:
-	view.render(model.snapshot(view.selected_index, view.slot_index, view.module_index))
+	view.render(model.snapshot(
+		view.selected_index, view.slot_index, view.module_index,
+		view.pool_index, view.add_index
+	))
 
 
 ## 透传给外部 / 测试的只读快照（View 不提供，Model 才有）。
 func snapshot() -> Dictionary:
-	return model.snapshot(view.selected_index, view.slot_index, view.module_index)
+	return model.snapshot(
+		view.selected_index, view.slot_index, view.module_index,
+		view.pool_index, view.add_index
+	)
 
 
 func _on_upgrade() -> void:
@@ -59,8 +66,13 @@ func _on_socket() -> void:
 	refresh()
 
 
-func _on_unsocket() -> void:
-	model.unsocket_module(view.selected_index, view.slot_index)
+func _on_pool_cycle() -> void:
+	model.cycle_item_state(view.selected_index, view.pool_index)
+	refresh()
+
+
+func _on_pool_add() -> void:
+	model.add_pool_item(view.selected_index, view.add_index)
 	refresh()
 
 

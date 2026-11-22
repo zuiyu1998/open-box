@@ -26,11 +26,14 @@ func _ready() -> void:
 	_test_plan_gates()
 	_test_per_box_independence()
 	_test_preview_is_read_only()
-	_test_socket_gold_cost_and_unsocket_zero_refund()
+	_test_socket_gold_cost_and_permanent_lock()
 	_test_gold_insufficient_consumes_nothing()
-	_test_unsocket_works_when_warehouse_full()
-	_test_explicit_replace_path()
+	_test_socket_works_when_warehouse_full()
+	_test_occupied_slot_is_terminal()
 	_test_broken_modules_are_reported()
+	_test_add_pool_item()
+	_test_item_state_writes()
+	_test_item_state_roundtrip()
 
 	print("\n=== 结果：%d 通过 / %d 失败 ===" % [_pass, _fail])
 	get_tree().quit(0 if _fail == 0 else 1)
@@ -213,7 +216,7 @@ func _test_ban_matches_the_documented_example() -> void:
 	var f := _new_state(1)
 	var st: GameState = f["state"]
 	var bx: Box = f["boxes"][0]
-	var r := PoolService.socket(st, bx.box_id, &"mod_ban_05", 0)
+	var r := PoolBuff.apply_module(st, bx.box_id, &"mod_ban_05", 0)
 	ok(r["ok"], "镶嵌排除模块成功")
 	var ps: PoolState = r["state"]
 	eq(ps.weight_of(&"s01_05"), 0, "被排除物品权重归零")
@@ -236,7 +239,7 @@ func _test_boost_is_zero_sum() -> void:
 	var st: GameState = f["state"]
 	var bx: Box = f["boxes"][0]
 	var before := PoolService.get_pool_state(st, bx.box_id)
-	var r := PoolService.socket(st, bx.box_id, &"mod_boost_05", 0)
+	var r := PoolBuff.apply_module(st, bx.box_id, &"mod_boost_05", 0)
 	ok(r["ok"], "镶嵌提升模块成功")
 	var ps: PoolState = r["state"]
 	eq(ps.weight_of(&"s01_05"), 6000, "目标 2000 → 6000（×3）")
@@ -253,39 +256,39 @@ func _test_plan_gates() -> void:
 	var st: GameState = f["state"]
 	var bx: Box = f["boxes"][0]
 
-	var r1 := PoolService.socket(st, bx.box_id, &"mod_ban_05", 1)
+	var r1 := PoolBuff.apply_module(st, bx.box_id, &"mod_ban_05", 1)
 	ok(r1["ok"], "先装一个排除模块（目标 s01_05）")
-	var r2 := PoolService.socket(st, bx.box_id, &"mod_boost_05", 2)
+	var r2 := PoolBuff.apply_module(st, bx.box_id, &"mod_boost_05", 2)
 	ok(not r2["ok"], "同一物品既排除又提升 ⇒ 拒绝")
 	eq(r2["reason"], PoolService.R_BAN_BOOST_CONFLICT, "原因码 = ban_boost_conflict（V2）")
 
-	var r3 := PoolService.socket(st, bx.box_id, &"mod_ban_08", 1)
+	var r3 := PoolBuff.apply_module(st, bx.box_id, &"mod_ban_08", 1)
 	ok(not r3["ok"], "往**占用位**放 ⇒ 拒绝")
 	eq(r3["reason"], PoolService.R_SLOT_OCCUPIED, "原因码 = slot_occupied（必须显式替换，不做隐式覆盖）")
 
-	var r4 := PoolService.socket(st, bx.box_id, &"mod_boost_over", 0)
+	var r4 := PoolBuff.apply_module(st, bx.box_id, &"mod_boost_over", 0)
 	ok(not r4["ok"], "提升倍数 3.5× ⇒ 拒绝")
 	eq(r4["reason"], PoolService.R_BOOST_OVER_CAP, "原因码 = boost_over_cap（V4 / 核心 D7）")
 
-	var r5 := PoolService.socket(st, bx.box_id, &"mod_recover", 0)
+	var r5 := PoolBuff.apply_module(st, bx.box_id, &"mod_recover", 0)
 	ok(not r5["ok"], "RECOVER 模块 ⇒ 拒绝（第二切片，本版仅定义接口）")
 	eq(r5["reason"], PoolService.R_RECOVER_UNSUPPORTED, "原因码 = recover_unsupported")
 
-	var r6 := PoolService.socket(st, bx.box_id, &"mod_ban_many", 0)
+	var r6 := PoolBuff.apply_module(st, bx.box_id, &"mod_ban_many", 0)
 	ok(not r6["ok"], "一次排除 6 件 ⇒ 拒绝")
 	eq(r6["reason"], PoolService.R_BAN_LIMIT, "原因码 = ban_limit_exceeded（V5：ban_limit = 8 − 3 = 5）")
 
-	var r7 := PoolService.socket(st, bx.box_id, &"no_such_module", 0)
+	var r7 := PoolBuff.apply_module(st, bx.box_id, &"no_such_module", 0)
 	ok(not r7["ok"], "未注册的 module_id ⇒ 拒绝")
 	eq(r7["reason"], PoolService.R_UNKNOWN_MODULE, "原因码 = unknown_module（V7：非空项良构）")
 
-	var r8 := PoolService.socket(st, bx.box_id, &"mod_ban_05", 9)
+	var r8 := PoolBuff.apply_module(st, bx.box_id, &"mod_ban_05", 9)
 	ok(not r8["ok"], "slot 越界 ⇒ 拒绝")
 	eq(r8["reason"], PoolService.R_BAD_SLOT, "原因码 = bad_slot")
 
-	var r9 := PoolService.socket(st, bx.box_id, &"mod_tag_a", 0)
+	var r9 := PoolBuff.apply_module(st, bx.box_id, &"mod_tag_a", 0)
 	ok(r9["ok"], "装一个带互斥标记的模块")
-	var r10 := PoolService.socket(st, bx.box_id, &"mod_tag_b", 2)
+	var r10 := PoolBuff.apply_module(st, bx.box_id, &"mod_tag_b", 2)
 	ok(not r10["ok"], "共享互斥标记的两个模块 ⇒ 拒绝共存")
 	eq(r10["reason"], PoolService.R_TAG_CONFLICT, "原因码 = exclusive_tag_conflict（V6）")
 
@@ -301,7 +304,7 @@ func _test_per_box_independence() -> void:
 	var b: Box = f["boxes"][1]
 	var b_before := PoolService.get_pool_state(st, b.box_id)
 	var b_weights_before := b_before.weights_bp.duplicate()
-	ok(PoolService.socket(st, a.box_id, &"mod_ban_05", 0)["ok"], "编辑盒子 A")
+	ok(PoolBuff.apply_module(st, a.box_id, &"mod_ban_05", 0)["ok"], "编辑盒子 A")
 	var a_after := PoolService.get_pool_state(st, a.box_id)
 	var b_after := PoolService.get_pool_state(st, b.box_id)
 	eq(a_after.weight_of(&"s01_05"), 0, "A 的 s01_05 被排除")
@@ -334,15 +337,15 @@ func _test_preview_is_read_only() -> void:
 	ok(ps != real, "候选状态与真实状态是两个对象")
 
 
-func _test_socket_gold_cost_and_unsocket_zero_refund() -> void:
-	print("— ★ v0.19：镶嵌的成本 = 该模块的金币；**拆卸什么都不返还**（核心 §15 D8）")
+func _test_socket_gold_cost_and_permanent_lock() -> void:
+	print("— ★ v0.44：镶嵌的成本 = 该模块的金币；**模块镶上即永久锁定**（拆卸已删除）")
 	var f := _new_state(1)
 	var st: GameState = f["state"]
 	var bx: Box = f["boxes"][0]
 	var gold_before := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
 	var inst_before := ItemService.instances.size()
 
-	var r := PoolService.socket(st, bx.box_id, &"mod_ban_costly", 0)
+	var r := PoolBuff.apply_module(st, bx.box_id, &"mod_ban_costly", 0)
 	ok(r["ok"], "镶嵌成功（成本在同一次 02 事务里扣掉）")
 	eq(
 		ItemService.currency_balance(ItemConstants.CURRENCY_GOLD),
@@ -353,22 +356,18 @@ func _test_socket_gold_cost_and_unsocket_zero_refund() -> void:
 	var ps_socketed: PoolState = r["state"]
 	eq(ps_socketed.void_mass_bp, 800, "已生效：void 800")
 
-	var u := PoolService.unsocket(st, bx.box_id, 0)
-	ok(u["ok"], "拆卸成功")
-	eq(
-		ItemService.currency_balance(ItemConstants.CURRENCY_GOLD),
-		gold_before - 25,
-		"**拆卸不返还金币**（余额不回升）"
-	)
-	eq(ItemService.instances.size(), inst_before, "**拆卸不产生任何新实例**（零返还）")
-	ok(ItemService.check_conservation(), "守恒等式仍成立（total_granted − total_consumed == 实例数）")
-	var ps_after: PoolState = u["state"]
-	eq(ps_after.void_mass_bp, 0, "**PoolState 回到基础态且 void == 0**（T6 ①）")
-	eq(ps_after.weight_of(&"s01_05"), 2000, "被排除项回到基础权重")
-	ok(ps_after.is_zero_sum(), "Σ == 10000")
-	eq(bx.occupied_count(), 0, "该位被置空")
+	# ★ v0.44：再往同一个位子镶 ⇒ 终局拒绝；没有任何"取下"的路径
+	var rev := bx.item_pool.revision
+	var gold_mid := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
+	var again := PoolBuff.apply_module(st, bx.box_id, &"mod_ban_08", 0)
+	ok(not again["ok"], "**往已占用位再镶 ⇒ 拒绝**（没有替换）")
+	eq(again["reason"], PoolService.R_SLOT_OCCUPIED, "原因码 = slot_occupied（终局：不是「请先拆」）")
+	eq(bx.item_pool.revision, rev, "revision 未推进")
+	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD), gold_mid, "金币未扣")
+	eq(bx.modules[0].module_id, &"mod_ban_costly", "原位子的模块原封不动（永久锁定）")
+	eq(bx.occupied_count(), 1, "占用数不变")
 	eq(bx.modules.size(), 3, "**定长长度不变**")
-	eq(bx.item_pool.revision, 2, "revision = 2（镶嵌 +1、拆卸 +1）")
+	ok(PoolService.get_pool_state(st, bx.box_id).is_zero_sum(), "Σ == 10000（状态仍自洽）")
 
 
 func _test_gold_insufficient_consumes_nothing() -> void:
@@ -382,7 +381,7 @@ func _test_gold_insufficient_consumes_nothing() -> void:
 		ItemConstants.CURRENCY_GOLD, 24, ItemConstants.CURRENCY_SOURCE_INIT
 	)
 	var inst_before := ItemService.instances.size()
-	var r := PoolService.socket(st, bx.box_id, &"mod_ban_costly", 0)
+	var r := PoolBuff.apply_module(st, bx.box_id, &"mod_ban_costly", 0)
 	ok(not r["ok"], "余额 24 < 25 ⇒ 拒绝")
 	eq(r["reason"], PoolService.R_CURRENCY_INSUFFICIENT, "原因码 = currency_insufficient")
 	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD), 24, "**一分钱都没扣**")
@@ -391,45 +390,44 @@ func _test_gold_insufficient_consumes_nothing() -> void:
 	eq(bx.item_pool.revision, 0, "revision 没被推进")
 
 
-func _test_unsocket_works_when_warehouse_full() -> void:
-	print("— ★ v0.19：仓库满时**拆卸照样成功**（它不产出任何实例 ⇒ 没有『放不下』这回事）")
+func _test_socket_works_when_warehouse_full() -> void:
+	print("— 仓库满时**镶嵌照样成功**（它只花钱、不产出 ⇒ 没有『放不下』这回事）")
 	var f := _new_state(1)
 	var st: GameState = f["state"]
 	var bx: Box = f["boxes"][0]
 	ItemService.warehouse_capacity = 11
-	ok(PoolService.socket(st, bx.box_id, &"mod_ban_costly", 0)["ok"], "先镶嵌（金币扣款）")
+	ok(PoolBuff.apply_module(st, bx.box_id, &"mod_ban_costly", 0)["ok"], "先镶嵌（金币扣款）")
 	for _i in 5:
 		ItemService.grant(&"s01_02", {"kind": ItemConstants.KIND_UNLOCK})
 	eq(ItemService.warehouse_usage()["used"], 11, "仓库恰好占满（5 件 × size 2 + 盲盒 1 单位）")
 	var inst_before := ItemService.instances.size()
 	var gold_before := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
 
-	var u := PoolService.unsocket(st, bx.box_id, 0)
-	ok(u["ok"], "**仓库满也能拆卸**（旧口径的 no_space 拒绝已随零返还作废）")
-	eq(bx.occupied_count(), 0, "该位被置空")
-	eq(ItemService.instances.size(), inst_before, "实例列表逐项不变（没有返还实例）")
+	# 换一个空位继续镶（`mod_ban_08` 无金币成本 ⇒ 金额断言只看"不扣多于应扣"，见下）
+	var r2 := PoolBuff.apply_module(st, bx.box_id, &"mod_ban_08", 1)
+	ok(r2["ok"], "**仓库满也能镶嵌**（镶嵌不产出任何实例 ⇒ 没有空间问题）")
+	eq(bx.occupied_count(), 2, "第 2 位也装上了")
+	eq(ItemService.instances.size(), inst_before, "实例列表逐项不变（不产出、不返还）")
 	eq(ItemService.warehouse_usage()["used"], 11, "占用不变")
-	eq(
-		ItemService.currency_balance(ItemConstants.CURRENCY_GOLD),
-		gold_before,
-		"金币不变（零返还）"
-	)
-	eq(bx.item_pool.revision, 2, "revision = 2（镶嵌 +1、拆卸 +1）")
+	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD), gold_before,
+		"该模块 `gold_cost = 0` ⇒ 余额不变（成本精确来自模块字段）")
+	eq(bx.item_pool.revision, 2, "revision = 2（两次镶嵌各 +1）")
 
 
-func _test_explicit_replace_path() -> void:
-	print("— 替换的唯一路径：显式 unsocket 后再 socket（不做隐式覆盖）")
+func _test_occupied_slot_is_terminal() -> void:
+	print("— ★ v0.44：占用位终局化——不能覆盖、不能取下，别的空位仍可镶")
 	var f := _new_state(1)
 	var st: GameState = f["state"]
 	var bx: Box = f["boxes"][0]
-	ok(PoolService.socket(st, bx.box_id, &"mod_ban_05", 0)["ok"], "第 0 位装上排除模块")
-	ok(not PoolService.socket(st, bx.box_id, &"mod_ban_08", 0)["ok"], "往占用位放 ⇒ 拒绝")
-	ok(PoolService.unsocket(st, bx.box_id, 0)["ok"], "显式拆卸第 0 位（零返还）")
-	ok(PoolService.socket(st, bx.box_id, &"mod_ban_08", 0)["ok"], "现在可以装另一个模块")
+	ok(PoolBuff.apply_module(st, bx.box_id, &"mod_ban_05", 0)["ok"], "第 0 位装上排除模块")
+	var rev := bx.item_pool.revision
+	ok(not PoolBuff.apply_module(st, bx.box_id, &"mod_ban_08", 0)["ok"], "往占用位放 ⇒ 拒绝")
+	eq(bx.item_pool.revision, rev, "被拒时 revision 不推进")
+	ok(PoolBuff.apply_module(st, bx.box_id, &"mod_ban_08", 1)["ok"], "换到第 1 位（空位）⇒ 成功")
 	var ps := PoolService.get_pool_state(st, bx.box_id)
 	eq(ps.weight_of(&"s01_08"), 0, "新模块生效（s01_08 被排除）")
-	ok(ps.weight_of(&"s01_05") > 2000, "旧模块的排除已被撤销：s01_05 拿回并分到摊回的质量（> 2000 bp）")
-	eq(ps.void_mass_bp, 440, "此时生效的是 s01_08 的 40% 损耗（1100 × 0.4 = 440）")
+	eq(ps.weight_of(&"s01_05"), 0, "旧模块也仍然生效（它取不下来）")
+	ok(ps.is_zero_sum(), "Σ == 10000（两个排除叠加后仍自洽）")
 
 
 func _test_broken_modules_are_reported() -> void:
@@ -455,3 +453,149 @@ func _test_broken_modules_are_reported() -> void:
 	bx.modules = saved
 	ok(PoolService.validate_box(bx, _series).is_empty(), "恢复后校验通过")
 	ok(PoolService.get_pool_state(st, bx.box_id) != null, "缓存重建后可用")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ★ v0.45：池子成员与物品三态（可编辑字段，不走模块）
+# ══════════════════════════════════════════════════════════════════════════════
+
+func _test_add_pool_item() -> void:
+	print("— ★ v0.45 添加物品：真进池子、真改分布、revision +1、发信号")
+	var f := _new_state(1)
+	var st: GameState = f["state"]
+	var bx: Box = f["boxes"][0]
+	var size0 := bx.item_pool.base_items.size()
+	var rev0 := bx.item_pool.revision
+
+	# 造一件"已注册但不在池里"的物品（池子只含 s01_XX）
+	var extra := ItemDef.new()
+	extra.item_id = &"extra_q1"
+	extra.display_name = "池外物品"
+	extra.category = &"stardust"
+	extra.quality = 1
+	extra.value = 1
+	extra.size = Vector2i(1, 1)
+	extra.rarity = 50
+	ItemCatalog.register(extra)
+
+	var hits: Array = []
+	var cb := func(bid: String, rev: int) -> void: hits.append([bid, rev])
+	PoolService.bus.pool_changed.connect(cb)
+
+	var r := PoolBuff.add_item(st, bx.box_id, &"extra_q1")
+	PoolService.bus.pool_changed.disconnect(cb)
+
+	ok(r["ok"], "加入成功")
+	eq(bx.item_pool.base_items.size(), size0 + 1, "池子 +1 件")
+	eq(bx.item_pool.regular_count, size0 + 1, "regular_count 同步（C6 / V5 口径跟着池子走）")
+	eq(bx.item_pool.extra_item_ids, [&"extra_q1"] as Array[StringName], "记进 extra_item_ids（要落盘）")
+	eq(bx.item_pool.revision, rev0 + 1, "revision +1（07 的缓存键失效）")
+	eq(hits.size(), 1, "发出 1 次 pool_changed")
+	if hits.size() == 1:
+		eq(hits[0][0], bx.box_id, "信号带对的 box_id")
+		eq(hits[0][1], rev0 + 1, "信号带新的 revision")
+	var ps := PoolService.get_pool_state(st, bx.box_id)
+	ok(ps.weight_of(&"extra_q1") > 0, "新物品真的进了分布（权重 > 0）")
+	ok(ps.is_zero_sum(), "Σ == 10000（C1）")
+
+	# 拒绝路径
+	eq(PoolBuff.add_item(st, bx.box_id, &"extra_q1")["reason"],
+		PoolService.R_ITEM_ALREADY_IN_POOL, "重复添加 ⇒ item_already_in_pool")
+	eq(PoolBuff.add_item(st, bx.box_id, &"nope")["reason"],
+		PoolService.R_UNKNOWN_ITEM, "未注册物品 ⇒ unknown_item")
+
+
+func _test_item_state_writes() -> void:
+	print("— ★ v0.45 三态写入：隐藏不改分布、禁用重新归一、C6 下限拦住禁用")
+	var f := _new_state(1)
+	var st: GameState = f["state"]
+	var bx: Box = f["boxes"][0]
+	var ids := bx.item_pool.item_ids()
+	var first: StringName = ids[0]
+
+	var before := PoolService.get_pool_state(st, bx.box_id).weights_bp.duplicate()
+
+	# ① 隐藏：分布逐项不变
+	var r1 := PoolBuff.set_state(st, bx.box_id, first, ItemPool.ItemState.HIDDEN)
+	ok(r1["ok"], "设为隐藏成功")
+	var ps1 := PoolService.get_pool_state(st, bx.box_id)
+	eq(ps1.weights_bp, before, "**隐藏不改变任何权重**")
+	eq(ps1.hidden_ids.has(first), true, "PoolState 报出该隐藏项")
+	eq(ps1.disabled_ids.is_empty(), true, "没有禁用项")
+
+	# ② 禁用：退出分布、其余重新归一
+	var r2 := PoolBuff.set_state(st, bx.box_id, first, ItemPool.ItemState.DISABLED)
+	ok(r2["ok"], "设为禁用成功")
+	var ps2 := PoolService.get_pool_state(st, bx.box_id)
+	eq(ps2.weights_bp.has(first), false, "**禁用项不在 weights_bp 里**（出候选集，不是 0 权重）")
+	eq(ps2.weight_of(first), 0, "查询它的权重为 0")
+	ok(ps2.is_zero_sum(), "Σ == 10000（其余物品重新归一）")
+	eq(ps2.disabled_ids.has(first), true, "PoolState 报出该禁用项")
+	eq(ps2.banned_ids().has(first), false, "**禁用不被误报成「被 BAN」**")
+
+	# ③ C6 下限：把可产出压到 3 之后，再禁用一件 ⇒ 拒绝且状态不变
+	while bx.item_pool.enabled_count() > 3:
+		var target := &""
+		for id in bx.item_pool.item_ids():
+			if bx.item_pool.state_of(id) != ItemPool.ItemState.DISABLED:
+				target = id
+				break
+		if target == &"":
+			break
+		ok(PoolBuff.set_state(st, bx.box_id, target, ItemPool.ItemState.DISABLED)["ok"],
+			"禁用一件（可产出 → %d）" % (bx.item_pool.enabled_count() - 1))
+	eq(bx.item_pool.enabled_count(), 3, "前置：可产出压到 3")
+	var last_id := &""
+	for id in bx.item_pool.item_ids():
+		if PoolService.get_pool_state(st, bx.box_id).weights_bp.has(id):
+			last_id = id
+			break
+	var rev_before := bx.item_pool.revision
+	var r3 := PoolBuff.set_state(st, bx.box_id, last_id, ItemPool.ItemState.DISABLED)
+	ok(not r3["ok"], "再禁用一件 ⇒ 拒绝（C6 ≥ 3）")
+	eq(r3["reason"], PoolService.R_BELOW_C6, "原因码 = below_c6_floor")
+	eq(bx.item_pool.revision, rev_before, "被拒时 revision 不动")
+	eq(bx.item_pool.enabled_count(), 3, "可产出仍是 3")
+
+	# ③b 幂等：设成"当前已经是"的状态 ⇒ 成功但不推进 revision（不白让缓存失效）
+	var rev_idem := bx.item_pool.revision
+	var same := PoolBuff.set_state(st, bx.box_id, last_id, ItemPool.ItemState.SHOWN)
+	ok(same["ok"], "设成当前状态 ⇒ 成功")
+	eq(bx.item_pool.revision, rev_idem, "revision 不动（幂等）")
+
+	# ④ 其它拒绝路径
+	eq(PoolBuff.set_state(st, bx.box_id, &"nope", 0)["reason"],
+		PoolService.R_ITEM_NOT_IN_POOL, "不在池中 ⇒ item_not_in_pool")
+	eq(PoolBuff.set_state(st, bx.box_id, last_id, 99)["reason"],
+		PoolService.R_BAD_STATE, "状态越界 ⇒ bad_item_state")
+
+
+func _test_item_state_roundtrip() -> void:
+	print("— ★ v0.45 落盘：追加物品与三态随盒子往返（读档不丢编辑）")
+	var f := _new_state(1)
+	var st: GameState = f["state"]
+	var bx: Box = f["boxes"][0]
+
+	var extra := ItemDef.new()
+	extra.item_id = &"extra_q2"
+	extra.display_name = "池外物品 2"
+	extra.category = &"stardust"
+	extra.quality = 2
+	extra.value = 3
+	extra.size = Vector2i(1, 1)
+	extra.rarity = 40
+	ItemCatalog.register(extra)
+
+	ok(PoolBuff.add_item(st, bx.box_id, &"extra_q2")["ok"], "先加一件")
+	ok(PoolBuff.set_state(st, bx.box_id, &"extra_q2", ItemPool.ItemState.DISABLED)["ok"], "再把它禁用")
+	var first: StringName = bx.item_pool.item_ids()[0]
+	ok(PoolBuff.set_state(st, bx.box_id, first, ItemPool.ItemState.HIDDEN)["ok"], "第一件设隐藏")
+
+	var d := bx.to_dict()
+	var back := Box.from_dict(d, 0)
+	ok(back != null, "能读回来")
+	eq(back.item_pool.extra_item_ids, [&"extra_q2"] as Array[StringName], "追加物品读回来了")
+	eq(back.item_pool.state_of(&"extra_q2"), ItemPool.ItemState.DISABLED, "禁用状态读回来了")
+	eq(back.item_pool.state_of(first), ItemPool.ItemState.HIDDEN, "隐藏状态读回来了")
+	eq(back.item_pool.base_items.size(), bx.item_pool.base_items.size(), "池子件数一致")
+	eq(back.to_dict(), d, "往返后 to_dict 逐项一致（字节级稳定）")

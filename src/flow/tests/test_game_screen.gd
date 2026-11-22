@@ -25,6 +25,8 @@ func _ready() -> void:
 	_reset_world()
 	await _test_structure()
 	_reset_world()
+	await _test_top_bar_currency()
+	_reset_world()
 	await _test_warehouse_page()
 	_reset_world()
 	await _test_wish_machine_device()
@@ -32,6 +34,8 @@ func _ready() -> void:
 	await _test_wish_machine_open()
 	_reset_world()
 	await _test_wish_machine_layout()
+	_reset_world()
+	await _test_pool_editor()
 	_reset_world()
 	await _test_market_page()
 	_reset_world()
@@ -64,6 +68,11 @@ func ok(cond: bool, what: String) -> void:
 
 func eq(a, b, what: String) -> void:
 	ok(a == b, "%s  期望=%s 实际=%s" % [what, str(b), str(a)])
+
+
+## 浮点近似（期望 / 概率这类数不能用 `==` 断言）。
+func near(a: float, b: float, eps: float, what: String) -> void:
+	ok(absf(a - b) <= eps, "%s  期望≈%.4f 实际=%.4f" % [what, b, a])
 
 
 ## 每个用例都从干净的世界开始（盲盒占位/货币余额会跨用例串账，见 v0.26 的测试教训）。
@@ -163,7 +172,62 @@ func _test_structure() -> void:
 	await get_tree().process_frame
 	ok(is_instance_valid(wish_ref) and scr.page_node("WishPage") == wish_ref,
 		"refresh() 不会重建页（页引用保持有效）")
+
+	# ★ v0.43：tab 头被加大了（默认 16px / 窄内边距在 1920×1080 上小到看不清）
+	var bar: TabBar = tabs.get_tab_bar()
+	ok(bar != null, "能拿到内部 TabBar（主题覆盖必须打在它身上）")
+	if bar != null:
+		eq(bar.get_theme_font_size("font_size"), scr.TAB_FONT_SIZE,
+			"tab 字体 = %d（默认 16）" % scr.TAB_FONT_SIZE)
+		var rect := bar.get_tab_rect(0)
+		ok(rect.size.y >= 40.0, "tab 高度 ≥ 40px（实际 %.0f）" % rect.size.y)
+		ok(rect.size.x >= 90.0, "tab 宽度 ≥ 90px（实际 %.0f）" % rect.size.x)
+
+	# ★ v0.43：右上角有金币 / 原石读数（这是"钱够不够"的唯一常驻入口）
+	ok(scr.get_node_or_null("TopBar/Gold") != null, "右上角有金币标签")
+	ok(scr.get_node_or_null("TopBar/Gem") != null, "右上角有原石标签")
 	scr.queue_free()
+	await get_tree().process_frame
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ①b 右上角：金币 / 原石（★ v0.43）
+# ══════════════════════════════════════════════════════════════════════════════
+
+func _test_top_bar_currency() -> void:
+	print("— §3.0b 右上角读数：金币 / 原石")
+	_reset_world()
+	var st := GameState.new_game()
+	var scr = await _make_screen()
+	scr.bind_state(st)
+	await get_tree().process_frame
+
+	var gold: Label = scr.get_node("TopBar/Gold")
+	var gem: Label = scr.get_node("TopBar/Gem")
+	eq(gold.text, "金币 10000", "开局金币 10000（读 02 的余额）")
+	eq(gem.text, "原石 10000", "开局原石 10000（读 02 的余额）")
+	eq(gold.mouse_filter, Control.MOUSE_FILTER_IGNORE, "金币标签不吃鼠标（不挡 tab 点击）")
+	eq(gem.mouse_filter, Control.MOUSE_FILTER_IGNORE, "原石标签不吃鼠标（不挡 tab 点击）")
+
+	print("— §3.0b 余额变了 ⇒ refresh 后读数跟着变（本层不缓存）")
+	ItemService.grant_currency(ItemConstants.CURRENCY_GOLD, 250,
+		ItemConstants.CURRENCY_SOURCE_TASK)
+	ItemService.transact([{"op": ItemConstants.OP_CURRENCY,
+		"kind": ItemConstants.CURRENCY_GEM, "delta": -400}])
+	scr.refresh()
+	await get_tree().process_frame
+	eq(gold.text, "金币 10250", "金币 +250 后刷新")
+	eq(gem.text, "原石 9600", "原石 −400 后刷新")
+
+	print("— §3.0b 无状态时也不崩（读数显示 0）")
+	_reset_world()
+	ItemService.currencies.clear()
+	var scr2 = await _make_screen()
+	await get_tree().process_frame
+	eq(scr2.get_node("TopBar/Gold").text, "金币 0", "空余额 ⇒ 金币 0")
+	eq(scr2.get_node("TopBar/Gem").text, "原石 0", "空余额 ⇒ 原石 0")
+	scr.queue_free()
+	scr2.queue_free()
 	await get_tree().process_frame
 
 
@@ -378,7 +442,17 @@ func _test_wish_machine_layout() -> void:
 	var ctrl: Node = wish.get_node("Controller")
 	var s: Dictionary = ctrl.snapshot()
 	ok(String(s["box_uses"]).find("剩余开盒次数") >= 0, "使用次数读得到（%s）" % s["box_uses"])
-	ok(String(s["box_expectation"]).find("数学期望") >= 0, "数学期望读得到（%s）" % s["box_expectation"])
+	# ★ v0.47：期望改成**金币口径**，且扣掉模块成本
+	ok(String(s["box_expectation"]).find("单次毛期望") >= 0, "单次毛期望读得到（%s）" % s["box_expectation"])
+	ok(String(s["box_expectation"]).find("金币") >= 0, "用金币作单位（不再是 TVU）")
+	ok(String(s["box_expectation"]).find("净期望") >= 0, "净期望读得到")
+	ok(float(s["expectation_gold_per_open"]) > 0.0, "单次毛期望 > 0（%.2f）" % s["expectation_gold_per_open"])
+	eq(int(s["expectation_module_cost"]), 0, "新盒子没镶模块 ⇒ 模块成本 0")
+	near(
+		float(s["expectation_net"]),
+		float(s["expectation_gold_per_open"]) * float(bx.uses_remaining),
+		1e-6, "净期望 == 单次毛期望 × 剩余次数（无模块成本时）"
+	)
 
 	# ── 左栏中段：模块镶嵌（真镶嵌、真扣金币、真进位子）─────────────────────────
 	print("— §3.2b 模块镶嵌：位子按 socket_count 渲染，镶嵌真扣金币")
@@ -386,7 +460,8 @@ func _test_wish_machine_layout() -> void:
 	# ⚠️ `"%s" % 数组` 会被 GDScript 当成**参数列表**展开（元素多于一就报
 	#    "not all arguments converted"）⇒ 打印数组必须先 `str()`。
 	ok((s["module_options"] as Array).size() > 0, "有可镶嵌的模块（%s）" % str(s["module_options"]))
-	eq(s["unsocket_disabled"], true, "空位子 ⇒ 拆卸置灰")
+	eq(left.get_node_or_null("ModuleSection/ModuleButtons/UnsocketButton"), null,
+		"★ v0.44：**「拆卸」按钮已从场景里删除**")
 
 	var gold_before := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
 	var rev_before := bx.item_pool.revision
@@ -398,17 +473,23 @@ func _test_wish_machine_layout() -> void:
 	ok(bx.modules[0] != null, "第 1 位真的装上了模块")
 	eq(bx.item_pool.revision, rev_before + 1, "revision +1（池子编辑的唯一失效依据）")
 	ok(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD) < gold_before, "金币真扣")
-	eq(s2["unsocket_disabled"], false, "位子已占用 ⇒ 拆卸可点")
 
-	print("— §3.2b 拆卸：置空且零返还")
-	var gold_mid := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
-	var unsocket_btn: Button = left.get_node("ModuleSection/ModuleButtons/UnsocketButton")
-	unsocket_btn.pressed.emit()
+	# ★ v0.47：镶了模块 ⇒ 模块成本 C 进读数，净期望 = 毛期望 × 剩余次数 − C
+	eq(int(s2["expectation_module_cost"]), 20, "模块成本 = 该模块的 gold_cost（20）")
+	near(
+		float(s2["expectation_net"]),
+		float(s2["expectation_gold_per_open"]) * float(bx.uses_remaining) - 20.0,
+		1e-6, "净期望 = 单次毛期望 × 剩余次数 − 20（一次性全额扣，不摊）"
+	)
+	eq(bx.modules[0].module_id, &"mod_ban_home_q1", "装的是 20 金币的那个模块")
+
+	print("— §3.2b 占用位终局：镶上即锁定，UI 不再提供任何取下入口")
+	# 选中的仍是第 0 位（已占用）⇒ 镶嵌按钮必须置灰
+	scr.refresh()
 	await get_tree().process_frame
 	var s3: Dictionary = ctrl.snapshot()
-	ok(String(s3["result"]).find("已拆卸") >= 0, "拆卸成功（%s）" % s3["result"])
-	eq(bx.modules[0], null, "位子被置空")
-	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD), gold_mid, "拆卸不返还金币（D8）")
+	eq(s3["socket_disabled"], true, "选中已占用的位子 ⇒ 镶嵌置灰（没有替换）")
+	eq(bx.modules[0].module_id, &"mod_ban_home_q1", "原位子的模块名 = mod_ban_home_q1（原封不动）")
 
 	# ── 中栏：干员出战切换（免费、即时影响排除）───────────────────────────────
 	print("— §3.2b 中栏干员：出战切换影响排除目标")
@@ -422,6 +503,75 @@ func _test_wish_machine_layout() -> void:
 	var op1: Dictionary = ctrl.snapshot()["operator"]
 	eq(op1["active"], false, "点击后撤回")
 	ok(String(op1["bans"]).find("无") >= 0, "未出战 ⇒ 排除目标清空（%s）" % op1["bans"])
+	scr.queue_free()
+	await get_tree().process_frame
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ④c 许愿机页：池子（显示 / 隐藏 / 禁用 + 添加）★ v0.45
+# ══════════════════════════════════════════════════════════════════════════════
+
+func _test_pool_editor() -> void:
+	print("— §3.2c 池子：三态轮转真改池子，摘要跟着更新")
+	_reset_world()
+	OperatorService.reset()
+	var st := GameState.new_game()
+	var boxes := GachaService.grant_box(st, &"series_01", 1, &"test")
+	var bx: Box = boxes[0]
+	var scr = await _make_screen()
+	scr.bind_state(st)
+	await get_tree().process_frame
+	var wish: Node = scr.page_node("WishPage")
+	var ctrl: Node = wish.get_node("Controller")
+	var left: Node = wish.get_node("Columns/Left")
+
+	ok(left.get_node_or_null("PoolSection/PoolPicker") != null, "左栏有「池子」段")
+
+	var s: Dictionary = ctrl.snapshot()
+	var n0: int = (s["pool_options"] as Array).size()
+	eq(n0, bx.item_pool.base_items.size(), "池子列表 = 池内件数（%d）" % n0)
+	ok(String(s["pool_summary"]).find("池子 %d 件" % n0) >= 0, "摘要报出件数（%s）" % s["pool_summary"])
+
+	var cycle_btn: Button = left.get_node("PoolSection/PoolButtons/PoolCycleButton")
+	var first_id: StringName = bx.item_pool.base_items[0].item_id
+
+	print("— §3.2c 轮转：显示 → 隐藏 → 禁用 → 显示")
+	cycle_btn.pressed.emit()
+	await get_tree().process_frame
+	var s1: Dictionary = ctrl.snapshot()
+	eq(bx.item_pool.state_of(first_id), ItemPool.ItemState.HIDDEN, "第 1 件变成隐藏")
+	ok(String(s1["pool_state_text"]).find("隐藏") >= 0, "状态行说明是隐藏（%s）" % s1["pool_state_text"])
+	ok(String(s1["pool_summary"]).find("隐藏 1") >= 0, "摘要：隐藏 1（%s）" % s1["pool_summary"])
+
+	cycle_btn.pressed.emit()
+	await get_tree().process_frame
+	var s2: Dictionary = ctrl.snapshot()
+	eq(bx.item_pool.state_of(first_id), ItemPool.ItemState.DISABLED, "再轮转 → 禁用")
+	ok(String(s2["pool_summary"]).find("禁用 1") >= 0, "摘要：禁用 1（%s）" % s2["pool_summary"])
+	# 禁用 ⇒ 真的退出分布
+	var ps := PoolService.get_pool_state(st, bx.box_id)
+	eq(ps.weights_bp.has(first_id), false, "禁用项已退出 weights_bp")
+	ok(ps.is_zero_sum(), "其余物品重新归一，Σ == 10000")
+
+	cycle_btn.pressed.emit()
+	await get_tree().process_frame
+	var s3: Dictionary = ctrl.snapshot()
+	eq(bx.item_pool.state_of(first_id), ItemPool.ItemState.SHOWN, "再轮转 → 回到显示")
+	ok(String(s3["pool_summary"]).find("隐藏 0") >= 0, "摘要：隐藏 0（%s）" % s3["pool_summary"])
+	ok(String(s3["pool_summary"]).find("禁用 0") >= 0, "摘要：禁用 0")
+
+	print("— §3.2c 添加：把池外物品加进池子")
+	var add_n: int = (s3["add_options"] as Array).size()
+	ok(add_n > 0, "有可添加的候选（%d 件池外物品）" % add_n)
+	var add_btn: Button = left.get_node("PoolSection/AddRow/AddButton")
+	add_btn.pressed.emit()
+	await get_tree().process_frame
+	var s4: Dictionary = ctrl.snapshot()
+	eq((s4["pool_options"] as Array).size(), n0 + 1, "池子 +1 件")
+	eq(bx.item_pool.base_items.size(), n0 + 1, "ItemPool 真的多了一件")
+	eq(bx.item_pool.extra_item_ids.size(), 1, "记进 extra_item_ids（要落盘）")
+	ok(String(s4["result"]).find("已加入池子") >= 0, "结果行报告加入成功（%s）" % s4["result"])
+	ok((s4["add_options"] as Array).size() < add_n, "候选列表少了一件（它已经在池里）")
 	scr.queue_free()
 	await get_tree().process_frame
 

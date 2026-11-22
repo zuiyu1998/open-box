@@ -23,7 +23,7 @@ extends Resource
 ## **v0.14：使用次数 = 这个盒子的总寿命预算**（每盒可变、**入档**）。
 ##
 ## **两个消耗点共用这一个计数器**（各扣 1）：
-##   · **装模块**（`PoolService.socket()` 成功镶嵌时）；
+##   · **装模块**（`PoolBuff.apply_module()` 成功镶嵌时）；
 ##   · **兑现**（`GachaService.redeem()` 成功兑现时）。
 ## **失败一律不扣**（校验失败不得消耗次数）。
 ##
@@ -149,6 +149,9 @@ func to_dict() -> Dictionary:
 			"regular_count": item_pool.regular_count,
 			"socket_count": item_pool.socket_count,
 			"revision": item_pool.revision,
+			# ★ v0.45：追加物品与三态必须落盘（否则读档丢掉玩家的编辑）
+			"extra_item_ids": item_pool.extra_item_ids.duplicate(),
+			"item_states": item_pool.item_states.duplicate(),
 		}
 	return {
 		"box_id": box_id,
@@ -193,6 +196,25 @@ static func from_dict(d: Dictionary, uses_when_missing: int = 0) -> Box:
 		b.item_pool.regular_count = int(pd.get("regular_count", b.item_pool.regular_count))
 		b.item_pool.socket_count = int(pd.get("socket_count", b.item_pool.socket_count))
 		b.item_pool.revision = int(pd.get("revision", 0))
+		# ★ v0.45：池子成员不再是"完全由 series_id 推出"——**追加的物品必须读回来**，
+		#   否则玩家的编辑会在读档时静默丢失（比"少了三态"更严重）。
+		var extras = pd.get("extra_item_ids", [])
+		if extras is Array:
+			for raw in (extras as Array):
+				var def := ItemCatalog.get_def(StringName(raw))
+				if def == null:
+					push_warning("Box.from_dict: 追加物品 `%s` 已不在内容表里，跳过（不静默替换）" % raw)
+					continue
+				b.item_pool.base_items.append(def)
+				b.item_pool.extra_item_ids.append(def.item_id)
+				b.item_pool.regular_count = maxi(b.item_pool.regular_count, b.item_pool.base_items.size())
+		# ★ v0.45：三态（缺键 = 全部显示）
+		var states = pd.get("item_states", {})
+		if states is Dictionary:
+			for k in (states as Dictionary).keys():
+				var st := int((states as Dictionary)[k])
+				if st == ItemPool.ItemState.HIDDEN or st == ItemPool.ItemState.DISABLED:
+					b.item_pool.item_states[String(k)] = st
 	b.modules = modules_from_sparse_array(d.get("modules", []), b.item_pool.socket_count)
 	b.source = StringName(d.get("source", ""))
 	b.acquired_tick = int(d.get("acquired_tick", 0))

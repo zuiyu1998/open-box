@@ -30,7 +30,7 @@ func _ready() -> void:
 	_test_batch_precheck()
 	_test_upgrade()
 	_test_level_gate_only_for_opening()
-	_test_socket_gold_and_replace()
+	_test_socket_gold_and_occupied_slot()
 	_test_starting_state_has_no_deadlock()
 
 	print("\n=== 结果：%d 通过 / %d 失败 ===" % [_pass, _fail])
@@ -210,9 +210,10 @@ func _test_no_device_gate() -> void:
 	eq(bx.occupied_count(), 0, "modules 没被写入")
 	ok(not DeviceService.has_device(st), "has_device() 为 false")
 
-	# 拆卸不受门槛约束（01 侧入口，核心 §4.4 裁定⑪）
-	var u := PoolService.unsocket(st, bx.box_id, 0)
-	eq(u["reason"], PoolService.R_SLOT_EMPTY, "拆卸不看设备（报的是 slot_empty，不是 no_device）")
+	# ★ v0.44：拆卸已删除 ⇒ 「拆卸不受门槛约束」这一条随之消失；
+	#   取而代之：**没有设备时，镶嵌这条入口也照旧被门槛拦下**（已有断言覆盖）。
+	#   这里只补一条：此时位子仍空着、状态未被任何"拆"动作触碰。
+	eq(bx.occupied_count(), 0, "位子仍是空的（没有任何拆/装发生）")
 
 
 func _test_open_cost_formula() -> void:
@@ -374,8 +375,8 @@ func _test_level_gate_only_for_opening() -> void:
 	ok(DeviceService.can_open(st, bx3), "等级 2（上限 3）⇒ 品质 3 可开")
 
 
-func _test_socket_gold_and_replace() -> void:
-	print("— T16：镶嵌的金币成本来自模块字段；替换再付一次；拆卸零返还（§5.3）")
+func _test_socket_gold_and_occupied_slot() -> void:
+	print("— T16：镶嵌的金币成本来自模块字段；★ v0.44 占用位终局（无替换、无拆卸）")
 	var f := _new_state(1000, MOD_GOLD * 2, 1)
 	var st: GameState = f["state"]
 	var bx: Box = f["box"]
@@ -387,16 +388,15 @@ func _test_socket_gold_and_replace() -> void:
 		"**金币恰好减少模块的 `gold_cost`（20）**")
 	eq(ItemService.instances.size(), insts, "**不消耗任何物品**")
 
-	# 替换 = 拆 + 装 ⇒ 再付一次，且旧模块什么都不返还
+	# ★ v0.44：替换入口已删除 ⇒ 往同一个位子再镶一律拒绝，且分文不动
 	var before := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
-	ok(DeviceService.replace(st, bx.box_id, &"mod_ban_sd5", 0)["ok"], "替换成功")
-	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD), before - MOD_GOLD,
-		"替换**再付一次**新模块的金币（旧模块不返还）")
-	eq(
-		bx.uses_remaining,
-		SeriesDef.expected_initial_uses(2) - 2,
-		"两次镶嵌共扣 2 次寿命（原装 1 + 新装 1；拆卸不退还那一次）"
-	)
+	var uses_before := bx.uses_remaining
+	var r := DeviceService.socket(st, bx.box_id, &"mod_ban_sd5", 0)
+	ok(not r["ok"], "往占用位再镶 ⇒ 拒绝（没有「替换」这条路）")
+	eq(r["reason"], PoolService.R_SLOT_OCCUPIED, "原因码 = slot_occupied")
+	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD), before, "金币未扣")
+	eq(bx.uses_remaining, uses_before, "寿命未扣")
+	eq(bx.occupied_count(), 1, "占用数不变")
 
 	# 金币不足 ⇒ 链首拒绝
 	var f2 := _new_state(1000, MOD_GOLD - 1, 1)
@@ -408,8 +408,8 @@ func _test_socket_gold_and_replace() -> void:
 	eq(bx2.occupied_count(), 0, "modules 未写入")
 	eq(bx2.uses_remaining, SeriesDef.expected_initial_uses(2), "寿命未扣")
 
-	# 拆卸零返还 + 仓库满也成功
-	var full := _new_state(1000, MOD_GOLD, 1)
+	# 仓库满也不影响镶嵌（它不产出实例）
+	var full := _new_state(1000, MOD_GOLD * 2, 1)   # ★ 两个模块的预算：两次镶嵌各扣一次
 	var st3: GameState = full["state"]
 	var bx3: Box = full["box"]
 	ItemService.warehouse_capacity = 5
@@ -417,11 +417,10 @@ func _test_socket_gold_and_replace() -> void:
 	for _i in 2:
 		ItemService.grant(&"s01_01", {"kind": ItemConstants.KIND_UNLOCK})
 	eq(ItemService.warehouse_usage()["used"], 5, "仓库占满（2 件 × size 2 + 盲盒 1 单位）")
-	var gold3 := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
 	var n3 := ItemService.instances.size()
-	ok(PoolService.unsocket(st3, bx3.box_id, 0)["ok"], "**仓库满也能拆卸**（零返还 ⇒ 无空间问题）")
-	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD), gold3, "拆卸不返还金币")
-	eq(ItemService.instances.size(), n3, "拆卸不产生实例")
+	# 空位仍可镶 ⇒ 证明"仓库满"不构成门槛
+	ok(DeviceService.socket(st3, bx3.box_id, &"mod_ban_sd5", 1)["ok"], "**仓库满也能镶到另一个空位**")
+	eq(ItemService.instances.size(), n3, "不产生实例")
 
 
 func _test_starting_state_has_no_deadlock() -> void:

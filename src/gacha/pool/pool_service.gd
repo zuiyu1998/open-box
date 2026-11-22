@@ -28,6 +28,8 @@ const R_NO_DEVICE := &"no_device"
 const R_BAD_SLOT := &"bad_slot"
 const R_UNKNOWN_MODULE := &"unknown_module"
 const R_SLOT_OCCUPIED := &"slot_occupied"
+## ★ **v0.44 起为墓碑**：`unsocket()` 已删除 ⇒ 不再有"拆空位"这个失败场景。
+## 保留常量只为不让历史原因码"消失得无影无踪"（旧日志 / 旧测试仍能解释它）。
 const R_SLOT_EMPTY := &"slot_empty"
 const R_BAD_SHAPE := &"modules_shape"              # V7 / C4①（定长长度）
 const R_UNKNOWN_TARGET := &"unknown_target"        # 目标物品不在池内（**不是** V1——V1 已作废）
@@ -43,6 +45,15 @@ const R_BELOW_C6 := &"below_c6_floor"              # 可产出物品数 < 3
 const R_CURRENCY_INSUFFICIENT := &"currency_insufficient"   # ★ v0.19：金币不足（镶嵌的唯一花钱失败）
 const R_POOL_INVALID := &"pool_invalid"
 const R_BAD_SERIES := &"bad_series"
+## ★ v0.45：池子成员 / 三态的拒绝码
+const R_UNKNOWN_ITEM := &"unknown_item"                 # `item_id` 没在 `ItemCatalog` 注册
+const R_ITEM_ALREADY_IN_POOL := &"item_already_in_pool" # 已经在池中，不重复加
+const R_ITEM_NOT_IN_POOL := &"item_not_in_pool"         # 要改状态的物品不在这池子里
+const R_BAD_STATE := &"bad_item_state"                   # 状态值越界
+## ★ v0.46：**不经 `PoolBuff` 直接调内部写入** ⇒ 拒绝。
+## 这是"唯一写入门面"的**运行时兜底**（不是靠注释约定）：`PoolBuff` 写入时开门、写完关门，
+## 任何其它调用方拿到的永远是这一枚码。
+const R_WRITE_DENIED := &"write_denied"
 
 
 ## 变更信号（01 §4.5）。静态类自身不能发信号，故由一个单例承载：
@@ -57,6 +68,19 @@ static var bus: ChangeBus = ChangeBus.new()
 
 ## box_id -> PoolState。**内存缓存、不入档**：`revision` 对不上就重算（07 的缓存键 = (box_id, revision)）。
 static var _states: Dictionary = {}
+
+## ★ v0.46：**写入闸门**——只有 `PoolBuff` 在写入期间把它打开。
+## `_write_*` 在闸门关闭时一律拒绝（`write_denied`），于是"物品池 buff 是唯一接口"
+## **在运行时成立**，而不是一条只能靠自觉的注释约定。
+static var _write_gate: bool = false
+
+
+static func _open_write_gate() -> void:
+	_write_gate = true
+
+
+static func _close_write_gate() -> void:
+	_write_gate = false
 
 
 ## ★ v0.40（15 干员）：**出战干员的额外排除回调**。
@@ -110,8 +134,8 @@ static func get_item_pool(state: GameState, box_id: String) -> ItemPool:
 	return b.item_pool if b != null else null
 
 
-## 取 `Box.modules`——**独立只读入口**（核心 §4.1.2：模块列表可以独立于池子被查看 / 替换 / 拆卸）。
-## 返回副本：改它**不影响盒子**（写入只能走 `socket` / `unsocket`）。
+## 取 `Box.modules`——**独立只读入口**（核心 §4.1.2：模块列表可以独立于池子被查看）。
+## 返回副本：改它**不影响盒子**（写入只能走 `socket`——v0.44 起这是**唯一**写路径）。
 static func get_modules(state: GameState, box_id: String) -> Array[Module]:
 	var b := _find(state, box_id)
 	if b == null:
@@ -164,38 +188,35 @@ static func drop_all_cached_states() -> void:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  写入入口：镶嵌 / 替换 / 拆卸
+#  写入入口：镶嵌（**唯一写路径**）
 # ══════════════════════════════════════════════════════════════════════════════
 
 ## 镶嵌：把 `Module` 写进该盒 `modules` 的**第 `slot` 位**（该位必须是空项）。
 ##
-## · 玩家可指定**任意空位**；往**占用位**放必须**显式替换**（先 `unsocket`），**不做隐式覆盖**；
-## · 制造消耗 = **一次 `ItemService.transact()`**：任一 `item_cost` 条目实例不足即**整体失败**
-##   （原子、全有或全无）；**制造侧不做空间预检**——它只消耗不产出，不因仓库满而失败；
+## · 玩家可指定**任意空位**；**往占用位放一律拒绝（`slot_occupied`）**——
+##   ★ **v0.44（用户裁决）：拆卸与替换都已去掉**，**模块一旦镶上就永久锁定在这个位子上，
+##   直到盒子被摧毁**；没有任何"取下来换一个"的路径（下方 `unsocket` 的墓碑说明）。
+## · **成本 = 该模块的金币**（`ModuleDef.gold_cost`，经 `02` 的一次 `transact` 扣除）；
+##   余额不足 ⇒ `currency_insufficient`，**什么都不改**（在写 `modules` / 扣寿命之前返回）；
 ## · **镶嵌即锁定进这个盒子**：配置**下一个盒子**需要**新的模块**（不存在"模块库存"）；
-## · **★ 设备是硬门槛**（v0.14 裁决；v0.17：**玩家侧入口是 `DeviceService.socket()` / `replace()`——薄入口只做"校验 + 转发"**，
+## · **★ 设备是硬门槛**（v0.14 裁决；v0.17 起玩家侧入口是 `DeviceService.socket()`——薄入口只做"校验 + 转发"，
 ##   本方法是**执行者**，这里的校验是**同一枚码的兜底**）——`state.has_device() == false` ⇒ 拒绝 `no_device`，
 ##   **一次寿命都不扣**（门槛检查排在所有消耗之前）；
 ## · **★ v0.14：装模块也消耗这个盒子的一次使用**（与兑现共用同一个计数器）——
-##   归零即摧毁；**失败一律不扣次数**（校验失败、制造成本不足都在消耗之前返回）；
-## · ⚠️ **v0.19 待改（本方法当前还是 v0.18 的形态）**：① **成本从"销毁物品"改为"扣金币"**——
-##   改调 `ItemService.transact([{ op = &"currency", kind = &"gold", delta = -该模块的 gold_cost }])`
-##   （**金额来自 `ModuleDef.gold_cost`**；**旧字段 `item_cost` / `ModuleCost` 与 `consume_by_filter` 调用一并删除**，核心 §16.14）；
-##   ② 余额不足 ⇒ **`currency_insufficient`**（不扣生命、不写 `modules`）；③ 其余顺序不变（写 `modules` → 扣 1 次寿命）。
-## `unsocket`：**★ v0.19：什么都不返还**（旧口径"返还 `floor(cost × 0.5)` 材料的新实例"**整条作废**，核心 §15 D8）
-##   ⇒ **它不再产出任何实例、不再需要空间预检、也不必进事务**（`grant(kind = &"refund")` 失去调用方）。
+##   归零即摧毁；**失败一律不扣次数**（校验失败、金币不足都在消耗之前返回）；
 ## · 返回 `{ok, reason, state, errors, destroyed}`：`destroyed == true` 表示这次镶嵌把盒子扣到 0、
 ##   盒子已被摧毁（**即使它从未兑现过**，那是合法路径）。
 ##
 ## `[登记]` **04 设备系统是"镶嵌（装模块）的入口 / 工具路径"，本方法仍是池子数据的唯一写入方**——
 ##   **"唯一写入方"这条不变量不因装置成为工具而改变**（v0.17：`04` 负责"开启盲盒 + 镶嵌模块"两个入口；
 ##   **v0.18 又加了第三件"设备升级"**）。
-##   **单独拆卸（只拆不装）不是 `04` 的动作** ⇒ `unsocket` **没有 `04` 侧的入口，也不受设备门槛约束**。
 ##   ⚠️ **v0.18**：**镶嵌既不花原石、也不看设备等级**（等级门控只作用于"开盒"）⇒ **本方法的语义一字未改**。
 ##   **未定项**：「是否必须先有装置才能镶嵌」（即装置成为镶嵌的**前置门槛**，而不只是 UI 路径）
 ##   —— 用户原话"设备系统**用于**给盲盒添加模块"读起来像工具路径，但"必须先有装置"也说得通。
 ##   **本实现按"工具路径"落地：不设任何装置门槛**；该判定留给 **04 重写**那一轮。
-static func socket(state: GameState, box_id: String, module_id: StringName, slot: int) -> Dictionary:
+static func _write_module(state: GameState, box_id: String, module_id: StringName, slot: int) -> Dictionary:
+	if not _write_gate:
+		return _reject(R_WRITE_DENIED)
 	var b := _find(state, box_id)
 	if b == null:
 		return _reject(R_BOX_NOT_FOUND)
@@ -216,7 +237,8 @@ static func socket(state: GameState, box_id: String, module_id: StringName, slot
 	if mdef == null:
 		return _reject(R_UNKNOWN_MODULE)
 	if b.modules[slot] != null:
-		# 显式替换：先 unsocket 那一位，**不做隐式覆盖**
+		# ★ v0.44：位子已占用 ⇒ 一律拒绝。**模块镶上即永久锁定**（拆卸与替换都已删除），
+		#   所以这里不是"先拆再装"的提示，而是**终局拒绝**。
 		return _reject(R_SLOT_OCCUPIED)
 
 	# 先做**计划校验**（V2 / V4 / V5 / V6 / V7 / C6），再花钱——非法计划不许产生任何消耗
@@ -265,49 +287,123 @@ static func socket(state: GameState, box_id: String, module_id: StringName, slot
 	}
 
 
-## 拆卸：把该盒 `modules` 的第 `slot` 位**置空**（**定长长度不变**）。
+## ── 墓碑：`unsocket()` 已于 **v0.44 删除**（用户裁决）────────────────────────────────
 ##
-## ★ **拆卸不要求设备**：v0.14 裁决把设备门槛只摆在**两个消耗寿命的动作**上（开盒、装模块），
-##   拆卸既不消耗寿命、也不消耗设备。
+## **拆卸与替换都不再存在**：模块一旦镶嵌就**永久锁定在那个位子上**，直到盒子被摧毁
+## （寿命归零 ⇒ 盒子连同 `modules` 一起消失，见 `GameState.remove_box()`）。
 ##
-## ★★ **v0.19（用户裁决）：拆卸什么都不返还。**
-##   · 旧口径"返还 `floor(item_cost × 0.5)` 材料"**整条作废**（核心 §15 **D8**）——
-##     模块的成本现在是**金币**，而**金币也不退**；
-##   · ⇒ **本方法不再产出任何实例** ⇒ **不需要空间预检、也不必进事务**（裁决 17 在拆卸这一半
-##     失去对象；"主动操作放不下就整笔拒绝"现在只剩转化一个适用对象）；
-##   · `source.kind = &"refund"` 因此**失去调用方**（保留为保留值，墓碑见 `02-item.md` §5.7）。
+## **为什么整条路径删掉、而不是留着不用**：
+##   · 拆卸是"能把模块取下来"的唯一入口，留着它就等于留了一条**绕过新规则的后门**
+##     （将来任何人写一行 `unsocket(...)` 就能把永久承诺改回可逆，而没有任何断言会拦下）；
+##   · 它的历史语义已经两次作废（v0.19 起零返还、v0.44 起连动作本身取消），
+##     留着只会让读者以为"还能拆，只是不返还"。
 ##
-## ★ **拆卸不退还寿命次数**（D20② 不变）：它根本不碰 `uses_remaining`
-##   ⇒ **替换（拆 + 装）净扣 1 次寿命 ＋ 再付一次新模块的金币**。
-static func unsocket(state: GameState, box_id: String, slot: int) -> Dictionary:
+## **不要把它加回来**（与 `UNSOCKET_REFUND_RATE` 的墓碑同一纪律）。若将来要恢复"可替换"，
+## 那必须是**一条新裁决 + 一条新的、显式计价与确认的写入路径**（例如"覆盖式镶嵌"），
+## 不能靠复活这个函数。
+##
+## 连带失效的东西（都保留为墓碑，不再有产出路径）：`R_SLOT_EMPTY`（没有"拆空位"这件事了）、
+## `source.kind = &"refund"`（v0.19 起就没有调用方）、`DeviceService.replace()`（见 04 的墓碑）。
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ★ v0.45：池子成员与物品三态（**可编辑字段**，不走模块）
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# 用户裁决："**物品池中可以添加生成的物品，可以设置物品池中的物品的显示、隐藏、禁用**"
+# （追问确认：做成**池子上的可编辑字段**，不是新的模块类型；**禁用 = 出候选集并重新归一、不产生 void**；
+#  **隐藏 = 仍参与抽取，只是不在面板列出**；**添加 = 从已注册物品里挑**）。
+#
+# 与模块的分工（**不得混用**）：
+#   · **模块 BAN**：需要镶嵌、花金币、扣寿命、永久；被排除质量 **40% 蒸发到 void、60% 摊回**；
+#   · **本节的「禁用」**：直接改池子字段、**免费、可随时改回**；被禁用的物品**整体退出分布**，
+#     其余物品在 10000 bp 里**重新归一**，**不产生任何 void**。
+# 两者都能让一件物品"抽不到"，但**代价结构与概率后果完全不同**——所以是两个旋钮，不是一个。
+
+## 新物品进池子（`item_id` 必须已在 `ItemCatalog` 注册；不得已在池中）。
+##
+## 返回 `{ok, reason, state, errors, destroyed}`（与 `socket()` 同形，便于上层统一处理）。
+static func _write_add_item(state: GameState, box_id: String, item_id: StringName) -> Dictionary:
+	if not _write_gate:
+		return _reject(R_WRITE_DENIED)
 	var b := _find(state, box_id)
 	if b == null:
 		return _reject(R_BOX_NOT_FOUND)
 	if b.location != ItemConstants.LOC_WAREHOUSE:
-		# ★ v0.26：邮件里的盒子连"拆"也不做（配置权属于"可用持有"）——不消耗任何东西
 		return _reject(ItemConstants.REASON_BOX_IN_MAIL)
-	if slot < 0 or slot >= b.modules.size():
-		return _reject(R_BAD_SLOT)
-	var m := b.modules[slot]
-	if m == null:
-		return _reject(R_SLOT_EMPTY)
-	var mdef := GachaCatalog.get_module(m.module_id)
-	if mdef == null:
-		# 该模块已下线：不静默当基础池（那会静默吃掉玩家投入的模块成本）
-		return _reject(R_UNKNOWN_MODULE)
+	if b.item_pool == null:
+		return _reject(R_POOL_INVALID)
+	if ItemCatalog.get_def(item_id) == null:
+		return _reject(R_UNKNOWN_ITEM)
+	if b.item_pool.has_item(item_id):
+		return _reject(R_ITEM_ALREADY_IN_POOL)
+	if not b.item_pool.add_item(ItemCatalog.get_def(item_id)):
+		return _reject(R_POOL_INVALID)
 
-	b.modules[slot] = null                        # 置空；**长度不变**
 	b.item_pool.revision += 1
 	var s := _compute(b, b.item_pool.revision)
 	_states[box_id] = s
-	# ★ v0.14：**拆卸不消耗使用次数**（消耗点只有"装模块"与"兑现"两个）；
-	#   因此 `destroyed` 恒为 false——盒子的寿命只由那两个动作决定。
-	# ★ v0.19：也**没有任何物品 / 资源变动**（零返还）。
 	bus.pool_changed.emit(box_id, b.item_pool.revision)
 	return {
 		"ok": true, "reason": R_OK, "state": s, "errors": [] as Array[String],
 		"destroyed": false,
 	}
+
+
+## 改一件物品的三态（`ItemPool.ItemState`）。
+##
+## 拒绝条件（**都不改任何状态**）：盒子不存在 / 在邮件 / `item_id` 不在池中 / 状态越界 /
+## **禁用后会让"可产出数"掉到 3 以下**（C6 下限，`regular_count − 3` 的同一枚码 `below_c6_floor`）。
+static func _write_set_state(
+	state: GameState, box_id: String, item_id: StringName, new_state: int
+) -> Dictionary:
+	if not _write_gate:
+		return _reject(R_WRITE_DENIED)
+	var b := _find(state, box_id)
+	if b == null:
+		return _reject(R_BOX_NOT_FOUND)
+	if b.location != ItemConstants.LOC_WAREHOUSE:
+		return _reject(ItemConstants.REASON_BOX_IN_MAIL)
+	if b.item_pool == null:
+		return _reject(R_POOL_INVALID)
+	if not b.item_pool.has_item(item_id):
+		return _reject(R_ITEM_NOT_IN_POOL)
+	if new_state < ItemPool.ItemState.SHOWN or new_state > ItemPool.ItemState.DISABLED:
+		return _reject(R_BAD_STATE)
+
+	# ★ 幂等：设成"当前已经是"的状态 ⇒ 成功但**什么都不动**（不推进 revision、不发信号）。
+	#   否则反复点同一个按钮会白白让 07 的缓存失效。
+	if b.item_pool.state_of(item_id) == new_state:
+		return {
+			"ok": true, "reason": R_OK, "state": get_pool_state(state, box_id),
+			"errors": [] as Array[String], "destroyed": false,
+		}
+
+	# C6：禁用是"减少可产出数"，必须守住 ≥ 3（改成别的状态只会增加或不变）
+	var was_disabled := b.item_pool.state_of(item_id) == ItemPool.ItemState.DISABLED
+	if new_state == ItemPool.ItemState.DISABLED and not was_disabled:
+		if b.item_pool.enabled_count() - 1 < 3:
+			return _reject(R_BELOW_C6)
+
+	if not b.item_pool.set_state(item_id, new_state):
+		return _reject(R_BAD_STATE)
+
+	b.item_pool.revision += 1
+	var s := _compute(b, b.item_pool.revision)
+	_states[box_id] = s
+	bus.pool_changed.emit(box_id, b.item_pool.revision)
+	return {
+		"ok": true, "reason": R_OK, "state": s, "errors": [] as Array[String],
+		"destroyed": false,
+	}
+
+
+## 只读：`item_id(String) -> 状态(int)` 的副本（缺键 = 显示）。
+func get_item_states(state: GameState, box_id: String) -> Dictionary:
+	var b := _find(state, box_id)
+	if b == null or b.item_pool == null:
+		return {}
+	return b.item_pool.item_states.duplicate()
 
 
 ## 试算：算出"若把 `module_id` 放进该盒第 `slot` 位"的**候选派生状态**。
@@ -360,7 +456,7 @@ static func _compute(b: Box, revision: int) -> PoolState:
 
 
 static func _compute_with(pool: ItemPool, modules: Array[Module], revision: int) -> PoolState:
-	var ids := pool.item_ids()
+	var full_ids := pool.item_ids()
 	var base_arr := pool.compute_weights_bp()
 	var st := PoolState.new()
 	st.box_id = pool.box_id
@@ -368,17 +464,30 @@ static func _compute_with(pool: ItemPool, modules: Array[Module], revision: int)
 	st.revision = revision
 	st.socket_count = pool.socket_count
 	st.regular_count = pool.regular_count
+	st.hidden_ids = pool.hidden_ids()       # ★ v0.45：派生视图（隐藏仍参与抽取，不影响分布）
+	st.disabled_ids = pool.disabled_ids()   # ★ v0.45：禁用**不参与抽取** ⇒ 不进 weights_bp
 	if base_arr.is_empty():
 		return st                                  # 池子非法：交空状态，由 validate 报因
 
 	# ① 基础权重（v0.12：由 rarity 派生；v0.13：全部物品共分 100%）
 	#    `base` 同时是"按比例摊回"的依据（§5.2 第 5 步：AUTO → 按基础权重给其余未排除物品），
 	#    因此在这里就转成按 item_id 索引的字典（PackedInt32Array 不能当比例表用）。
+	# ★ v0.45：**禁用项退出候选集**。`compute_weights_bp()` 返回全长数组（与 `full_ids` 对位），
+	#   禁用项在里面本来就是 0；下面直接**不把它们放进 `w`**——于是
+	#   ① `weights_bp` 只含真正可产出的物品；② `banned_ids()` 不会把"禁用"误报成"被排除"。
+	var ids: Array[StringName] = []
+	for _e in full_ids:
+		if not st.disabled_ids.has(_e):
+			ids.append(_e)
+
 	var base: Dictionary = {}
 	var w: Dictionary = {}
-	for i in ids.size():
-		base[ids[i]] = int(base_arr[i])
-		w[ids[i]] = int(base_arr[i])
+	for i in full_ids.size():
+		var _id := full_ids[i]
+		if st.disabled_ids.has(_id):
+			continue          # ★ v0.45：禁用项不参与抽取 ⇒ 不进候选集
+		base[_id] = int(base_arr[i])
+		w[_id] = int(base_arr[i])
 	var mass := TOTAL_BP
 	var void_bp := 0
 
@@ -611,7 +720,7 @@ static func _msg(code: StringName, text: String) -> String:
 	return "%s：%s" % [code, text]
 
 
-## 从 `"码：说明"` 里取回原因码（`socket` / `unsocket` 的 `reason` 用）。
+## 从 `"码：说明"` 里取回原因码（`socket` 的 `reason` 用）。
 static func _code_of(entry: String) -> StringName:
 	var i := entry.find("：")
 	return StringName(entry.substr(0, i)) if i > 0 else StringName(entry)

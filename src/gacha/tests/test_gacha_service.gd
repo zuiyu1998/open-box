@@ -23,6 +23,7 @@ func _ready() -> void:
 	_test_roll_has_no_side_effects()
 	_test_gacha_service_has_no_uuid_or_serial_math()
 	_test_evaluation_invariants_and_headline()
+	_test_gold_expectation_and_pool_extras()
 	_test_x1_5_uses_collected_only()
 	_test_redeem_consumes_box_and_grants_exactly_once()
 	_test_redeem_overflow_goes_to_mail()
@@ -91,6 +92,9 @@ func _setup() -> void:
 		d.value = values[i]
 		d.size = Vector2i(2, 1)   # ★ v0.37：二维尺寸（占 2 格）
 		d.rarity = rarities[i]
+		# ★ v0.47：金币期望要能真的算出来 ⇒ 夹具必须给 `sell_gold`
+		#   （默认 0 会让 `m_bar_gold()` 恒为 0，测试就变成"断言 0 == 0"的假绿）。
+		d.sell_gold = values[i] * 2
 		ItemCatalog.register(d)
 		_defs.append(d)
 
@@ -190,7 +194,7 @@ func _test_roll_covers_void_and_matches_distribution() -> void:
 	var f := _new_state()
 	var st: GameState = f["state"]
 	var bx: Box = f["boxes"][0]
-	ok(PoolService.socket(st, bx.box_id, &"mod_ban_05", 0)["ok"], "先造出 void（排除 s01_05 ⇒ 800 bp）")
+	ok(PoolBuff.apply_module(st, bx.box_id, &"mod_ban_05", 0)["ok"], "先造出 void（排除 s01_05 ⇒ 800 bp）")
 	var ev := _eval_of(st, bx)
 	near(ev.void_prob, 0.08, 1e-6, "void_prob == 800 / 10000 == 0.08")
 
@@ -277,7 +281,7 @@ func _test_evaluation_invariants_and_headline() -> void:
 	var hl := EvalService.headline(ev, GachaCatalog.get_series(&"series_01"))
 	eq(hl["best_item_id"], &"s01_05", "头奖 = 价值 9 的那件（s01_05）")
 	near(hl["best_item_prob"], 0.2, 1e-6, "它的概率 0.2")
-	ok(PoolService.socket(st, bx.box_id, &"mod_ban_05", 0)["ok"], "把头奖排除掉")
+	ok(PoolBuff.apply_module(st, bx.box_id, &"mod_ban_05", 0)["ok"], "把头奖排除掉")
 	var ev2 := _eval_of(st, bx)
 	var hl2 := EvalService.headline(ev2, GachaCatalog.get_series(&"series_01"))
 	ok(hl2["best_item_id"] != &"s01_05", "排除后 headline 换人（候选集 = 仍可产出的物品）")
@@ -286,6 +290,72 @@ func _test_evaluation_invariants_and_headline() -> void:
 	for p in ev2.probs:
 		total2 += float(p)
 	near(total2, 1.0, 1e-6, "编辑后 C1 仍成立（Σprobs + void_prob == 1.0）")
+
+
+## ★ v0.47：**金币口径的期望** + 池子追加物品后求值链仍自洽。
+##
+## 后者是这条测试真正的价值：v0.45 加了"往池子加物品"，而 `evaluate_pool` 当时仍以
+## `series.item_ids()` 取范围 ⇒ 追加物品整个漏出分布 ⇒ `Σp < 1` ⇒ `is_normalized == false`
+## ⇒ **`roll()` 直接拒开**（`bad_evaluation`）。这里把它钉死。
+func _test_gold_expectation_and_pool_extras() -> void:
+	print("— ★ v0.47 金币期望：m_bar_gold = Σ(pᵢ × sell_goldᵢ)；模块成本 = Σ gold_cost")
+	var f := _new_state(&"series_01", 1)
+	var st: GameState = f["state"]
+	var bx: Box = f["boxes"][0]
+	var series := GachaCatalog.get_series(&"series_01")
+	var ev := _eval_of(st, bx)
+
+	# ① 金币期望：按同一组概率自己再算一遍，必须与 07 的实现相等
+	var manual := 0.0
+	for i in ev.item_ids.size():
+		var d := ItemCatalog.get_def(ev.item_ids[i])
+		manual += float(ev.probs[i]) * float(d.sell_gold)
+	near(EvalService.m_bar_gold(ev), manual, 1e-6, "m_bar_gold == Σ(pᵢ × sell_goldᵢ)")
+	ok(EvalService.m_bar_gold(ev) > 0.0, "金币期望 > 0（%.3f）" % EvalService.m_bar_gold(ev))
+	# TVU 口径仍在（07 的 ρ 用），两者不是一回事
+	near(EvalService.m_bar(ev, series), 4.16, 1e-4, "TVU 口径的 m̄ 仍是 4.16（没被改动）")
+	ok(not is_equal_approx(EvalService.m_bar(ev, series), EvalService.m_bar_gold(ev)),
+		"两者确实是不同口径（TVU 值 ≠ 金币值）")
+
+	# ② 模块成本
+	eq(EvalService.module_gold_cost(bx), 0, "未镶模块 ⇒ C = 0")
+	ok(PoolBuff.apply_module(st, bx.box_id, &"mod_ban_05", 0)["ok"], "镶一个模块")
+	var mod := GachaCatalog.get_module(&"mod_ban_05")
+	eq(EvalService.module_gold_cost(bx), mod.gold_cost, "C == 该模块的 gold_cost（%d）" % mod.gold_cost)
+
+	# ③ ★ 回归：往池子加一件物品后，分布仍自洽、仍能开盒
+	var extra := ItemDef.new()
+	extra.item_id = &"extra_q1"
+	extra.display_name = "池外物品"
+	extra.category = &"stardust"
+	extra.quality = 1
+	extra.value = 5
+	extra.sell_gold = 50
+	extra.size = Vector2i(1, 1)
+	extra.rarity = 10
+	ItemCatalog.register(extra)
+	ok(PoolBuff.add_item(st, bx.box_id, &"extra_q1")["ok"], "把池外物品加进池子")
+
+	var ev2 := _eval_of(st, bx)
+	var sum := ev2.void_prob
+	for p in ev2.probs:
+		sum += float(p)
+	near(sum, 1.0, 1e-6, "**加物品后 Σp + void 仍 == 1（C1）**")
+	ok(ev2.is_normalized, "**is_normalized == true**（旧实现这里是 false）")
+	eq(ev2.item_ids.size(), ev.item_ids.size() + 1, "分布范围含新物品（多一件）")
+	ok(ev2.item_ids.has(&"extra_q1"), "新物品在 `item_ids` 里")
+	var r := GachaService.roll(ev2, 3)
+	ok(r.ok, "**加物品后仍开得动盒子**（旧实现返回 bad_evaluation）")
+	ok(EvalService.m_bar_gold(ev2) > EvalService.m_bar_gold(ev), "金币期望随新物品上升")
+	# 池子禁用一件后，求值范围也要跟着缩
+	var target: StringName = ev2.item_ids[0]
+	ok(PoolBuff.set_state(st, bx.box_id, target, ItemPool.ItemState.DISABLED)["ok"], "禁用一件")
+	var ev3 := _eval_of(st, bx)
+	ok(not ev3.item_ids.has(target), "禁用项已退出求值范围")
+	var sum3 := ev3.void_prob
+	for p3 in ev3.probs:
+		sum3 += float(p3)
+	near(sum3, 1.0, 1e-6, "禁用后 C1 仍成立（其余物品重新归一）")
 
 
 func _test_x1_5_uses_collected_only() -> void:
@@ -383,7 +453,7 @@ func _test_redeem_void_consumes_box_without_item() -> void:
 	var f := _new_state()
 	var st: GameState = f["state"]
 	var bx: Box = f["boxes"][0]
-	ok(PoolService.socket(st, bx.box_id, &"mod_ban_05", 0)["ok"], "造出 void 段")
+	ok(PoolBuff.apply_module(st, bx.box_id, &"mod_ban_05", 0)["ok"], "造出 void 段")
 	var ev := _eval_of(st, bx)
 	var seed := _find_seed(ev, true)
 	ok(seed >= 0, "找到一个会出 void 的 seed")
