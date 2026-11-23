@@ -8,6 +8,5 @@ item_id = &"home_q4"
 display_name = "雕花立柜"
 category = &"home"
 quality = 4
-value = 27
+value = 16
 rarity = 5
-sell_gold = 16

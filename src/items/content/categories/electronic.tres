@@ -8,3 +8,4 @@ category_id = &"electronic"
 display_name = "电子物品"
 description = "芯片、模组与整机 —— 技术类高附加物。"
 sort_order = 7
+value = 2

@@ -8,6 +8,5 @@ item_id = &"home_q2"
 display_name = "竹编收纳筐"
 category = &"home"
 quality = 2
-value = 3
+value = 4
 rarity = 30
-sell_gold = 4

@@ -143,7 +143,7 @@ static func m_bar_gold(ev: PoolEvaluation) -> float:
 		var d := ItemCatalog.get_def(ev.item_ids[i])
 		if d == null:
 			continue
-		total += float(ev.probs[i]) * float(d.sell_gold)
+		total += float(ev.probs[i]) * float(d.value)
 	return total
 
 

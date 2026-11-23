@@ -11,7 +11,7 @@
 ## **养成**：等级（提交配方物品升级）+ **互斥路线**（决定排除哪些物品）。
 ##
 ## **效果注入**：本系统**不写池子数据**（`PoolService` 仍是唯一写入方）——
-## 它只向 `PoolService` 注入一个 `extra_ban_provider` 回调；`_compute` 在算派生状态时
+## 它只向 **`PoolBuff`** 注入一个"排除目标"回调（★ v0.49：经 buff，不再直接塞给 `PoolService`）；`_compute` 在算派生状态时
 ## 调用它拿"出战干员的额外排除目标"，与模块 BAN 走**同一条** 40%/60% 零和路径。
 ## 这是全库既有的注入模式（`ItemService.series_item_provider` 同理）。
 extends Node
@@ -70,7 +70,7 @@ func upgrade_requirement() -> Dictionary:
 	return UPGRADE_REQUIREMENTS.get(level, {})
 
 
-## ★ 出战干员的额外排除目标（`PoolService` 的 `extra_ban_provider` 会调它）。
+## ★ 出战干员的额外排除目标（★ v0.49：`PoolBuff.operator_bans()` 会调它）。
 ## **未出战 / 当前路线无 ban_targets ⇒ 空数组**（不注入任何排除）。
 func active_bans() -> Array[StringName]:
 	if not active:
@@ -175,8 +175,13 @@ func reset() -> void:
 #  效果注入
 # ══════════════════════════════════════════════════════════════════════════════
 
-## ★ 把"出战干员的额外排除"注入给 `PoolService`。
-## 在 `_ready` 调用一次即可——`PoolService.extra_ban_provider` 是静态回调，
-## 池子求值（`_compute`）时会 `call()` 它取当前出战干员的 `active_bans()`。
+## ★ v0.49：把"出战干员的额外排除"注入给 **`PoolBuff`**（不再直接塞进 `PoolService`）。
+## 在 `_ready` 调用一次即可——`PoolBuff.set_operator_ban_provider()` 是静态回调，
+## 池子求值（`_compute`）时会经 `PoolBuff.operator_bans()` 取当前出战干员的 `active_bans()`。
+##
+## **为什么改**：v0.46 定的不变量是"**物品池数据只能由 buff 这一个接口操作**"，
+## 而干员的排除会改变 `PoolState.weights_bp`——直接从 `OperatorService` 塞给 `PoolService`
+## 就是绕过 buff 的第二条写入路径。现在的链路是：
+## `OperatorService → PoolBuff.set_operator_ban_provider() → PoolBuff.operator_bans() → _compute`。
 func _ready() -> void:
-	PoolService.extra_ban_provider = Callable(self, "active_bans")
+	PoolBuff.set_operator_ban_provider(Callable(self, "active_bans"))

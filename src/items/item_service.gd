@@ -630,11 +630,11 @@ func check_currencies() -> bool:
 #  售卖（★ v0.20；02-item.md §5.14）——物品的第二条出口：卖成金币
 # ══════════════════════════════════════════════════════════════════════════════
 
-## **售卖**：把仓库里的若干实例**销毁**，并按 `ItemDef.sell_gold`（单位：金币）**发放金币**。
+## **售卖**：把仓库里的若干实例**销毁**，并按 `ItemDef.value`（单位：金币）**发放金币**。
 ##
 ## ★ **一次事务完成两件事**：`transact([{consume, tag=&"sell"}, {currency, +金币}])`
 ##   ⇒ **要么"销毁 + 得钱"都发生，要么什么都不发生**（不会出现"东西没了钱没到"的坏账）。
-## ★ **价格完全由 `ItemDef.sell_gold` 决定**（每件一份）；`0` = **不可售**（报 `not_sellable`，
+## ★ **价格完全由 `ItemDef.value` 决定**（每件一份）；`0` = **不可售**（报 `not_sellable`，
 ##   **不是**免费送）。**售价的标定归核心 D26**，本类不算法、不打折。
 ## ★ **只对仓库实例生效**（邮件实例不可售——它们本来就不是"可用持有"，§5.10）。
 ## ★ **与 `discard` 的区别**：丢弃**不给任何回报**；售卖**按定义发金币**。
@@ -665,10 +665,10 @@ func sell(instance_ids: Array[String]) -> Dictionary:
 		var def := ItemCatalog.get_def(inst.item_id)
 		if def == null:
 			return fail.call(ItemConstants.REASON_BAD_OP)
-		if def.sell_gold <= 0:
+		if def.value <= 0:
 			return fail.call(ItemConstants.REASON_NOT_SELLABLE)
 		seen[sid] = true
-		gold += def.sell_gold
+		gold += def.value
 
 	var res := transact([
 		{"op": ItemConstants.OP_SELL, "instance_ids": instance_ids},
@@ -686,7 +686,7 @@ func sell(instance_ids: Array[String]) -> Dictionary:
 ## 08 渲染"卖一件能得多少金币"用它，**不得自行解释或折算**。
 func sell_price(item_id: StringName) -> int:
 	var def := ItemCatalog.get_def(item_id)
-	return def.sell_gold if def != null else 0
+	return def.value if def != null else 0
 
 
 # ══════════════════════════════════════════════════════════════════════════════

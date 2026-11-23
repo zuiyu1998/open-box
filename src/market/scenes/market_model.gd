@@ -39,11 +39,11 @@ func snapshot() -> Dictionary:
 		if not WarehouseService.is_warehouse(inst.instance_id):
 			continue
 		var def := ItemCatalog.get_def(inst.item_id)
-		if def == null or def.sell_gold <= 0:
+		if def == null or def.value <= 0:
 			continue
 		var name := def.display_name if def != null else String(inst.item_id)
 		sell_options.append("%s（%s）· 卖 %d 金币" % [
-			name, ItemConstants.quality_name(def.quality), def.sell_gold,
+			name, ItemConstants.quality_name(def.quality), def.value,
 		])
 
 	return {
@@ -108,6 +108,6 @@ func _sellable_ids() -> Array[String]:
 		if not WarehouseService.is_warehouse(inst.instance_id):
 			continue
 		var def := ItemCatalog.get_def(inst.item_id)
-		if def != null and def.sell_gold > 0:
+		if def != null and def.value > 0:
 			out.append(inst.instance_id)
 	return out

@@ -92,9 +92,7 @@ func _setup() -> void:
 		d.value = values[i]
 		d.size = Vector2i(2, 1)   # ★ v0.37：二维尺寸（占 2 格）
 		d.rarity = rarities[i]
-		# ★ v0.47：金币期望要能真的算出来 ⇒ 夹具必须给 `sell_gold`
-		#   （默认 0 会让 `m_bar_gold()` 恒为 0，测试就变成"断言 0 == 0"的假绿）。
-		d.sell_gold = values[i] * 2
+		# ★ v0.52：价值即售价（`sell_gold` 已删除）——夹具只需要一个 `value`。
 		ItemCatalog.register(d)
 		_defs.append(d)
 
@@ -298,7 +296,7 @@ func _test_evaluation_invariants_and_headline() -> void:
 ## `series.item_ids()` 取范围 ⇒ 追加物品整个漏出分布 ⇒ `Σp < 1` ⇒ `is_normalized == false`
 ## ⇒ **`roll()` 直接拒开**（`bad_evaluation`）。这里把它钉死。
 func _test_gold_expectation_and_pool_extras() -> void:
-	print("— ★ v0.47 金币期望：m_bar_gold = Σ(pᵢ × sell_goldᵢ)；模块成本 = Σ gold_cost")
+	print("— ★ v0.47/v0.52 金币期望：m_bar_gold = Σ(pᵢ × valueᵢ)；模块成本 = Σ gold_cost")
 	var f := _new_state(&"series_01", 1)
 	var st: GameState = f["state"]
 	var bx: Box = f["boxes"][0]
@@ -309,13 +307,14 @@ func _test_gold_expectation_and_pool_extras() -> void:
 	var manual := 0.0
 	for i in ev.item_ids.size():
 		var d := ItemCatalog.get_def(ev.item_ids[i])
-		manual += float(ev.probs[i]) * float(d.sell_gold)
+		manual += float(ev.probs[i]) * float(d.value)
 	near(EvalService.m_bar_gold(ev), manual, 1e-6, "m_bar_gold == Σ(pᵢ × sell_goldᵢ)")
 	ok(EvalService.m_bar_gold(ev) > 0.0, "金币期望 > 0（%.3f）" % EvalService.m_bar_gold(ev))
 	# TVU 口径仍在（07 的 ρ 用），两者不是一回事
 	near(EvalService.m_bar(ev, series), 4.16, 1e-4, "TVU 口径的 m̄ 仍是 4.16（没被改动）")
-	ok(not is_equal_approx(EvalService.m_bar(ev, series), EvalService.m_bar_gold(ev)),
-		"两者确实是不同口径（TVU 值 ≠ 金币值）")
+	# ★ v0.52：合并后两者**必须相等**（TVU 概念已退场，value 直接是金币）
+	near(EvalService.m_bar(ev, series), EvalService.m_bar_gold(ev), 1e-9,
+		"m_bar 与 m_bar_gold 现在是同一个口径（价值即金币）")
 
 	# ② 模块成本
 	eq(EvalService.module_gold_cost(bx), 0, "未镶模块 ⇒ C = 0")
@@ -329,8 +328,7 @@ func _test_gold_expectation_and_pool_extras() -> void:
 	extra.display_name = "池外物品"
 	extra.category = &"stardust"
 	extra.quality = 1
-	extra.value = 5
-	extra.sell_gold = 50
+	extra.value = 50          # ★ v0.52：价值即售价，只有一个字段
 	extra.size = Vector2i(1, 1)
 	extra.rarity = 10
 	ItemCatalog.register(extra)
@@ -349,7 +347,7 @@ func _test_gold_expectation_and_pool_extras() -> void:
 	ok(EvalService.m_bar_gold(ev2) > EvalService.m_bar_gold(ev), "金币期望随新物品上升")
 	# 池子禁用一件后，求值范围也要跟着缩
 	var target: StringName = ev2.item_ids[0]
-	ok(PoolBuff.set_state(st, bx.box_id, target, ItemPool.ItemState.DISABLED)["ok"], "禁用一件")
+	ok(PoolBuff.disable(st, bx.box_id, target)["ok"], "禁用一件")
 	var ev3 := _eval_of(st, bx)
 	ok(not ev3.item_ids.has(target), "禁用项已退出求值范围")
 	var sum3 := ev3.void_prob

@@ -19,18 +19,28 @@
 ## 使用方式（两种等价写法，`apply()` 只是分发器）：
 ## ```gdscript
 ## PoolBuff.add_item(state, box_id, &"home_q3")
-## PoolBuff.set_state(state, box_id, &"home_q1", ItemPool.ItemState.HIDDEN)
+## PoolBuff.reveal(state, box_id, &"home_q1")      # 隐藏 → 显示
 ## PoolBuff.apply_module(state, box_id, &"mod_ban_home_q1", 0)
-## PoolBuff.apply(state, box_id, {"kind": PoolBuff.KIND_SET_STATE, "item_id": &"home_q1", "new_state": 1})
+## PoolBuff.disable(state, box_id, &"home_q1")     # 显示 → 禁用（隐藏的不行）
+## PoolBuff.apply(state, box_id, {"kind": PoolBuff.KIND_REVEAL, "item_id": &"home_q1"})
 ## ```
 class_name PoolBuff
 extends RefCounted
 
-## `apply()` 的动作名（逐字；与 `PoolService` 的三个内部写入一一对应）。
-const KIND_ADD_ITEM := &"add_item"          # 把一件已注册物品加进池子
-const KIND_SET_STATE := &"set_state"        # 改一件池内物品的三态（显示/隐藏/禁用）
+## `apply()` 的动作名（逐字；与 `PoolService` 的内部写入一一对应）。
+##
+## ★ v0.48（用户裁决）：**暴露的是三件"有方向"的事**，不是一个万能 `set_state`：
+##   · **添加**（`add_item`）——新物品一进来就是**显示**；
+##   · **揭示**（`reveal`）——隐藏 → 显示；
+##   · **禁用**（`disable`）——**只有显示能被禁用**，且禁用是**终局**。
+##   没有"显示 → 隐藏"这个动作（隐藏是物品的基础状态，由内容 / 读档决定，玩家压不下去）。
+const KIND_ADD_ITEM := &"add_item"          # 把一件已注册物品加进池子（→ 显示）
+const KIND_REVEAL := &"reveal"              # 隐藏 → 显示
+const KIND_DISABLE := &"disable"            # 显示 → 禁用（终局；隐藏的必须先揭示）
 const KIND_APPLY_MODULE := &"apply_module"  # 把模块镶进某个位子（模块效果 = 池子数据的写入）
-const ALL_KINDS: Array[StringName] = [KIND_ADD_ITEM, KIND_SET_STATE, KIND_APPLY_MODULE]
+const ALL_KINDS: Array[StringName] = [
+	KIND_ADD_ITEM, KIND_REVEAL, KIND_DISABLE, KIND_APPLY_MODULE,
+]
 
 
 ## 统一分发：`op` 形如 `{kind, ...}`。
@@ -40,10 +50,10 @@ static func apply(state: GameState, box_id: String, op: Dictionary) -> Dictionar
 	match kind:
 		KIND_ADD_ITEM:
 			return add_item(state, box_id, StringName(op.get("item_id", &"")))
-		KIND_SET_STATE:
-			return set_state(
-				state, box_id, StringName(op.get("item_id", &"")), int(op.get("new_state", -1))
-			)
+		KIND_REVEAL:
+			return reveal(state, box_id, StringName(op.get("item_id", &"")))
+		KIND_DISABLE:
+			return disable(state, box_id, StringName(op.get("item_id", &"")))
 		KIND_APPLY_MODULE:
 			return apply_module(
 				state, box_id, StringName(op.get("module_id", &"")), int(op.get("slot", -1))
@@ -52,18 +62,25 @@ static func apply(state: GameState, box_id: String, op: Dictionary) -> Dictionar
 			return _bad_op()
 
 
-## 把一件**已注册**物品加进该盒池子。免费、可逆（用 `set_state(DISABLED)` 让它抽不到）。
+## 把一件**已注册**物品加进该盒池子（**落为"显示"**）。免费、可逆性见 `reveal` / `disable`。
 static func add_item(state: GameState, box_id: String, item_id: StringName) -> Dictionary:
 	return _through_gate(func() -> Dictionary:
 		return PoolService._write_add_item(state, box_id, item_id))
 
 
-## 改一件池内物品的三态。免费、可逆、幂等（设成当前态 ⇒ 成功但不动 `revision`）。
-static func set_state(
-	state: GameState, box_id: String, item_id: StringName, new_state: int
-) -> Dictionary:
+## **揭示**：把一件**隐藏**的物品变成显示（此后它可见、可被禁用）。
+## 已经是显示的 ⇒ 幂等成功；已被禁用 ⇒ `state_terminal`（终局不可逆）。
+static func reveal(state: GameState, box_id: String, item_id: StringName) -> Dictionary:
 	return _through_gate(func() -> Dictionary:
-		return PoolService._write_set_state(state, box_id, item_id, new_state))
+		return PoolService._write_set_state(state, box_id, item_id, ItemPool.ItemState.SHOWN))
+
+
+## **禁用**：把一件**显示**的物品变成禁用（不参与抽取，权重在其余物品间重新归一）。
+## ⚠️ **只有显示状态能被禁用**：隐藏的 ⇒ `not_revealed`（必须先 `reveal`）；
+## 已禁用的 ⇒ `state_terminal`。
+static func disable(state: GameState, box_id: String, item_id: StringName) -> Dictionary:
+	return _through_gate(func() -> Dictionary:
+		return PoolService._write_set_state(state, box_id, item_id, ItemPool.ItemState.DISABLED))
 
 
 ## 把 `module_id` 镶进该盒第 `slot` 位（**模块效果就是池子数据的一次写入**）。
@@ -74,6 +91,39 @@ static func apply_module(
 ) -> Dictionary:
 	return _through_gate(func() -> Dictionary:
 		return PoolService._write_module(state, box_id, module_id, slot))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ★ v0.49：**干员的额外排除**也经 buff（不再由 `PoolService.extra_ban_provider` 旁路注入）
+# ══════════════════════════════════════════════════════════════════════════════
+
+## "出战干员排除了哪些物品"的提供者：`Callable() -> Array`（返回 `StringName` 列表）。
+## 注入方 = `OperatorService._ready()`。**未注入 ⇒ 空数组**（行为与"没有干员"一致）。
+static var _operator_ban_provider: Callable = Callable()
+
+
+static func set_operator_ban_provider(cb: Callable) -> void:
+	_operator_ban_provider = cb
+
+
+static func clear_operator_ban_provider() -> void:
+	_operator_ban_provider = Callable()
+
+
+## 当前**生效中**的干员排除目标（`Array[StringName]`）。`_compute` 只问这一个入口。
+##
+## 为什么它也算"池子数据操作"：它会改变 `PoolState.weights_bp`（与模块 BAN 同一条 40/60 路径）。
+## v0.46 定的"buff 是唯一接口"如果允许这条旁路存在，就等于留了第二个能改分布的入口。
+static func operator_bans() -> Array[StringName]:
+	var out: Array[StringName] = []
+	if not _operator_ban_provider.is_valid():
+		return out
+	var raw = _operator_ban_provider.call()
+	if not (raw is Array):
+		return out
+	for t in (raw as Array):
+		out.append(StringName(t))
+	return out
 
 
 # ══════════════════════════════════════════════════════════════════════════════

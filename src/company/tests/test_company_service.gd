@@ -78,7 +78,7 @@ func _setup() -> void:
 		d.value = q
 		d.size = Vector2i(1, 1)
 		d.rarity = 10
-		d.sell_gold = q * 2
+		d.value = q * 2
 		ItemCatalog.register(d)
 
 

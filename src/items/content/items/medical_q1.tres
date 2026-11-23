@@ -8,4 +8,4 @@ item_id = &"medical_q1"
 display_name = "医用绷带"
 category = &"medical"
 rarity = 60
-sell_gold = 2
+value = 2

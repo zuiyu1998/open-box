@@ -8,4 +8,4 @@ item_id = &"electronic_q1"
 display_name = "电阻元件"
 category = &"electronic"
 rarity = 60
-sell_gold = 2
+value = 2

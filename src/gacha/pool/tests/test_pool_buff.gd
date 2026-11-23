@@ -21,6 +21,7 @@ func _ready() -> void:
 	_test_gate_denies_bypass()
 	_test_public_write_names_are_gone()
 	_test_device_entry_still_works()
+	_test_operator_bans_go_through_buff()
 
 	print("\n=== 结果：%d 通过 / %d 失败 ===" % [_pass, _fail])
 	get_tree().quit(0 if _fail == 0 else 1)
@@ -134,7 +135,7 @@ func _test_apply_dispatch() -> void:
 	eq(bx.item_pool.extra_item_ids.has(&"extra_q1"), true, "记进 extra_item_ids（要落盘）")
 
 	# ② set_state
-	var r2 := PoolBuff.set_state(st, bx.box_id, &"extra_q1", ItemPool.ItemState.DISABLED)
+	var r2 := PoolBuff.disable(st, bx.box_id, &"extra_q1")
 	ok(r2["ok"], "set_state 成功")
 	eq(bx.item_pool.state_of(&"extra_q1"), ItemPool.ItemState.DISABLED, "状态已改为禁用")
 	var ps := PoolService.get_pool_state(st, bx.box_id)
@@ -148,17 +149,24 @@ func _test_apply_dispatch() -> void:
 	eq(bx.modules[0].module_id, &"mod_ban_sd1", "模块进了第 0 位")
 	eq(bx.item_pool.revision, rev + 1, "revision +1")
 
-	# ④ apply() 分发：三种 kind 都认
+	# ④ apply() 分发：v0.48 的三个 kind 都认（添加 / 揭示 / 禁用）
+	#    先造一个隐藏项（隐藏只能由数据层构造），再用 apply(KIND_REVEAL) 揭示它
+	ok(bx.item_pool.set_state(&"s01_02", ItemPool.ItemState.HIDDEN), "夹具：s01_02 置为隐藏")
 	var r4 := PoolBuff.apply(st, bx.box_id, {
-		"kind": PoolBuff.KIND_SET_STATE, "item_id": &"s01_01", "new_state": ItemPool.ItemState.HIDDEN,
+		"kind": PoolBuff.KIND_REVEAL, "item_id": &"s01_02",
 	})
-	ok(r4["ok"], "apply(KIND_SET_STATE) 成功")
-	eq(bx.item_pool.state_of(&"s01_01"), ItemPool.ItemState.HIDDEN, "分发到了 set_state")
+	ok(r4["ok"], "apply(KIND_REVEAL) 成功")
+	eq(bx.item_pool.state_of(&"s01_02"), ItemPool.ItemState.SHOWN, "分发到了 reveal")
+	var r5b := PoolBuff.apply(st, bx.box_id, {
+		"kind": PoolBuff.KIND_DISABLE, "item_id": &"s01_02",
+	})
+	ok(r5b["ok"], "apply(KIND_DISABLE) 成功")
+	eq(bx.item_pool.state_of(&"s01_02"), ItemPool.ItemState.DISABLED, "分发到了 disable")
 
 	# ⑤ 未知 kind ⇒ bad_op（不猜、不静默降级）
-	var r5 := PoolBuff.apply(st, bx.box_id, {"kind": &"nope"})
-	ok(not r5["ok"], "未知 kind ⇒ 失败")
-	eq(r5["reason"], ItemConstants.REASON_BAD_OP, "原因码 = bad_op")
+	var r_unknown := PoolBuff.apply(st, bx.box_id, {"kind": &"nope"})
+	ok(not r_unknown["ok"], "未知 kind ⇒ 失败")
+	eq(r_unknown["reason"], ItemConstants.REASON_BAD_OP, "原因码 = bad_op")
 
 
 func _test_gate_denies_bypass() -> void:
@@ -194,7 +202,9 @@ func _test_public_write_names_are_gone() -> void:
 	ok(not _has_method("res://src/gacha/pool/pool_service.gd", "set_item_state"), "PoolService 不再有 set_item_state()")
 	ok(_has_method("res://src/gacha/pool/pool_buff.gd", "apply"), "PoolBuff.apply() 存在")
 	ok(_has_method("res://src/gacha/pool/pool_buff.gd", "add_item"), "PoolBuff.add_item() 存在")
-	ok(_has_method("res://src/gacha/pool/pool_buff.gd", "set_state"), "PoolBuff.set_state() 存在")
+	ok(_has_method("res://src/gacha/pool/pool_buff.gd", "reveal"), "PoolBuff.reveal() 存在")
+	ok(_has_method("res://src/gacha/pool/pool_buff.gd", "disable"), "PoolBuff.disable() 存在")
+	ok(not _has_method("res://src/gacha/pool/pool_buff.gd", "set_state"), "没有万能 set_state（三件事各有入口）")
 	ok(_has_method("res://src/gacha/pool/pool_buff.gd", "apply_module"), "PoolBuff.apply_module() 存在")
 
 
@@ -222,3 +232,38 @@ func _test_device_entry_still_works() -> void:
 	# 占用位再镶 ⇒ 终局拒绝（v0.44）
 	eq(DeviceService.socket(st, bx.box_id, &"mod_ban_sd1", 0)["reason"],
 		PoolService.R_SLOT_OCCUPIED, "占用位仍终局拒绝")
+
+## ★ v0.49：**干员的额外排除也经 buff**（原来是从 OperatorService 直接塞给 PoolService 的旁路）。
+##
+## 钉住两件事：① `PoolBuff.operator_bans()` 是唯一读取入口；② 它真的改变分布
+## （与模块 BAN 同一条 40% 蒸发 / 60% 摊回路径）。
+func _test_operator_bans_go_through_buff() -> void:
+	print("— ★ v0.49 干员排除经 buff：设置 → 分布变化；清空 → 回到基线")
+	var f := _setup()
+	var st: GameState = f["state"]
+	var bx: Box = f["box"]
+
+	PoolBuff.clear_operator_ban_provider()
+	eq(PoolBuff.operator_bans().size(), 0, "未注入 ⇒ 空（不施加任何额外排除）")
+	var base := PoolService.get_pool_state(st, bx.box_id)
+	var base_w := base.weight_of(&"s01_01")
+	ok(base_w > 0, "基线：s01_01 可产出（%d bp）" % base_w)
+	eq(base.void_mass_bp, 0, "基线：没有 void")
+
+	# 注入一条排除：s01_01
+	PoolBuff.set_operator_ban_provider(func() -> Array: return [&"s01_01"])
+	eq(PoolBuff.operator_bans(), [&"s01_01"] as Array[StringName], "buff 报出该排除")
+	# 分布缓存按 revision 命中，这里强制重算：直接让缓存失效
+	PoolService.drop_all_cached_states()
+	var after := PoolService.get_pool_state(st, bx.box_id)
+	eq(after.weight_of(&"s01_01"), 0, "被排除项权重归 0")
+	eq(after.void_mass_bp, int(floor(float(base_w) * 0.4)),
+		"40%% 蒸发到 void（%d → %d）" % [base_w, after.void_mass_bp])
+	ok(after.is_zero_sum(), "Σ == 10000（C1 仍成立）")
+
+	# 清空 ⇒ 回到基线
+	PoolBuff.clear_operator_ban_provider()
+	PoolService.drop_all_cached_states()
+	var back := PoolService.get_pool_state(st, bx.box_id)
+	eq(back.weight_of(&"s01_01"), base_w, "清空后权重逐项回到基线")
+	eq(back.void_mass_bp, 0, "void 归 0")

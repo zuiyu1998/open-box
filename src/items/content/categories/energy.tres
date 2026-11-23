@@ -8,3 +8,4 @@ category_id = &"energy"
 display_name = "能源物品"
 description = "电池、燃料与动力核心 —— 供能与驱动的消耗品。"
 sort_order = 4
+value = 2

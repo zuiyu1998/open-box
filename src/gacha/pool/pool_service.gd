@@ -54,6 +54,10 @@ const R_BAD_STATE := &"bad_item_state"                   # 状态值越界
 ## 这是"唯一写入门面"的**运行时兜底**（不是靠注释约定）：`PoolBuff` 写入时开门、写完关门，
 ## 任何其它调用方拿到的永远是这一枚码。
 const R_WRITE_DENIED := &"write_denied"
+## ★ v0.48：三态状态机的拒绝码（"单向链"的护栏，见 `_write_set_state`）
+const R_STATE_TERMINAL := &"state_terminal"   # 已禁用 ⇒ 终局，不能再变
+const R_NO_DOWNGRADE := &"no_downgrade"       # 没有"显示 → 隐藏"这个动作
+const R_NOT_REVEALED := &"not_revealed"       # 隐藏的物品必须先揭示才能禁用
 
 
 ## 变更信号（01 §4.5）。静态类自身不能发信号，故由一个单例承载：
@@ -83,14 +87,18 @@ static func _close_write_gate() -> void:
 	_write_gate = false
 
 
-## ★ v0.40（15 干员）：**出战干员的额外排除回调**。
+## ── 墓碑：`extra_ban_provider` 已于 **v0.49 迁到 `PoolBuff`** ─────────────────────────────
 ##
-## 干员为许愿机提供"类似模块、但无代价"的 BAN 效果——它**不写池子数据**，
-## 只注入这个回调；`_compute` 在算派生状态时 `call()` 它拿 `Array[StringName]`（额外排除目标），
-## 与模块 BAN 走**同一条** 40% 蒸发 / 60% 摊回的零和路径。
-## 注入方 = `OperatorService._ready()`（与 `ItemService.series_item_provider` 同一模式）。
-## 未注入（`is_valid() == false`）⇒ 无额外排除，行为与旧版完全一致。
-static var extra_ban_provider: Callable = Callable()
+## 它原来是"干员给池子加一条排除"的旁路：`OperatorService._ready()` 直接把一个 `Callable`
+## 塞进本类，`_compute` 再去 `call()` 它。
+##
+## **为什么必须挪走**：v0.46 起"**物品池数据只能由 buff 这一个接口操作**"（用户裁决），
+## 而这条旁路是**绕过 buff 的第二条写入路径**——干员能在 buff 不知情的情况下改变分布。
+## 现在由 `PoolBuff.set_operator_ban_provider()` / `PoolBuff.operator_bans()` 承担，
+## 注入方改为 `OperatorService` → `PoolBuff`，`_compute` 只问 buff。
+##
+## **不要把它加回来**（与 `unsocket()` 的墓碑同一纪律）：需要"无代价排除"时请走
+## `PoolBuff.set_operator_ban_provider()`，否则"唯一接口"这条不变量当场失效。
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -339,6 +347,9 @@ static func _write_add_item(state: GameState, box_id: String, item_id: StringNam
 		return _reject(R_ITEM_ALREADY_IN_POOL)
 	if not b.item_pool.add_item(ItemCatalog.get_def(item_id)):
 		return _reject(R_POOL_INVALID)
+	# ★ v0.48：**添加进来的物品一律是"显示"**（用户裁决）——它立刻可见、可抽、也可被禁用；
+	#   隐藏只作为"物品的基础状态"存在（由内容 / 读档决定），玩家没有把它压下去的动作。
+	b.item_pool.set_state(item_id, ItemPool.ItemState.SHOWN)
 
 	b.item_pool.revision += 1
 	var s := _compute(b, b.item_pool.revision)
@@ -350,9 +361,21 @@ static func _write_add_item(state: GameState, box_id: String, item_id: StringNam
 	}
 
 
-## 改一件物品的三态（`ItemPool.ItemState`）。
+## 改一件物品的三态（`ItemPool.ItemState`）—— ★ v0.48：**带状态机校验**。
 ##
-## 拒绝条件（**都不改任何状态**）：盒子不存在 / 在邮件 / `item_id` 不在池中 / 状态越界 /
+## 用户裁决的允许迁移（**单向链**）：
+## ```
+##   添加（新物品）──────────→ 显示
+##   隐藏 ──揭示（reveal）──→ 显示
+##   显示 ──禁用（disable）─→ 禁用      ← 只有"显示"能被禁用；禁用是**终局**
+## ```
+## 明确**不允许**的三条（各自一枚码，便于上层解释）：
+##   · **显示 → 隐藏**（人为降级）⇒ `no_downgrade`；
+##   · **隐藏 → 禁用**（还没揭示就想禁掉）⇒ `not_revealed`；
+##   · **禁用 → 任何**（终局不可逆）⇒ `terminal`。
+## 幂等：设成"当前已经是"的状态 ⇒ 成功但**什么都不动**（不推进 `revision`、不发信号）。
+##
+## 其它拒绝条件（**都不改任何状态**）：盒子不存在 / 在邮件 / `item_id` 不在池中 / 状态越界 /
 ## **禁用后会让"可产出数"掉到 3 以下**（C6 下限，`regular_count − 3` 的同一枚码 `below_c6_floor`）。
 static func _write_set_state(
 	state: GameState, box_id: String, item_id: StringName, new_state: int
@@ -371,17 +394,29 @@ static func _write_set_state(
 	if new_state < ItemPool.ItemState.SHOWN or new_state > ItemPool.ItemState.DISABLED:
 		return _reject(R_BAD_STATE)
 
+	var cur := b.item_pool.state_of(item_id)
 	# ★ 幂等：设成"当前已经是"的状态 ⇒ 成功但**什么都不动**（不推进 revision、不发信号）。
 	#   否则反复点同一个按钮会白白让 07 的缓存失效。
-	if b.item_pool.state_of(item_id) == new_state:
+	if cur == new_state:
 		return {
 			"ok": true, "reason": R_OK, "state": get_pool_state(state, box_id),
 			"errors": [] as Array[String], "destroyed": false,
 		}
 
-	# C6：禁用是"减少可产出数"，必须守住 ≥ 3（改成别的状态只会增加或不变）
-	var was_disabled := b.item_pool.state_of(item_id) == ItemPool.ItemState.DISABLED
-	if new_state == ItemPool.ItemState.DISABLED and not was_disabled:
+	# ── 状态机：只放行三条合法迁移 ────────────────────────────────────────────
+	if cur == ItemPool.ItemState.DISABLED:
+		# 禁用是终局：不能再变回显示或隐藏（否则"禁用"就不是承诺了）
+		return _reject(R_STATE_TERMINAL)
+	if new_state == ItemPool.ItemState.HIDDEN:
+		# 没有"显示 → 隐藏"这个动作（隐藏是物品进入时的初始态，不是玩家能主动压下去的）
+		return _reject(R_NO_DOWNGRADE)
+	if cur == ItemPool.ItemState.HIDDEN and new_state == ItemPool.ItemState.DISABLED:
+		# 只有**显示**的物品才能被禁用 ⇒ 隐藏的必须先揭示
+		return _reject(R_NOT_REVEALED)
+
+	# 走到这里只剩两条：隐藏 → 显示（揭示）、显示 → 禁用（禁用）
+	# C6：禁用是"减少可产出数"，必须守住 ≥ 3
+	if new_state == ItemPool.ItemState.DISABLED:
 		if b.item_pool.enabled_count() - 1 < 3:
 			return _reject(R_BELOW_C6)
 
@@ -512,16 +547,15 @@ static func _compute_with(pool: ItemPool, modules: Array[Module], revision: int)
 				boost_ops.append(d)
 			ModuleDef.OpType.RECOVER:
 				pass  # 第二切片：本版仅定义接口（socket() 已在定义级拒绝它）
-	# ★ v0.40（15 干员）：出战干员的额外排除——**走与模块 BAN 完全相同的路径**
-	#   （`freed` 累加 ⇒ 下方 40% 蒸发 / 60% 摊回零和自动复用）。
-	#   干员是"无代价被动"：不占盒子槽位、不改 `modules`，只在求值时注入排除集合。
-	if extra_ban_provider.is_valid():
-		var extra: Array = extra_ban_provider.call()
-		for t in extra:
-			var tn := StringName(t)
-			if w.has(tn) and not banned.has(tn):
-				banned.append(tn)
-				freed += int(w[tn])
+	# ★ v0.49：出战干员的额外排除——**从 buff 拿**（原来是本类上的 `extra_ban_provider` 旁路）。
+	#   干员是"无代价被动"：不占盒子槽位、不改 `modules`，只在求值时提供排除集合；
+	#   它与模块 BAN 走**同一条** 40% 蒸发 / 60% 摊回的零和路径（`freed` 累加即可复用）。
+	#   ⚠️ **本类不得再持有任何"外部塞进来的回调"**：池子数据的来源只有 buff。
+	for t in PoolBuff.operator_bans():
+		var tn := StringName(t)
+		if w.has(tn) and not banned.has(tn):
+			banned.append(tn)
+			freed += int(w[tn])
 	# 逐模块切分"可回收质量"：AUTO 的块按基础权重摊给其余物品，TARGETED 的块全给其目标
 	var surviving: Array[StringName] = []
 	for id in ids:

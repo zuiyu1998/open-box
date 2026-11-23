@@ -8,6 +8,5 @@ item_id = &"art_q5"
 display_name = "名匠手作"
 category = &"art"
 quality = 5
-value = 81
+value = 32
 rarity = 2
-sell_gold = 32

@@ -18,13 +18,23 @@ extends Resource
 ## 白 1 / 绿 2 / 蓝 3 / 紫 4 / 金 5 / 红 6（`ItemConstants.QUALITY_*`，02-item.md §5.1）。
 ## 越界由校验器 **V8** 拦下（`ItemCatalog.validate()`），不是靠 `@export_range`（它只约束检查器）。
 @export_range(1, 6) var quality: int = 1
-@export var value: int = 1                  # 该物品的 TVU 价值 v（本系统定义，07 使用）
+## ★ v0.52（用户裁决）：**物品的价值就是它的金币售价——同一个字段、同一个数**。
+##
+## 旧版有两个字段（`value` = TVU 账面价值 / `sell_gold` = 金币售价），它们**互不换算**，
+## 结果同一件物品在"期望"和"卖出去"两处显示两个不同的数。用户裁决合并成一个：
+## **`value` 的单位是金币**，取原 `sell_gold` 的阶梯（品质 1–6 → **2 / 4 / 8 / 16 / 32 / 64**）。
+## TVU 作为概念退场：`07` 的 `M̄ = Σ(pᵢ × valueᵢ)` 现在**直接就是金币期望**。
+##
+## · **`0` = 不可售**（不是"免费送"）：卖出入口必须报 `not_sellable`；
+## · **标定归核心 D26**：售价是"金币供给"的第二条来源（第一条是任务奖励），
+##   定高了会冲垮 v0.19 的金币闸门（D25），必须与 `ModuleDef.gold_cost` 一起测。
+@export var value: int = 1
 ## ★ v0.37：**尺寸改为二维向量**（`宽 × 高`，单位 = 仓库网格的一格）。
 ##
 ## · **占格数 = `size.x * size.y`**（容量记账按格数：`ItemService.warehouse_used` 就是"已占格数"）；
 ## · **容量 `warehouse_capacity` 也按格数计**（默认 1000 格）；
 ## · **两个分量都必须 ≥ 1**（校验器 V2），任一分量为 0 会让物品"不占地方"，是配置错误；
-## · **尺寸与品质无关**（用户裁决）：品质只决定 `value` / `rarity` / `sell_gold`，
+## · **尺寸与品质无关**（用户裁决）：品质只决定 `value` / `rarity`，
 ##   **不再有"越高档越大"的阶梯**（旧的 `ItemConstants.QUALITY_SIZE` 已删除）；
 ## · **当前全部物品默认 `1×1`**（`ItemConstants.DEFAULT_ITEM_SIZE`），要差异化只改内容配置。
 @export var size: Vector2i = Vector2i(1, 1)
@@ -40,16 +50,7 @@ extends Resource
 @export var icon: Texture2D                 # 面板 / 条目图标
 @export var tags: Array[StringName] = []    # 预留：场景约束 / 特殊需求标记（见 03）
 
-## ★ v0.20（用户裁决）：**售出价格（单位：金币）**——把这件物品卖成金币时**每件**能换到多少。
-##
-## · **单位是金币 `gold`**（不是物品价值 `value`、也不是原石）：`value` 是 TVU 的账面价值（07 用它算 `M̄`、
-##   **与售卖无关**），`sell_gold` 是**兑换口径**——两者**互不换算**（别把 `value` 当价格用）。
-## · **`0` = 不可售**（不是"免费送"）：卖出入口必须对它报 `not_sellable`。
-## · **售卖是一条独立的物品出口**（与"交付任务"并列）：`ItemService.sell()` 一次事务里
-##   **销毁仓库实例 + 按本字段发放金币**（原子；`02-item.md` §5.7 / §5.14）。
-## · **标定归核心 D26**（🔧）：它是"金币供给"的第二条来源（第一条是任务奖励），
-##   ⇒ 售价定高了会把 v0.19 的金币闸门（D25）冲垮，必须与 `ModuleDef.gold_cost` 一起测。
-@export_range(0, 999999, 1) var sell_gold: int = 0
+
 
 
 ## 派生索引键。它只是索引键，**不是持有量的身份**（身份已由 instance_id 承担）。

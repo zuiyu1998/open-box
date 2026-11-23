@@ -63,7 +63,7 @@ const REASON_MISSING_INSTANCE := &"missing_instance"
 const REASON_DUPLICATE_ID := &"duplicate_id"
 const REASON_NOT_IN_WAREHOUSE := &"not_in_warehouse"
 const REASON_NOT_IN_MAIL := &"not_in_mail"
-## ★ v0.20：该物品**不可售**（`ItemDef.sell_gold == 0`）——售卖入口专用
+## ★ v0.20：该物品**不可售**（`ItemDef.value == 0`）——售卖入口专用
 const REASON_NOT_SELLABLE := &"not_sellable"
 const REASON_NO_SPACE := &"no_space"  # 空间问题的唯一原因码（transact 与 claim 共用）
 ## ★ v0.26：**这个盒子在邮件里**——邮件不是"可用持有"，所以不能配置 / 兑现（与物品同一纪律）。
@@ -174,9 +174,12 @@ const QUALITY_COLORS := {
 ## `sell_gold`：售出单价（金币），品质 ×2 的等比（🔧 归核心 D26，与 D25 一起标定）。
 ## **这些表是"内容生成"的唯一数据源**（`tools/gen_item_content.gd` 读它们写 42 个 `.tres`）；
 ## 手改 `.tres` 之前先改这里，否则下次重新生成会被覆盖。
-const QUALITY_VALUE := {1: 1, 2: 3, 3: 9, 4: 27, 5: 81, 6: 243}
+## ★ v0.52（用户裁决）：**价值 = 售价，单位金币**——旧的 TVU 阶梯（1/3/9/27/81/243）已删除，
+## 本阶梯就是 `ItemDef.value` 的唯一来源，取原 `QUALITY_SELL_GOLD` 的 ×2 几何（2/4/8/16/32/64）。
+const QUALITY_VALUE := {1: 2, 2: 4, 3: 8, 4: 16, 5: 32, 6: 64}
 const QUALITY_RARITY := {1: 60, 2: 30, 3: 10, 4: 5, 5: 2, 6: 1}
-const QUALITY_SELL_GOLD := {1: 2, 2: 4, 3: 8, 4: 16, 5: 32, 6: 64}
+## ★ v0.52：**墓碑**——`QUALITY_SELL_GOLD` 与 `ItemDef.value` 一并删除（价值即售价，不再有两个漏斗）。
+## 不要再加回来；要改价格请改上面的 `QUALITY_VALUE`。
 
 ## ★ v0.37：**物品尺寸的默认值**（二维向量：宽 × 高，单位 = 仓库网格的一格）。
 ## **尺寸与品质无关**；当前全部 42 个物品都用这个默认值（生成器不再写 `size`，取默认即可）。
@@ -252,8 +255,9 @@ static func quality_rarity(q: int) -> int:
 	return int(QUALITY_RARITY.get(q, -1))
 
 
+## ★ v0.52：**墓碑**——售价与价值合并后不再需要单独入口；调用方请用 `quality_value()`。
 static func quality_sell_gold(q: int) -> int:
-	return int(QUALITY_SELL_GOLD.get(q, -1))
+	return quality_value(q)
 
 
 static func is_valid_kind(kind: StringName) -> bool:

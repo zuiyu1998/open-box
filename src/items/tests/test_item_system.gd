@@ -132,7 +132,8 @@ func _setup_catalog() -> void:
 	# ★ v0.37：尺寸改为**二维向量**（宽 × 高）。夹具刻意保留"面积 1 / 2 / 5"这三档，
 	#   因为大量容量测试（溢出边界 / 部分领取 / 事务空间预演）依赖它们的相对大小。
 	var sizes := {1: Vector2i(1, 1), 2: Vector2i(2, 1), 3: Vector2i(5, 1)}
-	var values := {1: 1, 2: 3, 3: 9}
+	# ★ v0.52：价值 = 金币售价 ⇒ 夹具用金币阶梯（2 / 4 / 8）
+	var values := {1: 2, 2: 4, 3: 8}
 	# ★ v0.23：权重与品质挂钩（品质越高越难出，V9 严格单调）——夹具也必须满足，
 	#   否则"合法配置一律通过"这条断言会被自己的夹具打回。
 	var rarities := {1: 60, 2: 30, 3: 10}
@@ -146,8 +147,7 @@ func _setup_catalog() -> void:
 			d.value = values[q]
 			d.size = sizes[q]
 			d.rarity = rarities[q]
-			# ★ v0.20：售出单价（金币）= 品质 × 2；另留一件 `sell_gold = 0`（不可售）用于负测试
-			d.sell_gold = q * 2
+			# ★ v0.52：`value` 就是售价，只有这一个字段（原 `sell_gold = q*2` 已并入上面那行）
 			ItemCatalog.register(d)
 
 
@@ -309,7 +309,6 @@ func _test_item_content() -> void:
 				"value": def.value,
 				"size": def.size,
 				"rarity": def.rarity,
-				"sell_gold": def.sell_gold,
 			}
 			var want := {
 				"id": "%s_q%d" % [cat.category_id, q],
@@ -320,9 +319,8 @@ func _test_item_content() -> void:
 				# ★ v0.37：尺寸是**二维向量**且**与品质无关** ⇒ 全部物品都是默认 1×1
 				"size": ItemConstants.DEFAULT_ITEM_SIZE,
 				"rarity": ItemConstants.quality_rarity(q),
-				"sell_gold": ItemConstants.quality_sell_gold(q),
 			}
-			eq(got, want, "`%s` 的六档阶梯逐项正确（名 / 值 / 尺寸 / 权重 / 售价）" % want["id"])
+			eq(got, want, "`%s` 的六档阶梯逐项正确（名 / 价值[金币] / 尺寸 / 权重）" % want["id"])
 			checked += 1
 	eq(checked, 42, "42 格全部核过（没有空格、没有重复）")
 	eq(ItemCatalog.all_item_ids().size(), 42, "注册表里 = 42 个定义")
@@ -502,9 +500,10 @@ func _test_value_is_fixed_per_item() -> void:
 	_reset()
 
 	# 字段本身存在且可读
-	eq(ItemCatalog.get_def(&"stardust_q2").value, 3, "value 是 ItemDef 上的固定字段")
-	eq(ItemCatalog.get_def(&"stardust_q1").value, 1, "值阶梯：品质 1 → 1")
-	eq(ItemCatalog.get_def(&"stardust_q3").value, 9, "值阶梯：品质 3 → 9（几何 ×3）")
+	# ★ v0.52：价值 = 金币售价，阶梯改为 ×2 几何（2 / 4 / 8 / 16 / 32 / 64）
+	eq(ItemCatalog.get_def(&"stardust_q2").value, 4, "value 是 ItemDef 上的固定字段（单位金币）")
+	eq(ItemCatalog.get_def(&"stardust_q1").value, 2, "值阶梯：品质 1 → 2 金币")
+	eq(ItemCatalog.get_def(&"stardust_q3").value, 8, "值阶梯：品质 3 → 8 金币（几何 ×2）")
 
 	# 类别不影响价值：同品质、不同类别的物品 value 相同
 	eq(
@@ -517,8 +516,8 @@ func _test_value_is_fixed_per_item() -> void:
 	var a := ItemService.grant(&"stardust_q2", {"kind": &"gacha"})
 	var b := ItemService.grant(&"crystal_q2", {"kind": &"gacha"})
 	eq(
-		ItemCatalog.get_def(a.item_id).value, 3,
-		"实例 a 的价值 == 其定义的 value"
+		ItemCatalog.get_def(a.item_id).value, 4,
+		"实例 a 的价值 == 其定义的 value（品质 2 → 4 金币）"
 	)
 	eq(
 		ItemCatalog.get_def(b.item_id).value,
@@ -1007,7 +1006,7 @@ func _test_config_validator() -> void:
 	# 先造一个已持有实例的场景：实例只记 item_id，value 从定义查得
 	_reset()
 	var held := ItemService.grant(&"stardust_q2", {"kind": &"gacha"})
-	eq(ItemCatalog.get_def(held.item_id).value, 3, "前置：实例的价值来自定义（value=3）")
+	eq(ItemCatalog.get_def(held.item_id).value, 4, "前置：实例的价值来自定义（品质 2 → 4 金币）")
 
 	# 用不同 value 重复注册同一个 item_id
 	var redef := ItemDef.new()
@@ -1077,7 +1076,7 @@ func _state_snapshot() -> Dictionary:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  §5.14 售卖（★ v0.20）：物品的第二条出口 —— 按 `ItemDef.sell_gold` 换金币
+#  §5.14 售卖（★ v0.20）：物品的第二条出口 —— 按 `ItemDef.value` 换金币
 # ══════════════════════════════════════════════════════════════════════════════
 
 func _test_sell_grants_gold_and_destroys() -> void:
@@ -1121,7 +1120,7 @@ func _test_sell_rejects_and_is_atomic() -> void:
 	zero.value = 1
 	zero.size = Vector2i(1, 1)
 	zero.rarity = 10
-	zero.sell_gold = 0
+	zero.value = 0
 	ItemCatalog.register(zero)
 	var z := ItemService.grant(&"stardust_q9", {"kind": ItemConstants.KIND_UNLOCK})
 	var r0 := ItemService.sell([z.instance_id])
@@ -1169,7 +1168,7 @@ func _test_sell_config_validation() -> void:
 	bad.value = 1
 	bad.size = Vector2i(1, 1)
 	bad.rarity = 10
-	bad.sell_gold = -5
+	bad.value = -5
 	ItemCatalog.register(bad)
 	var rep := ItemCatalog.validate()
 	ok(not rep["ok"], "负售价 ⇒ 校验失败（V7）")

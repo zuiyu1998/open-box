@@ -8,6 +8,5 @@ item_id = &"electronic_q2"
 display_name = "二极管"
 category = &"electronic"
 quality = 2
-value = 3
+value = 4
 rarity = 30
-sell_gold = 4

@@ -7,3 +7,4 @@ script = ExtResource("1_cur")
 id = &"gold"
 display_name = "金币"
 description = "镶嵌模块的入场费（数额 = 该模块的 gold_cost）。不占仓库、不进邮件。"
+value = 2

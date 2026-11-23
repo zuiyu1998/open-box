@@ -6,7 +6,7 @@
 ## 它**不拥有**物品实例、也不拥有金币余额——那都是 `02`（`ItemService`）的账：
 ##  · 买入 = 一次 `ItemService.transact([{currency, -金币}, {grant, kind=&"market"}, …])`，
 ##    放不下（主动 kind ⇒ `OVERFLOW_REJECT`）时整笔被拒、金币分文不动、库存不减；
-##  · 卖出 = 直接转发 `ItemService.sell()`（按 `ItemDef.sell_gold` 换金币），本系统不另定卖价。
+##  · 卖出 = 直接转发 `ItemService.sell()`（按 `ItemDef.value` 换金币），本系统不另定卖价。
 ##
 ## **上架刷新**：每 `REFRESH_SECONDS`（当前 6 小时）从全部**可交易**物品
 ## （`sell_gold > 0`，即"卖得出价"的物品）里随机抽 `SLOT_COUNT` 个不同的 `item_id`，
@@ -26,7 +26,7 @@ const SLOT_COUNT := 6
 ## 每格库存件数（买走一件 −1，归零即该格售罄）。
 const STOCK_PER_SLOT := 1
 
-## **买入价倍数**：买价 = `ItemDef.sell_gold × BUY_PRICE_MULTIPLIER`。
+## **买入价倍数**：买价 = `ItemDef.value × BUY_PRICE_MULTIPLIER`。
 ## 买入比卖出贵 ⇒ 市场抽成，差价是经济闭环的一部分（🔧 归市场系统，可标定）。
 const BUY_PRICE_MULTIPLIER := 2
 
@@ -62,7 +62,7 @@ func refresh(seed_override: int = -1, now_unix: int = -1) -> void:
 	var pool: Array[StringName] = []
 	for id in ItemCatalog.all_item_ids():
 		var def := ItemCatalog.get_def(id)
-		if def != null and def.sell_gold > 0:
+		if def != null and def.value > 0:
 			pool.append(id)
 
 	# 不放回抽样：洗牌后取前 SLOT_COUNT 个（数量不足则全取）
@@ -74,7 +74,7 @@ func refresh(seed_override: int = -1, now_unix: int = -1) -> void:
 		var def := ItemCatalog.get_def(id)
 		listings.append({
 			"item_id": id,
-			"price": def.sell_gold * BUY_PRICE_MULTIPLIER,
+			"price": def.value * BUY_PRICE_MULTIPLIER,
 			"qty": STOCK_PER_SLOT,
 		})
 	refreshed_at_unix = now_unix if now_unix >= 0 else int(Time.get_unix_time_from_system())

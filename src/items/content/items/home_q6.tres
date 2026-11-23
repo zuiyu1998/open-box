@@ -8,6 +8,5 @@ item_id = &"home_q6"
 display_name = "传世茶案"
 category = &"home"
 quality = 6
-value = 243
+value = 64
 rarity = 1
-sell_gold = 64

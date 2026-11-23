@@ -8,4 +8,4 @@ item_id = &"art_q1"
 display_name = "素描习作"
 category = &"art"
 rarity = 60
-sell_gold = 2
+value = 2

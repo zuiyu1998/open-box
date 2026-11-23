@@ -8,5 +8,4 @@ item_id = &"home_q3"
 display_name = "铜制水壶"
 category = &"home"
 quality = 3
-value = 9
-sell_gold = 8
+value = 8

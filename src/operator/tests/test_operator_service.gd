@@ -79,7 +79,7 @@ func _setup_pool() -> GameState:
 		d.value = q
 		d.size = Vector2i(1, 1)
 		d.rarity = 100   # 全等 ⇒ 基础权重均分，BAN 效果可精确读
-		d.sell_gold = q * 2
+		d.value = q * 2
 		ItemCatalog.register(d)
 		defs.append(d)
 

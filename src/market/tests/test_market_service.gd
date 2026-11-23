@@ -80,7 +80,7 @@ func _setup() -> void:
 		d.size = Vector2i(1, 1)
 		d.rarity = 10
 		# 第 8 个 sell_gold = 0（不可交易）；其余 2/4/6/8/10/12/14（买价 = ×2）
-		d.sell_gold = 0 if i == 7 else (i + 1) * 2
+		d.value = 0 if i == 7 else (i + 1) * 2
 		ItemCatalog.register(d)
 
 
@@ -134,13 +134,13 @@ func _test_refresh_excludes_untradeable() -> void:
 		for l in MarketService.listings_snapshot():
 			var id: StringName = l["item_id"]
 			var def := ItemCatalog.get_def(id)
-			ok(def != null and def.sell_gold > 0, "上架物品都可交易（sell_gold > 0）")
+			ok(def != null and def.value > 0, "上架物品都可交易（sell_gold > 0）")
 			ok(String(id) != "stardust_q8", "不可交易物品（q8）不上架")
 	# 买价 = sell_gold × 2
 	var found := false
 	for l in MarketService.listings_snapshot():
 		var def := ItemCatalog.get_def(l["item_id"])
-		eq(int(l["price"]), def.sell_gold * MarketService.BUY_PRICE_MULTIPLIER,
+		eq(int(l["price"]), def.value * MarketService.BUY_PRICE_MULTIPLIER,
 			"买价 = sell_gold × %d" % MarketService.BUY_PRICE_MULTIPLIER)
 		found = true
 	ok(found, "至少有一格上架（断言了买价公式）")
@@ -251,8 +251,8 @@ func _test_sell_forwards_to_item_service() -> void:
 	var gold_before := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
 	var res := MarketService.sell([inst.instance_id])
 	ok(res["ok"], "市场卖出成功（转发 02）")
-	eq(int(res["gold"]), ItemCatalog.get_def(&"stardust_q1").sell_gold,
-		"卖得金币 = sell_gold（市场不另定卖价）")
+	eq(int(res["gold"]), ItemCatalog.get_def(&"stardust_q1").value,
+		"卖得金币 = value（价值即售价，市场不另定卖价）")
 	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD), gold_before + int(res["gold"]),
 		"金币余额 +卖得")
 

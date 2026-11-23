@@ -8,4 +8,4 @@ item_id = &"energy_q1"
 display_name = "干电池"
 category = &"energy"
 rarity = 60
-sell_gold = 2
+value = 2

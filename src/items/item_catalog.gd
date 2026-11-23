@@ -378,10 +378,10 @@ func validate() -> Dictionary:
 	# 而 07 只读派生量、**无从察觉**这类配置错误。
 	for k in _by_id.keys():
 		var def := _by_id[k] as ItemDef
-		if def.sell_gold < 0:
+		if def.value < 0:
 			errors.append(
-				"V7 非法：`%s`.sell_gold = %d，必须 >= 0（0 = 不可售；负值会让售卖销毁金币）"
-				% [def.item_id, def.sell_gold]
+				"V7 非法：`%s`.value = %d，必须 >= 0（0 = 不可售；负值会让售卖销毁金币；★ v0.52 价值即售价）"
+				% [def.item_id, def.value]
 			)
 
 	return {"ok": errors.is_empty(), "errors": errors}

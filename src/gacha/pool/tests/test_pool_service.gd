@@ -506,7 +506,7 @@ func _test_add_pool_item() -> void:
 
 
 func _test_item_state_writes() -> void:
-	print("— ★ v0.45 三态写入：隐藏不改分布、禁用重新归一、C6 下限拦住禁用")
+	print("— ★ v0.48 状态机：添加→显示、隐藏→(揭示)→显示、显示→(禁用)→禁用；禁用终局")
 	var f := _new_state(1)
 	var st: GameState = f["state"]
 	var bx: Box = f["boxes"][0]
@@ -515,17 +515,31 @@ func _test_item_state_writes() -> void:
 
 	var before := PoolService.get_pool_state(st, bx.box_id).weights_bp.duplicate()
 
-	# ① 隐藏：分布逐项不变
-	var r1 := PoolBuff.set_state(st, bx.box_id, first, ItemPool.ItemState.HIDDEN)
-	ok(r1["ok"], "设为隐藏成功")
-	var ps1 := PoolService.get_pool_state(st, bx.box_id)
-	eq(ps1.weights_bp, before, "**隐藏不改变任何权重**")
-	eq(ps1.hidden_ids.has(first), true, "PoolState 报出该隐藏项")
-	eq(ps1.disabled_ids.is_empty(), true, "没有禁用项")
+	# ① 隐藏是"物品的基础状态"（由内容/读档决定），玩家没有把显示压成隐藏的动作。
+	#    这里用数据层直接构造一个隐藏项，再用 buff 的 reveal 揭示它。
+	ok(bx.item_pool.set_state(first, ItemPool.ItemState.HIDDEN), "夹具：把第 1 件置为隐藏")
+	bx.item_pool.revision += 1          # 绕过 buff 的夹具改动要自己推进 revision，否则读到缓存
+	var ps_hidden := PoolService.get_pool_state(st, bx.box_id)
+	eq(ps_hidden.weights_bp, before, "**隐藏不改变任何权重**（仍参与抽取）")
+	eq(ps_hidden.hidden_ids.has(first), true, "PoolState 报出该隐藏项")
 
-	# ② 禁用：退出分布、其余重新归一
-	var r2 := PoolBuff.set_state(st, bx.box_id, first, ItemPool.ItemState.DISABLED)
-	ok(r2["ok"], "设为禁用成功")
+	# ② 隐藏的物品**不能直接禁用**（必须先揭示）
+	var bad := PoolBuff.disable(st, bx.box_id, first)
+	ok(not bad["ok"], "禁用一件隐藏物品 ⇒ 拒绝")
+	eq(bad["reason"], PoolService.R_NOT_REVEALED, "原因码 = not_revealed")
+	eq(bx.item_pool.state_of(first), ItemPool.ItemState.HIDDEN, "状态没变")
+
+	# ③ 揭示：隐藏 → 显示
+	var rev0 := bx.item_pool.revision
+	var rev_h := PoolBuff.reveal(st, bx.box_id, first)
+	ok(rev_h["ok"], "揭示成功")
+	eq(bx.item_pool.state_of(first), ItemPool.ItemState.SHOWN, "变成显示")
+	eq(bx.item_pool.revision, rev0 + 1, "revision +1")
+	eq(PoolService.get_pool_state(st, bx.box_id).weights_bp, before, "揭示也不改分布")
+
+	# ④ 禁用：显示 → 禁用，退出分布、其余重新归一
+	var r2 := PoolBuff.disable(st, bx.box_id, first)
+	ok(r2["ok"], "禁用成功")
 	var ps2 := PoolService.get_pool_state(st, bx.box_id)
 	eq(ps2.weights_bp.has(first), false, "**禁用项不在 weights_bp 里**（出候选集，不是 0 权重）")
 	eq(ps2.weight_of(first), 0, "查询它的权重为 0")
@@ -533,41 +547,60 @@ func _test_item_state_writes() -> void:
 	eq(ps2.disabled_ids.has(first), true, "PoolState 报出该禁用项")
 	eq(ps2.banned_ids().has(first), false, "**禁用不被误报成「被 BAN」**")
 
-	# ③ C6 下限：把可产出压到 3 之后，再禁用一件 ⇒ 拒绝且状态不变
+	# ⑤ 禁用是**终局**：揭示 / 再禁用都拒绝，状态不变
+	var rev_term := bx.item_pool.revision
+	eq(PoolBuff.reveal(st, bx.box_id, first)["reason"], PoolService.R_STATE_TERMINAL,
+		"禁用后不能揭示 ⇒ state_terminal")
+	eq(PoolBuff.disable(st, bx.box_id, first)["ok"], true, "再禁用 ⇒ 幂等成功（已是该状态）")
+	eq(bx.item_pool.revision, rev_term, "幂等不推进 revision")
+	eq(bx.item_pool.state_of(first), ItemPool.ItemState.DISABLED, "状态仍是禁用")
+
+	# ⑥ 没有"显示 → 隐藏"这个公开动作：buff 上不存在能直接设隐藏的入口
+	ok(not _has_buff_method("set_state"), "buff 不再暴露万能 set_state")
+	#    内部写入确实拦住了降级（打开闸门直接调，验证护栏本身）
+	PoolService._open_write_gate()
+	var down := PoolService._write_set_state(st, bx.box_id, ids[1], ItemPool.ItemState.HIDDEN)
+	PoolService._close_write_gate()
+	eq(down["reason"], PoolService.R_NO_DOWNGRADE, "显示 → 隐藏 ⇒ no_downgrade（护栏在位）")
+
+	# ⑦ C6 下限：把可产出压到 3 之后，再禁用一件 ⇒ 拒绝且状态不变
 	while bx.item_pool.enabled_count() > 3:
 		var target := &""
 		for id in bx.item_pool.item_ids():
-			if bx.item_pool.state_of(id) != ItemPool.ItemState.DISABLED:
+			if bx.item_pool.state_of(id) == ItemPool.ItemState.SHOWN:
 				target = id
 				break
 		if target == &"":
 			break
-		ok(PoolBuff.set_state(st, bx.box_id, target, ItemPool.ItemState.DISABLED)["ok"],
+		ok(PoolBuff.disable(st, bx.box_id, target)["ok"],
 			"禁用一件（可产出 → %d）" % (bx.item_pool.enabled_count() - 1))
 	eq(bx.item_pool.enabled_count(), 3, "前置：可产出压到 3")
 	var last_id := &""
 	for id in bx.item_pool.item_ids():
-		if PoolService.get_pool_state(st, bx.box_id).weights_bp.has(id):
+		if bx.item_pool.state_of(id) == ItemPool.ItemState.SHOWN:
 			last_id = id
 			break
 	var rev_before := bx.item_pool.revision
-	var r3 := PoolBuff.set_state(st, bx.box_id, last_id, ItemPool.ItemState.DISABLED)
+	var r3 := PoolBuff.disable(st, bx.box_id, last_id)
 	ok(not r3["ok"], "再禁用一件 ⇒ 拒绝（C6 ≥ 3）")
 	eq(r3["reason"], PoolService.R_BELOW_C6, "原因码 = below_c6_floor")
 	eq(bx.item_pool.revision, rev_before, "被拒时 revision 不动")
 	eq(bx.item_pool.enabled_count(), 3, "可产出仍是 3")
 
-	# ③b 幂等：设成"当前已经是"的状态 ⇒ 成功但不推进 revision（不白让缓存失效）
-	var rev_idem := bx.item_pool.revision
-	var same := PoolBuff.set_state(st, bx.box_id, last_id, ItemPool.ItemState.SHOWN)
-	ok(same["ok"], "设成当前状态 ⇒ 成功")
-	eq(bx.item_pool.revision, rev_idem, "revision 不动（幂等）")
-
-	# ④ 其它拒绝路径
-	eq(PoolBuff.set_state(st, bx.box_id, &"nope", 0)["reason"],
+	# ⑧ 其它拒绝路径
+	eq(PoolBuff.disable(st, bx.box_id, &"nope")["reason"],
 		PoolService.R_ITEM_NOT_IN_POOL, "不在池中 ⇒ item_not_in_pool")
-	eq(PoolBuff.set_state(st, bx.box_id, last_id, 99)["reason"],
-		PoolService.R_BAD_STATE, "状态越界 ⇒ bad_item_state")
+
+
+## buff 脚本里是否还有某个静态方法（用于"旧接口已删除"的断言）。
+func _has_buff_method(method_name: String) -> bool:
+	var scr := load("res://src/gacha/pool/pool_buff.gd") as Script
+	if scr == null:
+		return false
+	for m in scr.get_script_method_list():
+		if String(m.get("name", "")) == method_name:
+			return true
+	return false
 
 
 func _test_item_state_roundtrip() -> void:
@@ -586,10 +619,12 @@ func _test_item_state_roundtrip() -> void:
 	extra.rarity = 40
 	ItemCatalog.register(extra)
 
-	ok(PoolBuff.add_item(st, bx.box_id, &"extra_q2")["ok"], "先加一件")
-	ok(PoolBuff.set_state(st, bx.box_id, &"extra_q2", ItemPool.ItemState.DISABLED)["ok"], "再把它禁用")
+	ok(PoolBuff.add_item(st, bx.box_id, &"extra_q2")["ok"], "先加一件（落为显示）")
+	eq(bx.item_pool.state_of(&"extra_q2"), ItemPool.ItemState.SHOWN, "新物品是显示（v0.48）")
+	ok(PoolBuff.disable(st, bx.box_id, &"extra_q2")["ok"], "再把它禁用")
+	# 隐藏态只能由数据层构造（玩家没有这个动作）——落盘仍要能往返
 	var first: StringName = bx.item_pool.item_ids()[0]
-	ok(PoolBuff.set_state(st, bx.box_id, first, ItemPool.ItemState.HIDDEN)["ok"], "第一件设隐藏")
+	ok(bx.item_pool.set_state(first, ItemPool.ItemState.HIDDEN), "夹具：第一件置为隐藏")
 
 	var d := bx.to_dict()
 	var back := Box.from_dict(d, 0)

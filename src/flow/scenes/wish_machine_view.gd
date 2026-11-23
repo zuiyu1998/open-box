@@ -22,8 +22,13 @@ signal open_requested(times: int)
 signal socket_requested
 ## ★ v0.44：`unsocket_requested` 已随"拆卸"一起删除——**模块镶上即永久锁定**。
 ## ★ v0.45：池子成员与三态（可编辑字段，不走模块）
-signal pool_cycle_requested
+signal pool_reveal_requested
+signal pool_disable_requested
 signal pool_add_requested
+## ★ v0.51：浮层的排序变了（0 池内顺序 / 1 概率 / 2 价值 / 3 售价）
+signal pool_sort_requested(mode: int)
+## ★ v0.52b：请求打开池子数据浮层——**先 refresh 再开**，保证打开时看到的是当前数据
+signal pool_data_requested
 signal operator_toggle_requested
 ## 选中的盲盒变了（右栏信息 / 中栏位子都要跟着重算）。
 signal box_changed
@@ -43,9 +48,19 @@ signal box_changed
 @onready var _pool_summary: Label = $Columns/Left/PoolSection/PoolSummary
 @onready var _pool_picker: OptionButton = $Columns/Left/PoolSection/PoolPicker
 @onready var _pool_state: Label = $Columns/Left/PoolSection/PoolState
-@onready var _pool_cycle_btn: Button = $Columns/Left/PoolSection/PoolButtons/PoolCycleButton
+@onready var _pool_reveal_btn: Button = $Columns/Left/PoolSection/PoolButtons/RevealButton
+@onready var _pool_disable_btn: Button = $Columns/Left/PoolSection/PoolButtons/DisableButton
 @onready var _add_picker: OptionButton = $Columns/Left/PoolSection/AddRow/AddPicker
 @onready var _add_btn: Button = $Columns/Left/PoolSection/AddRow/AddButton
+## ★ v0.50：池子数据浮层（用 `CanvasLayer` 承载，容器的排版不会碰到它）
+@onready var _pool_data_btn: Button = $Columns/Left/PoolSection/PoolButtons/PoolDataButton
+@onready var _overlay: Control = $PoolOverlayLayer/PoolOverlay
+@onready var _ov_note: Label = $PoolOverlayLayer/PoolOverlay/Frame/Body/Note
+@onready var _ov_rows: VBoxContainer = $PoolOverlayLayer/PoolOverlay/Frame/Body/Scroll/Rows
+@onready var _ov_totals: Label = $PoolOverlayLayer/PoolOverlay/Frame/Body/Totals
+@onready var _ov_close: Button = $PoolOverlayLayer/PoolOverlay/Frame/Body/CloseButton
+## ★ v0.51：浮层排序
+@onready var _ov_sort: OptionButton = $PoolOverlayLayer/PoolOverlay/Frame/Body/SortRow/SortPicker
 @onready var _result_lbl: Label = $Columns/Left/ResultSection/ResultLine
 
 @onready var _op_level: Label = $Columns/Middle/OperatorLevel
@@ -66,8 +81,13 @@ func _ready() -> void:
 	_open_ten.pressed.connect(func() -> void: open_requested.emit(10))
 	_open_all.pressed.connect(func() -> void: open_requested.emit(0))
 	_socket_btn.pressed.connect(func() -> void: socket_requested.emit())
-	_pool_cycle_btn.pressed.connect(func() -> void: pool_cycle_requested.emit())
+	_pool_reveal_btn.pressed.connect(func() -> void: pool_reveal_requested.emit())
+	_pool_disable_btn.pressed.connect(func() -> void: pool_disable_requested.emit())
 	_add_btn.pressed.connect(func() -> void: pool_add_requested.emit())
+	# ★ v0.50：浮层的开 / 关**完全在 View 内部**——它不改任何数据，不需要绕 Model / Controller
+	_pool_data_btn.pressed.connect(func() -> void: pool_data_requested.emit())
+	_ov_sort.item_selected.connect(func(i: int) -> void: pool_sort_requested.emit(i))
+	_ov_close.pressed.connect(func() -> void: _overlay.visible = false)
 	_op_toggle.pressed.connect(func() -> void: operator_toggle_requested.emit())
 	_picker.item_selected.connect(func(_i: int) -> void: box_changed.emit())
 
@@ -120,7 +140,17 @@ func render(s: Dictionary) -> void:
 	_pool_state.text = String(s.get("pool_state_text", ""))
 	_refill(_pool_picker, s.get("pool_options", []))
 	_refill(_add_picker, s.get("add_options", []))
-	_pool_cycle_btn.disabled = bool(s.get("pool_cycle_disabled", true))
+	_pool_reveal_btn.disabled = bool(s.get("pool_reveal_disabled", true))
+	_pool_disable_btn.disabled = bool(s.get("pool_disable_disabled", true))
+
+	# ── 池子数据浮层（★ v0.50）───────────────────────────────────────────────
+	_ov_note.text = String(s.get("pool_table_note", ""))
+	_ov_totals.text = String(s.get("pool_table_totals", ""))
+	if _ov_sort.item_count == 0:
+		for m in WishMachineModel.SORT_MODES:
+			_ov_sort.add_item(m)
+	_ov_sort.select(int(s.get("pool_table_sort_mode", 0)))
+	_render_pool_table(s.get("pool_table_rows", []))
 	_add_btn.disabled = bool(s.get("pool_add_disabled", true))
 
 	# ── 左栏 · 下：生成物品 ───────────────────────────────────────────────────
@@ -155,3 +185,63 @@ func _refill(picker: OptionButton, opts) -> void:
 		picker.selected = prev
 	else:
 		picker.selected = 0
+
+
+## ★ v0.50：把浮层的表格行**重建一遍**（每次 render 都重建 ⇒ 数据永远跟当前池子一致）。
+##
+## 为什么用代码建行而不是在场景里铺 N 个 Label：池子件数由套系品质与"添加物品"决定（8–12+），
+## 静态节点会在增删物品后对不上；这里清空重填，逻辑与 `_refill` 同一套路子。
+## ★ v0.52b：显示 / 隐藏浮层（由 Controller 在 refresh 之后调用，保证数据是新取的）。
+func show_pool_overlay() -> void:
+	_overlay.visible = true
+
+
+func hide_pool_overlay() -> void:
+	_overlay.visible = false
+
+
+func is_pool_overlay_visible() -> bool:
+	return _overlay.visible
+
+
+func _render_pool_table(rows) -> void:
+	for ch in _ov_rows.get_children():
+		_ov_rows.remove_child(ch)
+		ch.queue_free()
+	var arr: Array = rows if rows is Array else []
+	if arr.is_empty():
+		var empty := Label.new()
+		empty.text = "（这个池子还没有可陈列的物品）"
+		_ov_rows.add_child(empty)
+		return
+	for r in arr:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 12)
+		var name_lbl := Label.new()
+		name_lbl.text = String(r.get("name", ""))
+		name_lbl.custom_minimum_size = Vector2(260, 0)
+		row.add_child(name_lbl)
+		var state_lbl := Label.new()
+		state_lbl.text = String(r.get("state", ""))
+		state_lbl.custom_minimum_size = Vector2(160, 0)
+		row.add_child(state_lbl)
+		var w_lbl := Label.new()
+		w_lbl.text = "%d" % int(r.get("weight_bp", 0))
+		w_lbl.custom_minimum_size = Vector2(90, 0)
+		w_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		row.add_child(w_lbl)
+		var p_lbl := Label.new()
+		p_lbl.text = "%.2f%%" % (float(r.get("prob", 0.0)) * 100.0)
+		p_lbl.custom_minimum_size = Vector2(90, 0)
+		p_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		row.add_child(p_lbl)
+		var v_lbl := Label.new()
+		v_lbl.text = "%d 金币" % int(r.get("value", 0))
+		v_lbl.custom_minimum_size = Vector2(90, 0)
+		v_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		row.add_child(v_lbl)
+		var spacer := Control.new()
+		spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(spacer)
+		_ov_rows.add_child(row)

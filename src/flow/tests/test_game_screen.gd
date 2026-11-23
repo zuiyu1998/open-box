@@ -37,6 +37,8 @@ func _ready() -> void:
 	_reset_world()
 	await _test_pool_editor()
 	_reset_world()
+	await _test_pool_overlay()
+	_reset_world()
 	await _test_market_page()
 	_reset_world()
 	await _test_tab_switch_refreshes()
@@ -532,36 +534,54 @@ func _test_pool_editor() -> void:
 	eq(n0, bx.item_pool.base_items.size(), "池子列表 = 池内件数（%d）" % n0)
 	ok(String(s["pool_summary"]).find("池子 %d 件" % n0) >= 0, "摘要报出件数（%s）" % s["pool_summary"])
 
-	var cycle_btn: Button = left.get_node("PoolSection/PoolButtons/PoolCycleButton")
+	var reveal_btn: Button = left.get_node("PoolSection/PoolButtons/RevealButton")
+	var disable_btn: Button = left.get_node("PoolSection/PoolButtons/DisableButton")
 	var first_id: StringName = bx.item_pool.base_items[0].item_id
 
-	print("— §3.2c 轮转：显示 → 隐藏 → 禁用 → 显示")
-	cycle_btn.pressed.emit()
+	print("— §3.2c 禁用：只有显示能禁用；禁用后退出分布且终局")
+	eq(reveal_btn.disabled, true, "显示态的物件 ⇒「揭示」置灰（没什么可揭示的）")
+	eq(disable_btn.disabled, false, "显示态 ⇒「禁用」可点")
+	disable_btn.pressed.emit()
 	await get_tree().process_frame
 	var s1: Dictionary = ctrl.snapshot()
-	eq(bx.item_pool.state_of(first_id), ItemPool.ItemState.HIDDEN, "第 1 件变成隐藏")
-	ok(String(s1["pool_state_text"]).find("隐藏") >= 0, "状态行说明是隐藏（%s）" % s1["pool_state_text"])
-	ok(String(s1["pool_summary"]).find("隐藏 1") >= 0, "摘要：隐藏 1（%s）" % s1["pool_summary"])
-
-	cycle_btn.pressed.emit()
-	await get_tree().process_frame
-	var s2: Dictionary = ctrl.snapshot()
-	eq(bx.item_pool.state_of(first_id), ItemPool.ItemState.DISABLED, "再轮转 → 禁用")
-	ok(String(s2["pool_summary"]).find("禁用 1") >= 0, "摘要：禁用 1（%s）" % s2["pool_summary"])
-	# 禁用 ⇒ 真的退出分布
+	eq(bx.item_pool.state_of(first_id), ItemPool.ItemState.DISABLED, "第 1 件变成禁用")
+	ok(String(s1["pool_summary"]).find("禁用 1") >= 0, "摘要：禁用 1（%s）" % s1["pool_summary"])
+	ok(String(s1["pool_state_text"]).find("禁用") >= 0, "状态行说明是禁用（%s）" % s1["pool_state_text"])
+	eq(reveal_btn.disabled, true, "禁用后 ⇒「揭示」置灰（终局不可逆）")
+	eq(disable_btn.disabled, true, "禁用后 ⇒「禁用」也置灰")
 	var ps := PoolService.get_pool_state(st, bx.box_id)
 	eq(ps.weights_bp.has(first_id), false, "禁用项已退出 weights_bp")
 	ok(ps.is_zero_sum(), "其余物品重新归一，Σ == 10000")
 
-	cycle_btn.pressed.emit()
+	print("— §3.2c 揭示：隐藏态才能揭示；隐藏的不能直接禁用")
+	# 隐藏态由数据层构造（玩家没有"显示→隐藏"这个动作）
+	var second_id: StringName = bx.item_pool.base_items[1].item_id
+	bx.item_pool.set_state(second_id, ItemPool.ItemState.HIDDEN)
+	bx.item_pool.revision += 1
+	# 在池子下拉里**选中那一件**再看按钮（按钮的可用性跟着选中项走）
+	var pool_picker: OptionButton = left.get_node("PoolSection/PoolPicker")
+	pool_picker.select(1)
+	scr.refresh()
 	await get_tree().process_frame
-	var s3: Dictionary = ctrl.snapshot()
-	eq(bx.item_pool.state_of(first_id), ItemPool.ItemState.SHOWN, "再轮转 → 回到显示")
-	ok(String(s3["pool_summary"]).find("隐藏 0") >= 0, "摘要：隐藏 0（%s）" % s3["pool_summary"])
-	ok(String(s3["pool_summary"]).find("禁用 0") >= 0, "摘要：禁用 0")
+	var s2: Dictionary = ctrl.snapshot()
+	eq(reveal_btn.disabled, false, "隐藏态 ⇒「揭示」可点")
+	eq(disable_btn.disabled, true, "隐藏态 ⇒「禁用」置灰（还没揭示）")
+	ok(String(s2["pool_summary"]).find("隐藏 1") >= 0, "摘要：隐藏 1（%s）" % s2["pool_summary"])
+	# 直接调模型：隐藏的禁用必须被拒，并给出人能看懂的理由
+	ctrl.model.disable_pool_item(1, 1)
+	var s2b: Dictionary = ctrl.snapshot()
+	ok(String(s2b["result"]).find("必须先揭示") >= 0, "隐藏的禁用 ⇒ 提示「必须先揭示」（%s）" % s2b["result"])
+	eq(bx.item_pool.state_of(second_id), ItemPool.ItemState.HIDDEN, "状态没变")
+	reveal_btn.pressed.emit()
+	await get_tree().process_frame
+	var s2c: Dictionary = ctrl.snapshot()
+	eq(bx.item_pool.state_of(second_id), ItemPool.ItemState.SHOWN, "揭示后变成显示")
+	ok(String(s2c["pool_summary"]).find("隐藏 0") >= 0, "摘要：隐藏 0（%s）" % s2c["pool_summary"])
+	eq(reveal_btn.disabled, true, "揭示后 ⇒「揭示」又置灰（已是显示）")
+	eq(disable_btn.disabled, false, "揭示后 ⇒「禁用」可点（它现在是显示）")
 
 	print("— §3.2c 添加：把池外物品加进池子")
-	var add_n: int = (s3["add_options"] as Array).size()
+	var add_n: int = (s2c["add_options"] as Array).size()
 	ok(add_n > 0, "有可添加的候选（%d 件池外物品）" % add_n)
 	var add_btn: Button = left.get_node("PoolSection/AddRow/AddButton")
 	add_btn.pressed.emit()
@@ -771,5 +791,154 @@ func _test_operator_page() -> void:
 	var s5: Dictionary = ctrl.snapshot()
 	ok(String(s5["result"]).find("升级成功") >= 0, "升级成功（%s）" % s5["result"])
 	ok(String(s5["level"]).find("Lv.2") >= 0, "面板等级刷新（%s）" % s5["level"])
+	scr.queue_free()
+	await get_tree().process_frame
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ④d 池子数据浮层（★ v0.50：按钮在许愿机页，浮层列池子数据）
+# ══════════════════════════════════════════════════════════════════════════════
+
+func _test_pool_overlay() -> void:
+	print("— §3.2d 池子数据浮层：按钮在页面上，浮层列数据、隐藏项不列")
+	_reset_world()
+	OperatorService.reset()
+	var st := GameState.new_game()
+	var boxes := GachaService.grant_box(st, &"series_01", 1, &"test")
+	var bx: Box = boxes[0]
+	var scr = await _make_screen()
+	scr.bind_state(st)
+	await get_tree().process_frame
+	var wish: Node = scr.page_node("WishPage")
+	var left: Node = wish.get_node("Columns/Left")
+	var overlay: Control = wish.get_node("PoolOverlayLayer/PoolOverlay")
+	var rows: VBoxContainer = wish.get_node("PoolOverlayLayer/PoolOverlay/Frame/Body/Scroll/Rows")
+	var note: Label = wish.get_node("PoolOverlayLayer/PoolOverlay/Frame/Body/Note")
+	var totals: Label = wish.get_node("PoolOverlayLayer/PoolOverlay/Frame/Body/Totals")
+	var close_btn: Button = wish.get_node("PoolOverlayLayer/PoolOverlay/Frame/Body/CloseButton")
+
+	var data_btn: Button = left.get_node("PoolSection/PoolButtons/PoolDataButton")
+	ok(data_btn != null, "许愿机页有「池子数据」按钮")
+	eq(overlay.visible, false, "默认不显示浮层")
+
+	# 基础表格：8 件全显示 ⇒ 8 行
+	eq(rows.get_child_count(), bx.item_pool.base_items.size(),
+		"浮层列出 %d 行（= 池内件数）" % bx.item_pool.base_items.size())
+	ok(String(totals.text).find("100.00%") >= 0, "合计行给出 Σ概率 + void = 100.00%（%s）" % totals.text)
+	ok(String(totals.text).find("金币") >= 0, "合计行给出金币期望")
+	ok(String(note.text).find("未揭示") < 0, "没有隐藏项 ⇒ 不提示未揭示")
+
+	print("— §3.2d 点按钮开浮层；隐藏项不列但计数提示")
+	data_btn.pressed.emit()
+	await get_tree().process_frame
+	eq(overlay.visible, true, "点击后浮层可见")
+	close_btn.pressed.emit()
+	await get_tree().process_frame
+	eq(overlay.visible, false, "「关闭」把它收起来")
+
+	# 造一个隐藏项 + 一个禁用项，再刷新
+	var hidden_id: StringName = bx.item_pool.base_items[0].item_id
+	bx.item_pool.set_state(hidden_id, ItemPool.ItemState.HIDDEN)
+	var disabled_id: StringName = bx.item_pool.base_items[1].item_id
+	PoolBuff.disable(st, bx.box_id, disabled_id)
+	bx.item_pool.revision += 1
+	scr.refresh()
+	await get_tree().process_frame
+	eq(rows.get_child_count(), bx.item_pool.base_items.size() - 1,
+		"隐藏项被排除 ⇒ 少一行（禁用项仍在表里）")
+	ok(String(note.text).find("另有 1 件未揭示") >= 0, "提示里说明有 1 件未揭示（%s）" % note.text)
+	# 禁用行：概率与权重都是 0
+	var found_disabled := false
+	for ch in rows.get_children():
+		if ch is HBoxContainer and ch.get_child_count() >= 4:
+			if String((ch.get_child(2) as Label).text) == "0":
+				found_disabled = true
+				eq((ch.get_child(3) as Label).text, "0.00%", "禁用行概率显示 0.00%")
+	ok(found_disabled, "禁用行确实在表里（权重 0）")
+
+	print("— §3.2d 排序：概率↓ / 价值↓ 真的换顺序（且不动数据）")
+	var sort_picker: OptionButton = wish.get_node("PoolOverlayLayer/PoolOverlay/Frame/Body/SortRow/SortPicker")
+	eq(sort_picker.item_count, WishMachineModel.SORT_MODES.size(), "排序下拉有 3 个选项（★ v0.52：售价并入价值）")
+	eq(sort_picker.selected, 0, "默认 = 池内顺序")
+
+	var rev_before := bx.item_pool.revision
+	var weights_before := PoolService.get_pool_state(st, bx.box_id).weights_bp.duplicate()
+
+	# 价值 ↓：首行价值必须是全表最大（★ v0.52：表只有 5 列，价值的列号 = 4）
+	sort_picker.select(2)
+	sort_picker.item_selected.emit(2)
+	await get_tree().process_frame
+	var first_val := 0
+	var max_val := -1
+	for ch in rows.get_children():
+		if ch is HBoxContainer and ch.get_child_count() >= 5:
+			max_val = maxi(max_val, int(String((ch.get_child(4) as Label).text).split(" ")[0]))
+	if rows.get_child_count() > 0:
+		first_val = int(String((rows.get_child(0).get_child(4) as Label).text).split(" ")[0])
+	eq(first_val, max_val, "价值 ↓：首行价值 == 全表最大值（%d）" % max_val)
+
+	# 概率 ↓
+	sort_picker.select(1)
+	sort_picker.item_selected.emit(1)
+	await get_tree().process_frame
+	var first_prob := String((rows.get_child(0).get_child(3) as Label).text)
+	var max_prob := 0.0
+	for ch in rows.get_children():
+		if ch is HBoxContainer and ch.get_child_count() >= 6:
+			max_prob = maxf(max_prob, String((ch.get_child(3) as Label).text).trim_suffix("%").to_float())
+	eq(String(first_prob).trim_suffix("%").to_float(), max_prob, "概率 ↓：首行概率 == 全表最大值")
+
+	# 排序不碰数据
+	eq(bx.item_pool.revision, rev_before, "排序不推进 revision（不是写入）")
+	eq(PoolService.get_pool_state(st, bx.box_id).weights_bp, weights_before, "排序不改分布")
+
+	# 回到池内顺序
+	sort_picker.select(0)
+	sort_picker.item_selected.emit(0)
+	await get_tree().process_frame
+	eq(first_val >= 0, true, "回到池内顺序也能正常渲染")
+	ok(String(note.text).find("池内顺序") >= 0, "说明行标明当前排序（%s）" % note.text)
+
+	print("— §3.2d ★ v0.52b 打开浮层会先取最新数据（外部改动也算）")
+	# 数据层直接改池子（模拟"别的系统动了池子，而本页没刷新"），不调 scr.refresh()
+	var tail_id: StringName = bx.item_pool.base_items[bx.item_pool.base_items.size() - 1].item_id
+	bx.item_pool.set_state(tail_id, ItemPool.ItemState.DISABLED)
+	bx.item_pool.revision += 1
+	# 此时浮层里还是旧数据（未渲染）
+	overlay.visible = false
+	data_btn.pressed.emit()
+	await get_tree().process_frame
+	eq(overlay.visible, true, "按钮把浮层打开了")
+	var found_tail := false
+	for ch in rows.get_children():
+		if ch is HBoxContainer and ch.get_child_count() >= 5:
+			var state_txt := String((ch.get_child(1) as Label).text)
+			var weight_txt := String((ch.get_child(2) as Label).text)
+			if state_txt.find("禁用") >= 0 and weight_txt == "0":
+				found_tail = true
+	ok(found_tail, "打开时重新取数 ⇒ 外部改的禁用项立刻反映在表里（权重 0）")
+
+	print("— §3.2d ★ v0.52c 浮层开着时也始终最新（订阅 pool_changed）")
+	# 浮层开着，直接用 buff 改池子（会发 pool_changed），**不调 refresh**
+	eq(overlay.visible, true, "前置：浮层是开着的")
+	var rows_before := rows.get_child_count()
+	# 挑一件**当前是显示**的（隐藏的不能直接禁用，v0.48）
+	var victim: StringName = &""
+	for d in bx.item_pool.base_items:
+		if d != null and bx.item_pool.state_of(d.item_id) == ItemPool.ItemState.SHOWN:
+			victim = d.item_id
+			break
+	ok(victim != &"", "前置：找到一件显示态的物件（%s）" % victim)
+	ok(PoolBuff.disable(st, bx.box_id, victim)["ok"], "用 buff 禁用（发出 pool_changed）")
+	await get_tree().process_frame
+	eq(rows.get_child_count(), rows_before, "行数不变（禁用不删行）")
+	var live_ok := false
+	for ch in rows.get_children():
+		if ch is HBoxContainer and ch.get_child_count() >= 5:
+			var st_txt := String((ch.get_child(1) as Label).text)
+			var w_txt := String((ch.get_child(2) as Label).text)
+			if st_txt.find("禁用") >= 0 and w_txt == "0":
+				live_ok = true
+	ok(live_ok, "**没有手动 refresh，浮层也立刻反映这次禁用**（订阅生效）")
 	scr.queue_free()
 	await get_tree().process_frame

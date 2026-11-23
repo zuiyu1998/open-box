@@ -8,6 +8,5 @@ item_id = &"information_q4"
 display_name = "加密档案"
 category = &"information"
 quality = 4
-value = 27
+value = 16
 rarity = 5
-sell_gold = 16

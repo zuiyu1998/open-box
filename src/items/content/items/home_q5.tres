@@ -8,6 +8,5 @@ item_id = &"home_q5"
 display_name = "古董屏风"
 category = &"home"
 quality = 5
-value = 81
+value = 32
 rarity = 2
-sell_gold = 32

@@ -8,5 +8,4 @@ item_id = &"information_q3"
 display_name = "技术手册"
 category = &"information"
 quality = 3
-value = 9
-sell_gold = 8
+value = 8

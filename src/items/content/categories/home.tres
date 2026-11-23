@@ -8,3 +8,4 @@ category_id = &"home"
 display_name = "家居物品"
 description = "家具、厨具、日常家什 —— 最普通的一类，前期需求的主力。"
 sort_order = 1
+value = 2

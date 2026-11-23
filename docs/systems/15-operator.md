@@ -2,7 +2,7 @@
 
 - 上游：`../core-design.md`（**v0.40**：新增第 15 个系统）
 - 依赖系统：`01-gacha.md`（模块 BAN 语义 / 池子求值 `PoolService`）、`02-item.md`（物品 / 升级消耗）、`10-progression.md`（存档）
-- 被依赖：`01`（求值经 `extra_ban_provider` 注入）、`08` / `11`（干员页）
+- 被依赖：`01`（求值经 `PoolBuff.operator_bans()` 取排除，★ v0.49）、`08` / `11`（干员页）
 - 定位：**"干员出没出战、走哪条养成路线、排除哪些物品"只有这一份答案**。
 
 ## 1. 这个系统负责什么
@@ -56,21 +56,28 @@ func from_save_dict(d: Dictionary) -> void
 func reset() -> void
 ```
 
-**效果注入（`PoolService` 侧，★ v0.40）**：
+**效果注入（★ v0.49：经 `PoolBuff`，不再直接塞进 `PoolService`）**：
 
 ```gdscript
-# res://src/gacha/pool/pool_service.gd
-static var extra_ban_provider: Callable = Callable()   # OperatorService._ready 注入
+# res://src/operator/operator_service.gd
+func _ready() -> void:
+    PoolBuff.set_operator_ban_provider(Callable(self, "active_bans"))
 
-# _compute_with() 里，模块 BAN 之后：
-if extra_ban_provider.is_valid():
-    var extra: Array = extra_ban_provider.call()
-    for t in extra:
-        var tn := StringName(t)
-        if w.has(tn) and not banned.has(tn):
-            banned.append(tn)
-            freed += int(w[tn])    # 走同一条 40% 蒸发 / 60% 摊回路径
+# res://src/gacha/pool/pool_buff.gd
+static var _operator_ban_provider: Callable = Callable()
+static func operator_bans() -> Array[StringName]: ...   # 唯一读取入口
+
+# res://src/gacha/pool/pool_service.gd 的 _compute_with() 里，模块 BAN 之后：
+for t in PoolBuff.operator_bans():
+    var tn := StringName(t)
+    if w.has(tn) and not banned.has(tn):
+        banned.append(tn)
+        freed += int(w[tn])    # 走同一条 40% 蒸发 / 60% 摊回路径
 ```
+
+★ **为什么改**：`01` 的不变量是"**物品池数据只能由 `PoolBuff` 这一个接口操作**"（v0.46）。
+干员的排除会改变 `PoolState.weights_bp`，直接写 `PoolService.extra_ban_provider` 就是**绕过 buff 的第二条入口**——
+那条字段已**删除并留墓碑**，`PoolService` 从此不持有任何外部回调。
 
 **★ v0.40：场景层（MVC；页面代码归 15，视觉规格归 08）**
 

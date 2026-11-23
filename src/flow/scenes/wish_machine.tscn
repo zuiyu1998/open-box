@@ -1,7 +1,23 @@
-[gd_scene load_steps=3 format=3 uid="uid://cflowwish01"]
+[gd_scene load_steps=4 format=3 uid="uid://cflowwish01"]
 
 [ext_resource type="Script" path="res://src/flow/scenes/wish_machine_view.gd" id="1_view"]
 [ext_resource type="Script" path="res://src/flow/scenes/wish_machine_controller.gd" id="2_ctrl"]
+
+[sub_resource type="StyleBoxFlat" id="ov_panel"]
+bg_color = Color(0.11, 0.12, 0.14, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.35, 0.38, 0.42, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+content_margin_left = 22.0
+content_margin_top = 18.0
+content_margin_right = 22.0
+content_margin_bottom = 18.0
 
 [node name="WishMachine" type="VBoxContainer"]
 anchors_preset = 15
@@ -123,10 +139,15 @@ text = ""
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="PoolCycleButton" type="Button" parent="Columns/Left/PoolSection/PoolButtons"]
+[node name="RevealButton" type="Button" parent="Columns/Left/PoolSection/PoolButtons"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "切换状态（显示 → 隐藏 → 禁用）"
+text = "揭示为显示"
+
+[node name="DisableButton" type="Button" parent="Columns/Left/PoolSection/PoolButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "禁用（不可逆）"
 
 [node name="AddRow" type="HBoxContainer" parent="Columns/Left/PoolSection"]
 layout_mode = 2
@@ -230,5 +251,131 @@ text = "开启全部"
 layout_mode = 2
 size_flags_vertical = 3
 
+[node name="PoolDataButton" type="Button" parent="Columns/Left/PoolSection/PoolButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "池子数据"
+
 [node name="Controller" type="Node" parent="."]
 script = ExtResource("2_ctrl")
+
+[node name="PoolOverlayLayer" type="CanvasLayer" parent="."]
+layer = 10
+
+[node name="PoolOverlay" type="Control" parent="PoolOverlayLayer"]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Backdrop" type="ColorRect" parent="PoolOverlayLayer/PoolOverlay"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.62)
+
+[node name="Frame" type="PanelContainer" parent="PoolOverlayLayer/PoolOverlay"]
+theme_override_styles/panel = SubResource("ov_panel")
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 160.0
+offset_top = 70.0
+offset_right = -160.0
+offset_bottom = -70.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Body" type="VBoxContainer" parent="PoolOverlayLayer/PoolOverlay/Frame"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="PoolOverlayLayer/PoolOverlay/Frame/Body"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 26
+text = "池子数据"
+
+[node name="Note" type="Label" parent="PoolOverlayLayer/PoolOverlay/Frame/Body"]
+layout_mode = 2
+autowrap_mode = 3
+text = ""
+
+[node name="SortRow" type="HBoxContainer" parent="PoolOverlayLayer/PoolOverlay/Frame/Body"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="SortLabel" type="Label" parent="PoolOverlayLayer/PoolOverlay/Frame/Body/SortRow"]
+layout_mode = 2
+text = "排序"
+
+[node name="SortPicker" type="OptionButton" parent="PoolOverlayLayer/PoolOverlay/Frame/Body/SortRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(200, 0)
+
+[node name="SortSpacer" type="Control" parent="PoolOverlayLayer/PoolOverlay/Frame/Body/SortRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Head" type="HBoxContainer" parent="PoolOverlayLayer/PoolOverlay/Frame/Body"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="H1" type="Label" parent="PoolOverlayLayer/PoolOverlay/Frame/Body/Head"]
+layout_mode = 2
+custom_minimum_size = Vector2(260, 0)
+text = "物品"
+
+[node name="H2" type="Label" parent="PoolOverlayLayer/PoolOverlay/Frame/Body/Head"]
+layout_mode = 2
+custom_minimum_size = Vector2(160, 0)
+text = "状态"
+
+[node name="H3" type="Label" parent="PoolOverlayLayer/PoolOverlay/Frame/Body/Head"]
+layout_mode = 2
+custom_minimum_size = Vector2(90, 0)
+horizontal_alignment = 2
+text = "权重(bp)"
+
+[node name="H4" type="Label" parent="PoolOverlayLayer/PoolOverlay/Frame/Body/Head"]
+layout_mode = 2
+custom_minimum_size = Vector2(90, 0)
+horizontal_alignment = 2
+text = "概率"
+
+
+
+[node name="H6" type="Label" parent="PoolOverlayLayer/PoolOverlay/Frame/Body/Head"]
+layout_mode = 2
+custom_minimum_size = Vector2(90, 0)
+horizontal_alignment = 2
+text = "价值(金币)"
+
+[node name="HSpacer" type="Control" parent="PoolOverlayLayer/PoolOverlay/Frame/Body/Head"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Scroll" type="ScrollContainer" parent="PoolOverlayLayer/PoolOverlay/Frame/Body"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Rows" type="VBoxContainer" parent="PoolOverlayLayer/PoolOverlay/Frame/Body/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="Totals" type="Label" parent="PoolOverlayLayer/PoolOverlay/Frame/Body"]
+layout_mode = 2
+text = ""
+
+[node name="CloseButton" type="Button" parent="PoolOverlayLayer/PoolOverlay/Frame/Body"]
+layout_mode = 2
+text = "关闭"

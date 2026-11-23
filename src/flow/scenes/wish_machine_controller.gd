@@ -24,11 +24,31 @@ func _ready() -> void:
 	view.upgrade_requested.connect(_on_upgrade)
 	view.open_requested.connect(_on_open)
 	view.socket_requested.connect(_on_socket)
-	view.pool_cycle_requested.connect(_on_pool_cycle)
+	view.pool_reveal_requested.connect(_on_pool_reveal)
+	view.pool_disable_requested.connect(_on_pool_disable)
 	view.pool_add_requested.connect(_on_pool_add)
+	view.pool_sort_requested.connect(_on_pool_sort)
+	view.pool_data_requested.connect(_on_pool_data)
 	view.operator_toggle_requested.connect(_on_operator_toggle)
 	view.box_changed.connect(refresh)
+	# ★ v0.52c：**池子一变就重算**——浮层开着的时候也必须跟着变（不是"打开即最新"，而是"始终保持最新"）。
+	#   订阅 `PoolService.bus.pool_changed`（唯一写入方在每次写入后发出），
+	#   用**对象方法**（不是 lambda）连接 ⇒ 节点被释放时 Godot 会自动断开，不会留下悬空回调。
+	PoolService.bus.pool_changed.connect(_on_pool_changed)
 	call_deferred("refresh")   # ★ 首次 render 推迟到 View 的 @onready 就绪之后
+
+
+## ★ v0.52c：池子被写入了（任何来源：本页按钮 / 数据层 / 别的系统）⇒ 重算并重渲染。
+##
+## **只在两种情况下真的去 refresh**：
+##   · 浮层正开着（用户在看数据，必须立刻跟）；
+##   · 页面在可见的那个 tab 上（否则白算一遍，切回来时 `tab_changed` 还会再刷）。
+## 其余情况什么都不做——**本类的 refresh 是纯读**，但没必要给不可见的页面做无用功。
+func _on_pool_changed(_box_id: String, _revision: int) -> void:
+	if view == null or not is_instance_valid(view):
+		return
+	if view.is_pool_overlay_visible() or view.is_visible_in_tree():
+		refresh()
 
 
 func bind_state(s: GameState) -> void:
@@ -66,8 +86,26 @@ func _on_socket() -> void:
 	refresh()
 
 
-func _on_pool_cycle() -> void:
-	model.cycle_item_state(view.selected_index, view.pool_index)
+func _on_pool_reveal() -> void:
+	model.reveal_pool_item(view.selected_index, view.pool_index)
+	refresh()
+
+
+func _on_pool_disable() -> void:
+	model.disable_pool_item(view.selected_index, view.pool_index)
+	refresh()
+
+
+## ★ v0.51：浮层排序（只改呈现顺序，不动池子数据）
+## ★ v0.52b：打开浮层**前先刷新**——按钮只负责"要开"，数据由这次 refresh 现取。
+## 如果池子在别处（数据层 / 其它系统）被改过而本页没刷新，这里能兜住。
+func _on_pool_data() -> void:
+	refresh()
+	view.show_pool_overlay()
+
+
+func _on_pool_sort(mode: int) -> void:
+	model.set_pool_sort(mode)
 	refresh()
 
 

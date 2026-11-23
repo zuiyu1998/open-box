@@ -102,7 +102,7 @@ func _setup_catalog() -> void:
 			d.value = values[q]
 			d.size = sizes[q]
 			d.rarity = rarities[q]
-			d.sell_gold = q * 2
+			d.value = q * 2
 			ItemCatalog.register(d)
 
 

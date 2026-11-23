@@ -8,5 +8,4 @@ item_id = &"art_q3"
 display_name = "青铜胸像"
 category = &"art"
 quality = 3
-value = 9
-sell_gold = 8
+value = 8

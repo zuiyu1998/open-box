@@ -8,3 +8,4 @@ category_id = &"art"
 display_name = "艺术藏品"
 description = "画作、雕塑、古董与限量藏品 —— 稀有度高、价值密度高。"
 sort_order = 2
+value = 2
