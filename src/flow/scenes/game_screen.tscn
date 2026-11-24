@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3 uid="uid://cflowgame01"]
+[gd_scene load_steps=3 format=3 uid="uid://cflowgame01"]
 
 [ext_resource type="Script" path="res://src/flow/scenes/game_screen.gd" id="1_game"]
+[ext_resource type="Script" path="res://src/flow/ui/game_tabs.gd" id="2_tabs"]
 
 [node name="GameScreen" type="Control"]
 layout_mode = 3
@@ -13,6 +14,7 @@ script = ExtResource("1_game")
 
 [node name="Tabs" type="TabContainer" parent="."]
 layout_mode = 1
+script = ExtResource("2_tabs")
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0

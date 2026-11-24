@@ -25,6 +25,8 @@ func _ready() -> void:
 	_reset_world()
 	await _test_structure()
 	_reset_world()
+	await _test_tab_style_survives_first_layout()
+	_reset_world()
 	await _test_top_bar_currency()
 	_reset_world()
 	await _test_warehouse_page()
@@ -109,8 +111,9 @@ func _test_structure() -> void:
 		return
 	var titles: Array = scr.tab_titles()
 	eq(titles.size(), 5, "五个 tab")
-	eq(titles[0], "仓库", "第 1 个 tab = 仓库")
-	eq(titles[1], "许愿机", "第 2 个 tab = 许愿机")
+	# ★ v0.54：许愿机是第一项（核心循环先给玩家看）
+	eq(titles[0], "许愿机", "第 1 个 tab = 许愿机（★ v0.54）")
+	eq(titles[1], "仓库", "第 2 个 tab = 仓库")
 	eq(titles[2], "市场", "第 3 个 tab = 市场（★ v0.38）")
 	eq(titles[3], "公司", "第 4 个 tab = 公司（★ v0.39）")
 	eq(titles[4], "干员", "第 5 个 tab = 干员（★ v0.40）")
@@ -157,8 +160,9 @@ func _test_structure() -> void:
 			"干员页有 Controller 子节点（%s）" % (opr_ctrl.get_script().resource_path if opr_ctrl else "nil"))
 
 	var tabs: TabContainer = scr.get_node("Tabs")
+	eq(tabs.current_tab, 0, "默认落在「许愿机」（第一个 tab）")
 	tabs.current_tab = 1
-	eq(tabs.current_tab, 1, "可以切到「许愿机」")
+	eq(tabs.current_tab, 1, "可以切到「仓库」")
 	tabs.current_tab = 2
 	eq(tabs.current_tab, 2, "可以切到「市场」")
 	tabs.current_tab = 3
@@ -166,7 +170,7 @@ func _test_structure() -> void:
 	tabs.current_tab = 4
 	eq(tabs.current_tab, 4, "可以切到「干员」")
 	tabs.current_tab = 0
-	eq(tabs.current_tab, 0, "可以切回「仓库」")
+	eq(tabs.current_tab, 0, "可以切回「许愿机」")
 
 	# ★ refresh() 多次调用不得重建页（否则外部持有的页引用会变成已释放实例）
 	var wish_ref: Node = scr.page_node("WishPage")
@@ -675,13 +679,12 @@ func _test_tab_switch_refreshes() -> void:
 	# ★ View 的 Label 文本是上次 render 写的，未切 tab 不更新
 	ok(String(items_lbl.text).find("还没有物品") >= 0, "未切 tab ⇒ View 仍是旧值（尚未刷新）")
 
-	# 切到许愿机再切回仓库 ⇒ tab_changed 触发 refresh ⇒ View 重新渲染出新物品
+	# ★ v0.54：默认落在许愿机（0）⇒ 切到仓库页（1）就会触发 `tab_changed` ⇒ 重新渲染出新物品
 	var tabs: TabContainer = scr.get_node("Tabs")
-	tabs.current_tab = 1
+	eq(tabs.current_tab, 0, "前置：默认在许愿机（第一个 tab）")
+	tabs.current_tab = 1          # 切到仓库页
 	await get_tree().process_frame
-	tabs.current_tab = 0
-	await get_tree().process_frame
-	ok(String(items_lbl.text).find("家居物品") >= 0, "切回仓库页 ⇒ View 显示新物品")
+	ok(String(items_lbl.text).find("家居物品") >= 0, "切到仓库页 ⇒ View 显示新物品")
 	ok(String(items_lbl.text).find("白×1") >= 0, "档位计数也更新")
 	scr.queue_free()
 	await get_tree().process_frame
@@ -940,5 +943,34 @@ func _test_pool_overlay() -> void:
 			if st_txt.find("禁用") >= 0 and w_txt == "0":
 				live_ok = true
 	ok(live_ok, "**没有手动 refresh，浮层也立刻反映这次禁用**（订阅生效）")
+	scr.queue_free()
+	await get_tree().process_frame
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ①c tab 样式必须在"真实进入流程"里就位（★ v0.53）
+# ══════════════════════════════════════════════════════════════════════════════
+
+## 复现真实流程：**只把场景加进树、让它自己 `_ready`**，不调 `bind_state` / `refresh`。
+##
+## 这条测试是为了钉住一个真实缺陷：`_ready` 里打的 tab 覆盖会在**首次布局后被清掉**，
+## 而之后直到玩家点 tab 才有下一次 `refresh()` ⇒ **一进游戏 tab 还是小的**。
+## 所以这里刻意"什么都不额外调用"，只等布局完成。
+func _test_tab_style_survives_first_layout() -> void:
+	print("— §3.0c tab 样式在首次布局后仍生效（真实进入路径：只 _ready + 布局）")
+	_reset_world()
+	var st := GameState.new_game()
+	GameSession.state = st
+	var packed: PackedScene = load("res://src/flow/scenes/game_screen.tscn")
+	var scr: Node = packed.instantiate()
+	add_child(scr)                       # 不加 bind_state、不调 refresh
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var tabs: TabContainer = scr.get_node("Tabs")
+	var bar: TabBar = tabs.get_tab_bar()
+	eq(bar.get_theme_font_size("font_size"), scr.TAB_FONT_SIZE,
+		"布局结束后字体仍是 %d（没被清回 16）" % scr.TAB_FONT_SIZE)
+	var rect := bar.get_tab_rect(0)
+	ok(rect.size.y >= 40.0, "布局结束后 tab 高度仍 ≥ 40px（实际 %.0f）" % rect.size.y)
+	ok(rect.size.x >= 90.0, "布局结束后 tab 宽度仍 ≥ 90px（实际 %.0f）" % rect.size.x)
 	scr.queue_free()
 	await get_tree().process_frame
