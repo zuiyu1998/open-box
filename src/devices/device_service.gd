@@ -97,9 +97,11 @@ static func series_quality_of(box: Box) -> int:
 
 ## **本次开盒要花的原石**（唯一计价口径，整数）：
 ##
-##     gem_cost = floori( SeriesDef.gem_cost × open_cost_bp(设备等级) / 10000 )
+##     gem_cost = floori( 基准价 × open_cost_bp(设备等级) / 10000 )
 ##
-## · **基准归 01 的内容配置**（`SeriesDef.gem_cost`）、**折扣归 04 的等级曲线**；
+## ★ v0.56：**基准价 = `box.open_gem_cost`（生成出来的盒子自带价）**；它为 `0` 时才回退到
+##   `SeriesDef.gem_cost`。这样"按期望定价的生成盒"与"牌库发的固定价盒"共用一个扣费入口。
+## · **基准归 01**（套系价 / 生成时的定价）、**折扣归 04 的等级曲线**；
 ## · **一律 `floori`**（与 02 / 06 的取整纪律一致）；结果恒 ≥ 0（`bp = 0` ⇒ 免费）；
 ## · **无设备 / 等级不足 / 套系解析不到 ⇒ 返回 -1**（调用方先看 `can_open`，
 ##   这个 -1 只是"不该被用来计价"的响亮信号，**不得**当成 0 用）。
@@ -113,7 +115,8 @@ static func open_cost(state: GameState, box: Box) -> int:
 	var def := DeviceCatalog.get_device(d.device_id)
 	if def == null:
 		return -1
-	return floori(float(series.gem_cost) * float(def.open_cost_bp(d.level)) / 10000.0)
+	var base := box.open_gem_cost if box.open_gem_cost > 0 else series.gem_cost
+	return floori(float(base) * float(def.open_cost_bp(d.level)) / 10000.0)
 
 
 ## **开盒入口**：链首校验（有设备 / 等级够 / 原石够）⇒ 把成本交给 `01` 执行。

@@ -31,6 +31,8 @@ const R_NO_DEVICE := &"no_device"
 ## ★ v0.18 / v0.19：**资源不足**（开盒要付原石）——与 `02` / `04` 同一枚码，
 ## **币种由动作决定**（开盒 / 升级 ⇒ 原石 `gem`；镶嵌 ⇒ 金币 `gold`）。
 const R_CURRENCY_INSUFFICIENT := &"currency_insufficient"
+## ★ v0.55：生成 / 出售盲盒的拒绝码
+const R_POOL_TOO_SMALL := &"pool_too_small"      # 全库物品都不够凑出请求的件数
 
 ## 兑现种子的发生器。**seed 在兑现时刻生成并记录**（不预生成于盒子获得时：
 ## "盒子先拿到手、池子之后才配置"要求 seed 与**兑现那一刻的池子快照**成对生成）。
@@ -443,3 +445,150 @@ static func _new_seed() -> int:
 		_seed_rng = RandomNumberGenerator.new()
 		_seed_rng.randomize()
 	return _seed_rng.randi()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ★ v0.55：盲盒生成 / 盲盒出售（用户裁决）
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# 用户裁决："**在盲盒系统中添加盲盒生成的功能，盲盒生成依赖传入的物品，该物品的品质决定了盲盒的品质。
+# 盲盒的品质决定了售价，售价依赖于盲盒的数学期望，品质越高，售价越高于数学期望**"；追问确认：
+#   · **不消耗物品**——传入的物品**成为盲盒池子的一部分**，其余物品**随机取"品质低于它"的物品**
+#     （**找不到更低的就用同品质补齐**，不拒绝）；
+#   · **件数由调用方传入**（`count` 含传入的那一件）；
+#   · **品质映射**：物品品质 1–2 → 盲盒品质 1；3–4 → 2；5 → 3；6 → 4；
+#   · **售价 = ⌈M̄ × 倍率⌉**，倍率表 **1.10 / 1.25 / 1.45 / 1.70**（按盲盒品质 1–4）；
+#   · **售价可卖**（显示 + 卖出入口）；
+#   · **本层不做 UI**：入口供公司系统（14）调用。
+
+## 盲盒品质 1–4 的**开盒价倍率**（★ 用户给定的表，不是推算出来的）。
+const PRICE_MULT_BY_QUALITY := {1: 1.10, 2: 1.25, 3: 1.45, 4: 1.70}
+
+## ★ 用户给定的汇率：**10 金币 = 1 原石**。原石价 = `⌈M̄_gold × 倍率 ÷ 10⌉`（至少 1）。
+const GOLD_PER_GEM := 10.0
+
+## 物品品质（1–6）→ 盲盒品质（1–4）：两档并一档。
+static func box_quality_of_item(item_quality: int) -> int:
+	if item_quality <= 2:
+		return 1
+	if item_quality <= 4:
+		return 2
+	if item_quality == 5:
+		return 3
+	return 4
+
+
+## **开盒原石价**：`⌈M̄_gold × 倍率 ÷ 10⌉`，**至少 1 原石**。
+##
+## ★ v0.56：单位是**原石**（不是金币）——用户澄清"售价是指开启时使用的原石"；
+##   金币→原石按 `GOLD_PER_GEM = 10` 换算。
+static func open_gem_cost_for(ev: EvalService.PoolEvaluation, box_quality: int) -> int:
+	var mult := float(PRICE_MULT_BY_QUALITY.get(clampi(box_quality, 1, 4), 1.0))
+	var m := EvalService.m_bar_gold(ev)
+	return maxi(1, int(ceil(m * mult / GOLD_PER_GEM)))
+
+
+## **生成一个盲盒**（★ v0.55）。
+##
+## 规则（逐条对应上面的裁决）：
+##   · `source_item_id` 必须是**已注册物品**；**它不会被消耗**，而是**成为池子的第一件**；
+##   · 其余 `count − 1` 件**从"品质严格低于它"的物品里随机抽**（同 id 不重复）；
+##     **候选不够时用同品质的物品补齐**（用户裁决：不拒绝）；
+##   · 盲盒品质 = `box_quality_of_item(源物品品质)`；**位子数 / 寿命预算按盲盒品质取模板**；
+##   · 池子建好后求出 `M̄`，售价 = `⌈M̄ × 倍率⌉` **当场定死**（之后编辑池子不改价）。
+##
+## 返回 `{ok, reason, box, price}`。**随机可复现**：传 `rng_seed` 即确定（测试用），
+## 默认 `0` = 用时间取种（真随机）。
+static func generate_box(
+	state: GameState,
+	source_item_id: StringName,
+	count: int,
+	rng_seed: int = 0
+) -> Dictionary:
+	if state == null:
+		return {"ok": false, "reason": R_BAD_EVALUATION, "box": null, "price": 0}
+	var src := ItemCatalog.get_def(source_item_id)
+	if src == null:
+		return {"ok": false, "reason": R_ITEM_NOT_REGISTERED, "box": null, "price": 0}
+	# C6：池子至少要 3 件可产出，否则这个盒子开不了
+	if count < 3:
+		return {"ok": false, "reason": PoolService.R_BELOW_C6, "box": null, "price": 0}
+
+	var q_box := box_quality_of_item(src.quality)
+	var series := _series_for_quality(q_box)
+	if series == null:
+		return {"ok": false, "reason": R_BAD_SERIES, "box": null, "price": 0}
+
+	# ── 抽池子：源物品打头，其余随机（更低品质优先，不够则同品质补）─────────────
+	var rng := RandomNumberGenerator.new()
+	if rng_seed != 0:
+		rng.seed = rng_seed
+	else:
+		rng.randomize()
+	var picked: Array[ItemDef] = [src]
+	var chosen: Dictionary = {source_item_id: true}
+	for lower in [true, false]:                 # 先"更低品质"，不够再"同品质"
+		if picked.size() >= count:
+			break
+		var pool: Array[ItemDef] = []
+		for id in ItemCatalog.all_item_ids():
+			var d := ItemCatalog.get_def(id)
+			if d == null or chosen.has(id):
+				continue
+			if lower:
+				if d.quality < src.quality:
+					pool.append(d)
+			elif d.quality == src.quality:
+				pool.append(d)
+		while not pool.is_empty() and picked.size() < count:
+			var idx := rng.randi_range(0, pool.size() - 1)
+			var d2 := pool[idx]
+			pool.remove_at(idx)
+			picked.append(d2)
+			chosen[d2.item_id] = true
+
+	if picked.size() < count:
+		# 全局物品都不够（内容太少）⇒ 明确拒绝，不静默给个更小的池子
+		return {"ok": false, "reason": R_POOL_TOO_SMALL, "box": null, "price": 0}
+
+	# ── 造盒 ───────────────────────────────────────────────────────────────────
+	var b := Box.new()
+	b.box_id = IUuid.v4()
+	b.series_id = series.series_id
+	b.item_pool = PoolService.init_pool(state, b.box_id, series.series_id)
+	if b.item_pool == null:
+		return {"ok": false, "reason": R_POOL_INVALID, "box": null, "price": 0}
+	# 用抽出来的列表替换基础池（这是"随机池"，不是套系原样）
+	b.item_pool.base_items = picked
+	b.item_pool.regular_count = picked.size()
+	b.item_pool.revision += 1
+	b.modules = PoolService.empty_slots(series.socket_count)
+	b.uses_remaining = SeriesDef.expected_initial_uses(q_box)
+	b.size = 1
+	b.location = WarehouseService.place_box(b.size)
+	b.source = &"generated"
+	b.acquired_tick = int(Time.get_ticks_msec())
+
+	# 售价：**生成那一刻的期望**定死（之后编辑池子 / 装模块都不改价）。
+	# ⚠️ 此刻盒子**还没进 `state`**，`PoolService.get_pool_state()` 会查不到它（返回 null ⇒ M̄ = 0）；
+	#    所以直接走 `_compute()` 现算一份派生状态。
+	var ev := EvalService.evaluate_pool(PoolService._compute(b, b.item_pool.revision), series)
+	b.open_gem_cost = open_gem_cost_for(ev, q_box)
+
+	state.add_box(b)
+	return {"ok": true, "reason": R_OK, "box": b, "price": b.open_gem_cost}
+
+
+## 品质档对应的**模板套系**（位子数 / 寿命 / 开盒原石价都取它）。
+## 约定：套系 id 形如 `series_q<N>`；找不到就退回同品质的第一个套系。
+static func _series_for_quality(q: int) -> SeriesDef:
+	var by_quality: SeriesDef = null
+	for sid in GachaCatalog.all_series_ids():
+		var s := GachaCatalog.get_series(sid)
+		if s == null or s.series_quality != q:
+			continue
+		if String(sid) == "series_q%d" % q:
+			return s
+		if by_quality == null:
+			by_quality = s
+	return by_quality

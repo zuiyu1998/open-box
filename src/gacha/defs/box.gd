@@ -51,6 +51,15 @@ extends Resource
 ##   **开盒不释放空间**（盒子还在），**只有"次数归零被摧毁"才释放那 1 单位**。
 @export var location: StringName = &"warehouse"           # warehouse / mail
 @export var size: int = 1                                # 每盒固定 1 单位（记进同一份容量账）
+## ★ v0.55/v0.56（用户裁决）：**这个盒子的开盒原石成本**（每次开盒扣多少原石）。
+##
+## · 单位**原石**（不是金币）；**`0` = 用套系的 `SeriesDef.gem_cost`**（牌库发的盒子都是 0）；
+## · **在生成那一刻算好并定死**（`GachaService.generate_box()`：`⌈M̄_gold × 品质倍率 ÷ 10⌉`，
+##   10 金币 = 1 原石）；之后玩家编辑池子 / 装模块把期望拉高了，**开盒价不变**
+##   —— 否则"先改后开"可以套利；
+## · **开盒扣费以它为准**：`DeviceService.open_cost()` 优先用它，为 0 才回退套系价，
+##   折扣（设备等级）仍按 04 的曲线作用在它上面。
+@export var open_gem_cost: int = 0
 
 
 ## 是否已用尽（用尽 ⇒ 盒子离开囤积清单，`modules` 随之消失）。
@@ -152,6 +161,8 @@ func to_dict() -> Dictionary:
 			# ★ v0.45：追加物品与三态必须落盘（否则读档丢掉玩家的编辑）
 			"extra_item_ids": item_pool.extra_item_ids.duplicate(),
 			"item_states": item_pool.item_states.duplicate(),
+			# ★ v0.55：**生成的盲盒**池子是随机凑的，必须整份落盘（否则读档退回套系原样）
+			"pool_item_ids": _pool_ids_for_save(),
 		}
 	return {
 		"box_id": box_id,
@@ -161,6 +172,7 @@ func to_dict() -> Dictionary:
 		"uses_remaining": uses_remaining,
 		"location": String(location),
 		"size": size,
+		"open_gem_cost": open_gem_cost,
 		"item_pool": pool_subset,
 		"modules": modules_to_sparse_array(),
 	}
@@ -196,6 +208,22 @@ static func from_dict(d: Dictionary, uses_when_missing: int = 0) -> Box:
 		b.item_pool.regular_count = int(pd.get("regular_count", b.item_pool.regular_count))
 		b.item_pool.socket_count = int(pd.get("socket_count", b.item_pool.socket_count))
 		b.item_pool.revision = int(pd.get("revision", 0))
+		# ★ v0.55：**随机池优先**——生成的盲盒池子不是套系原样，整份列表在档里。
+		#   先按它重建 base_items，再走下面的追加 / 三态（三态按 item_id 生效，顺序无关）。
+		var full_ids = pd.get("pool_item_ids", [])
+		var pool_rebuilt := false
+		if full_ids is Array and not (full_ids as Array).is_empty():
+			var rebuilt: Array[ItemDef] = []
+			for raw in (full_ids as Array):
+				var fdef := ItemCatalog.get_def(StringName(raw))
+				if fdef == null:
+					push_warning("Box.from_dict: 池内物品 `%s` 已不在内容表里，跳过（不静默替换）" % raw)
+					continue
+				rebuilt.append(fdef)
+			if not rebuilt.is_empty():
+				b.item_pool.base_items = rebuilt
+				b.item_pool.regular_count = rebuilt.size()
+				pool_rebuilt = true
 		# ★ v0.45：池子成员不再是"完全由 series_id 推出"——**追加的物品必须读回来**，
 		#   否则玩家的编辑会在读档时静默丢失（比"少了三态"更严重）。
 		var extras = pd.get("extra_item_ids", [])
@@ -205,9 +233,14 @@ static func from_dict(d: Dictionary, uses_when_missing: int = 0) -> Box:
 				if def == null:
 					push_warning("Box.from_dict: 追加物品 `%s` 已不在内容表里，跳过（不静默替换）" % raw)
 					continue
-				b.item_pool.base_items.append(def)
-				b.item_pool.extra_item_ids.append(def.item_id)
-				b.item_pool.regular_count = maxi(b.item_pool.regular_count, b.item_pool.base_items.size())
+				# ★ v0.55：**`pool_item_ids` 已经含它了**（整份列表覆盖了"套系 + 追加"），
+				#   这时只需把 id 记回 `extra_item_ids` 保持身份，**不要再 append 一次**
+				#   （否则每次存读都会多出一件：实测 regular_count 9 → 10 → 11…）。
+				if not pool_rebuilt:
+					b.item_pool.base_items.append(def)
+					b.item_pool.regular_count = maxi(b.item_pool.regular_count, b.item_pool.base_items.size())
+				if not b.item_pool.extra_item_ids.has(def.item_id):
+					b.item_pool.extra_item_ids.append(def.item_id)
 		# ★ v0.45：三态（缺键 = 全部显示）
 		var states = pd.get("item_states", {})
 		if states is Dictionary:
@@ -222,6 +255,19 @@ static func from_dict(d: Dictionary, uses_when_missing: int = 0) -> Box:
 	b.uses_remaining = int(d["uses_remaining"]) if d.has("uses_remaining") else uses_when_missing
 	# ★ v0.26：位置与体积。**旧档没有这两个键 ⇒ 一律回填 `warehouse` / 1**
 	#   （旧档里的盒子在旧口径下根本不在仓库/邮件里，回填"仓库"是唯一不丢东西的选择）。
+	b.open_gem_cost = int(d.get("open_gem_cost", 0))   # ★ v0.56：开盒原石价（0 = 用套系价）
 	b.location = StringName(d.get("location", String(ItemConstants.LOC_WAREHOUSE)))
 	b.size = int(d.get("size", 1))
 	return b
+
+
+## ★ v0.55：**只有当池子不是套系原样时**才把整份物品列表写进档（省体积、旧档契约不变）。
+## 判据：`base_items` 的 id 序列与 `series` 的 id 序列逐项相同 ⇒ 不写（可继续由 series 推出）。
+func _pool_ids_for_save() -> Array[StringName]:
+	var out: Array[StringName] = []
+	if item_pool == null:
+		return out
+	var series := GachaCatalog.get_series(series_id)
+	if series != null and item_pool.item_ids() == series.item_ids():
+		return out                                  # 与套系一致 ⇒ 不落盘
+	return item_pool.item_ids()

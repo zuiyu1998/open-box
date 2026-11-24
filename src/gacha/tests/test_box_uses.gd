@@ -766,7 +766,10 @@ func _test_uses_remaining_is_persisted() -> void:
 	eq(int(d["uses_remaining"]), 1, "落盘里含 uses_remaining（镶嵌 −1、兑现 −1 ⇒ 3 → 1）")
 	# ★ v0.45：池子子集从 5 键变 **7 键**——追加物品与三态必须落盘，
 	#   否则"玩家加进池子的物品 / 设的隐藏禁用"会在读档时静默丢失。
-	eq(d["item_pool"].size(), 7, "池子落**七项子集**（原五项 + extra_item_ids + item_states）")
+	# ★ v0.55：再 +`pool_item_ids`（生成的盲盒随机池要整份落盘）⇒ **8 键**
+	eq(d["item_pool"].size(), 8, "池子落**八项子集**（原五项 + extra_item_ids + item_states + pool_item_ids）")
+	eq(d["item_pool"]["pool_item_ids"], [] as Array[StringName],
+		"牌库发的盒子池子 = 套系原样 ⇒ 不写 pool_item_ids（省体积、旧档契约不变）")
 	eq(d["item_pool"]["extra_item_ids"], [] as Array[StringName], "本盒没加过物品 ⇒ 空数组")
 	eq(d["item_pool"]["item_states"], {}, "本盒没改过三态 ⇒ 空字典（缺键 = 显示）")
 	eq(int(d["item_pool"]["revision"]), 1, "revision 入档 == 1")
