@@ -131,9 +131,9 @@ const INIT_GOLD := 10000  # ★ 用户裁决：开局金币 10000（足够镶嵌
 
 
 # ── 物品品质 `quality`：★ v0.22 —— 6 档（白 / 绿 / 蓝 / 紫 / 金 / 红）────────────
-## **这是"物品品质"的唯一档位定义**（`02-item.md` §5.1 / §6）。它与**套系品质
-## `series_quality`（1..4，归 01 的 `SeriesDef`）是两条不同的轴**，不得混用：
-## 前者是"这一件物品有多好"，后者是"这个盒子的池子有多大 / 位子有几个"。
+## **这是"物品品质"的唯一档位定义**（`02-item.md` §5.1 / §6）。
+## ★ v0.61：**套系品质已删除**；物品品质现在还用于"物品品质 → 盲盒品质"的映射
+## （`GachaService.box_quality_of_item()`：1–2→1、3–4→2、5→3、6→4）。
 ##
 ## · 值域 = `QUALITY_MIN..QUALITY_MAX`（**1..6**，序数，越小越差）；
 ## · 每档有**两个名字**：**颜色名**（白 / 绿 / 蓝 / 紫 / 金 / 红——UI 的第一识别通道）
@@ -177,6 +177,32 @@ const QUALITY_COLORS := {
 ## ★ v0.52（用户裁决）：**价值 = 售价，单位金币**——旧的 TVU 阶梯（1/3/9/27/81/243）已删除，
 ## 本阶梯就是 `ItemDef.value` 的唯一来源，取原 `QUALITY_SELL_GOLD` 的 ×2 几何（2/4/8/16/32/64）。
 const QUALITY_VALUE := {1: 2, 2: 4, 3: 8, 4: 16, 5: 32, 6: 64}
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ★ v0.61：**盲盒的"出厂默认值"**（用户裁决：去掉套系 ⇒ 品质曲线搬到这里）
+# ══════════════════════════════════════════════════════════════════════════════
+# 从前这些数字挂在 `SeriesDef` 上。套系删除后：**盒子自己存**这些值；
+# 下表只用于**造盒时给默认值**（发盒 / 生成 / 公司生产），改表不影响已存在的盒子。
+
+const BOX_ITEMS_BY_QUALITY := {1: 8, 2: 8, 3: 12, 4: 12}
+const BOX_SOCKETS_BY_QUALITY := {1: 2, 2: 3, 3: 4, 4: 5}
+const USES_PER_SOCKET := 5
+const BOX_GEM_COST_BY_QUALITY := {1: 30, 2: 30, 3: 40, 4: 50}
+
+static func box_items_count(p_quality: int) -> int:
+	return int(BOX_ITEMS_BY_QUALITY.get(clampi(p_quality, 1, 4), 8))
+
+
+static func box_socket_count(p_quality: int) -> int:
+	return int(BOX_SOCKETS_BY_QUALITY.get(clampi(p_quality, 1, 4), 2))
+
+
+static func box_uses(p_quality: int) -> int:
+	return USES_PER_SOCKET * box_socket_count(p_quality)
+
+
+static func box_gem_cost(p_quality: int) -> int:
+	return int(BOX_GEM_COST_BY_QUALITY.get(clampi(p_quality, 1, 4), 30))
 const QUALITY_RARITY := {1: 60, 2: 30, 3: 10, 4: 5, 5: 2, 6: 1}
 ## ★ v0.52：**墓碑**——`QUALITY_SELL_GOLD` 与 `ItemDef.value` 一并删除（价值即售价，不再有两个漏斗）。
 ## 不要再加回来；要改价格请改上面的 `QUALITY_VALUE`。

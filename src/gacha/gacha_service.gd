@@ -33,6 +33,7 @@ const R_NO_DEVICE := &"no_device"
 const R_CURRENCY_INSUFFICIENT := &"currency_insufficient"
 ## ★ v0.55：生成 / 出售盲盒的拒绝码
 const R_POOL_TOO_SMALL := &"pool_too_small"      # 全库物品都不够凑出请求的件数
+const R_NOT_SELLABLE := &"not_sellable"          # 这个盒子没有卖价（套系解析不到）
 
 ## 兑现种子的发生器。**seed 在兑现时刻生成并记录**（不预生成于盒子获得时：
 ## "盒子先拿到手、池子之后才配置"要求 seed 与**兑现那一刻的池子快照**成对生成）。
@@ -50,43 +51,60 @@ static var _seed_rng: RandomNumberGenerator = null
 ## **奖励发的盒子是「未配置」态**：`item_pool` = 该套系基础池的副本（**每个盒子各一份**）、
 ## `modules` = 全空位——**不是 null、不是"字段不存在"**（03 §5.5 的定义）。
 ##
-## v0.14：`uses_remaining = SeriesDef.uses_per_box`（品质 1/2/3/4 → **10/15/20/25**，
-## 即 `USES_PER_SOCKET ×` 镶嵌位数；该常量由 `SeriesDef.validate()` 与品质曲线对齐）。
+## v0.61：`uses_remaining` 按**盒子品质**取默认值（10/15/20/25，见 `ItemConstants.box_uses()`）。
 ## ★ v0.16 数值裁决：寿命预算**远远超过**镶嵌次数 ⇒ 预算**不等于位数**（位数仍是 2/3/4/5；
 ## 旧曲线 2/3/4/5 已作废）——**"装满位子即烧光预算"不再是可发生路径**。
-static func grant_box(
-	state: GameState,
-	series_id: StringName,
-	count: int,
-	source: StringName = &""
-) -> Array[Box]:
-	var out: Array[Box] = []
-	if state == null:
-		return out
-	var series := GachaCatalog.get_series(series_id)
-	if series == null:
-		push_error("GachaService.grant_box: 未知 series_id `%s`" % series_id)
-		return out
-	for _i in maxi(count, 0):
-		var b := Box.new()
-		b.box_id = IUuid.v4()                      # 身份：IUuid.v4()，String，与 instance_id 同类型
-		b.series_id = series_id
-		b.item_pool = PoolService.init_pool(state, b.box_id, series_id)
-		if b.item_pool == null:
-			push_error("GachaService.grant_box: init_pool 失败，停止发放")
-			break
-		b.modules = PoolService.empty_slots(series.socket_count)
-		b.uses_remaining = series.uses_per_box    # ★ v0.14：初始使用次数（按套系品质）
-		b.size = 1                                # ★ v0.26：每盒固定 1 单位（记进同一份容量账）
-		# ★ v0.35（W1-a）：盲盒落位判定归仓库系统（WarehouseService）——容量仍只有一个判定点。
-		#   盲盒是**被动产出**（任务 / 里程碑发放），所以与物品同一口径：永不丢失。
-		b.location = WarehouseService.place_box(b.size)
-		b.source = source
-		b.acquired_tick = int(Time.get_ticks_msec())
-		state.add_box(b)
-		out.append(b)
-	return out
+static func grant_box(state: GameState, box: Box) -> Box:
+	if state == null or box == null:
+		return null
+	# ★ v0.35（W1-a）：盲盒落位判定归仓库系统——容量仍只有一个判定点。
+	#   盲盒是**被动产出**，与物品同一口径：永不丢失（放不下进邮件）。
+	box.location = WarehouseService.place_box(box.size)
+	state.add_box(box)
+	return box
 
+
+## ★ v0.61：**按品质随机造一个盒子并发给玩家**（任务奖励 / 公司产盒的入口）。
+##
+## 池子 = 从已注册物品里随机抽 `count` 件（不限品质——"这个品质的盒子里装什么"由内容决定）。
+## `count <= 0` ⇒ 取该品质的默认件数（`ItemConstants.box_items_count()`）。
+static func grant_random_box(
+	state: GameState,
+	quality: int,
+	count: int = 0,
+	source: StringName = &"",
+	rng_seed: int = 0
+) -> Box:
+	var q := clampi(quality, 1, 4)
+	var want := count if count > 0 else ItemConstants.box_items_count(q)
+	var pool: Array[ItemDef] = []
+	for id in ItemCatalog.all_item_ids():
+		var d := ItemCatalog.get_def(id)
+		if d != null:
+			pool.append(d)
+	if pool.size() < 3:
+		push_error("GachaService.grant_random_box: 内容不足 3 件，无法造盒")
+		return null
+	var rng := RandomNumberGenerator.new()
+	if rng_seed != 0:
+		rng.seed = rng_seed
+	else:
+		rng.randomize()
+	# 不放回抽样（先洗牌，保持确定性可复现）
+	for i in range(pool.size() - 1, 0, -1):
+		var j := rng.randi_range(0, i)
+		var tmp := pool[i]
+		pool[i] = pool[j]
+		pool[j] = tmp
+	var items: Array[ItemDef] = []
+	for i in mini(want, pool.size()):
+		items.append(pool[i])
+	while items.size() < 3:                       # 内容极少时循环补，保证 C6
+		items.append(pool[items.size() % pool.size()])
+	var b := Box.make(q, items, -1, -1, -1, source)
+	if b == null:
+		return null
+	return grant_box(state, b)
 
 ## ★ v0.26：**领取邮件里的盒子**——盲盒也是物品，所以它和物品一样"放不下就进邮件、要自己领回来"。
 ##
@@ -122,7 +140,7 @@ static func claim_boxes(state: GameState) -> Dictionary:
 ##
 ## 抽样规格（§5.6 的 `[补充]`，逐条照做）：
 ## · 抽样空间 = `evaluation.probs`（**全部物品**）**加上 `void_prob`**，总和恒为 1.0；
-## · **物品序 = 全部物品的固定数组顺序**（`SeriesDef.regular_items`；v0.13 起其后不再接隐藏物品）
+## · **物品序 = 池子的固定物品数组顺序**（v0.61：就是 `item_pool.base_items`）
 ##   → **再接 `void`**（`void` 段区间位置固定，置于物品序末尾）；
 ## · **禁用字典遍历顺序**；`RandomNumberGenerator` **必须显式赋 `seed`**，
 ##   **禁用全局 `randi()` / `randf()`**；
@@ -233,13 +251,10 @@ static func redeem(state: GameState, box: Box, gem_cost: int, seed_override: int
 		return GachaResult.failure(R_CURRENCY_INSUFFICIENT)
 	if box.uses_remaining <= 0:
 		return GachaResult.failure(R_USES_EXHAUSTED)
-	var series := GachaCatalog.get_series(box.series_id)
-	if series == null:
-		return GachaResult.failure(R_BAD_SERIES)
 	var ps := PoolService.get_pool_state(state, box.box_id)
 	if ps == null:
 		return GachaResult.failure(R_POOL_INVALID)
-	var ev := EvalService.evaluate_pool(ps, series)
+	var ev := EvalService.evaluate_pool(ps)
 	if ev == null:
 		return GachaResult.failure(R_EVAL_FAILED)
 
@@ -252,7 +267,6 @@ static func redeem(state: GameState, box: Box, gem_cost: int, seed_override: int
 		return GachaResult.failure(R_ITEM_NOT_REGISTERED)
 
 	# ── 提交阶段 ────────────────────────────────────────────────────────────────
-	r.series_id = box.series_id
 	r.box_id = box.box_id
 	r.seed = seed
 	r.draw_index = state.next_draw_index()
@@ -270,7 +284,8 @@ static func redeem(state: GameState, box: Box, gem_cost: int, seed_override: int
 			"delta": -gem_cost,
 		})
 	var src := r.to_source()
-	src["kind"] = ItemConstants.KIND_GACHA    # 02 §5.2：source.kind 必填（01 §10.2 断言这条形状）
+	src["kind"] = ItemConstants.KIND_GACHA
+	src["quality"] = box.quality          # ★ v0.61：归因带上盒子品质（套系已删除）    # 02 §5.2：source.kind 必填（01 §10.2 断言这条形状）
 	if not r.is_void:
 		# `is_new` = 收藏口径（**不驱动任何计数器**）
 		r.is_new = not EvalService.is_collected(r.item_id)
@@ -336,8 +351,6 @@ static func redeem_batch(
 			var b := boxes[i] as Box
 			if b == null or not state.has_box(b.box_id):
 				reason = R_BOX_NOT_FOUND
-			elif GachaCatalog.get_series(b.series_id) == null:
-				reason = R_BAD_SERIES
 			elif b.location != ItemConstants.LOC_WAREHOUSE:
 				# ★ v0.26：批量兑现里**只要混进一个邮件盒子**，整批就拒（邮件不是可用持有）
 				reason = ItemConstants.REASON_BOX_IN_MAIL
@@ -418,7 +431,7 @@ static func snapshot_of(ps: PoolState) -> Dictionary:
 
 
 ## 开箱日志条目（核心 §14.2.7 / 01 §4.4）。**键集逐字**：
-## `{box_id, seed, series_id, pool_snapshot, item_id, quality, is_void}`。
+## `{box_id, seed, pool_snapshot, item_id, quality, is_void}`。
 ##
 ## `[补充]` **持久化归 10**（存档格式、日志落盘时机）；本方法只保证形状与内容——
 ## `void` 以 `is_void = true` + 空 `item_id` 落盘，使"抽到空洞"可复现、可对账。
@@ -428,7 +441,6 @@ static func draw_log_entry(r: GachaResult) -> Dictionary:
 	return {
 		"box_id": r.box_id,
 		"seed": r.seed,
-		"series_id": String(r.series_id),
 		"pool_snapshot": r.pool_snapshot.duplicate(true),
 		"item_id": String(r.item_id),
 		"quality": r.quality,
@@ -482,7 +494,7 @@ static func box_quality_of_item(item_quality: int) -> int:
 ##
 ## ★ v0.56：单位是**原石**（不是金币）——用户澄清"售价是指开启时使用的原石"；
 ##   金币→原石按 `GOLD_PER_GEM = 10` 换算。
-static func open_gem_cost_for(ev: EvalService.PoolEvaluation, box_quality: int) -> int:
+static func open_cost_for(ev: EvalService.PoolEvaluation, box_quality: int) -> int:
 	var mult := float(PRICE_MULT_BY_QUALITY.get(clampi(box_quality, 1, 4), 1.0))
 	var m := EvalService.m_bar_gold(ev)
 	return maxi(1, int(ceil(m * mult / GOLD_PER_GEM)))
@@ -498,12 +510,12 @@ static func open_gem_cost_for(ev: EvalService.PoolEvaluation, box_quality: int) 
 ##   · 池子建好后求出 `M̄`，售价 = `⌈M̄ × 倍率⌉` **当场定死**（之后编辑池子不改价）。
 ##
 ## 返回 `{ok, reason, box, price}`。**随机可复现**：传 `rng_seed` 即确定（测试用），
-## 默认 `0` = 用时间取种（真随机）。
 static func generate_box(
 	state: GameState,
 	source_item_id: StringName,
 	count: int,
-	rng_seed: int = 0
+	rng_seed: int = 0,
+	grant: bool = true
 ) -> Dictionary:
 	if state == null:
 		return {"ok": false, "reason": R_BAD_EVALUATION, "box": null, "price": 0}
@@ -513,11 +525,7 @@ static func generate_box(
 	# C6：池子至少要 3 件可产出，否则这个盒子开不了
 	if count < 3:
 		return {"ok": false, "reason": PoolService.R_BELOW_C6, "box": null, "price": 0}
-
 	var q_box := box_quality_of_item(src.quality)
-	var series := _series_for_quality(q_box)
-	if series == null:
-		return {"ok": false, "reason": R_BAD_SERIES, "box": null, "price": 0}
 
 	# ── 抽池子：源物品打头，其余随机（更低品质优先，不够则同品质补）─────────────
 	var rng := RandomNumberGenerator.new()
@@ -527,7 +535,7 @@ static func generate_box(
 		rng.randomize()
 	var picked: Array[ItemDef] = [src]
 	var chosen: Dictionary = {source_item_id: true}
-	for lower in [true, false]:                 # 先"更低品质"，不够再"同品质"
+	for lower in [true, false]:
 		if picked.size() >= count:
 			break
 		var pool: Array[ItemDef] = []
@@ -546,49 +554,74 @@ static func generate_box(
 			pool.remove_at(idx)
 			picked.append(d2)
 			chosen[d2.item_id] = true
-
 	if picked.size() < count:
-		# 全局物品都不够（内容太少）⇒ 明确拒绝，不静默给个更小的池子
 		return {"ok": false, "reason": R_POOL_TOO_SMALL, "box": null, "price": 0}
 
-	# ── 造盒 ───────────────────────────────────────────────────────────────────
-	var b := Box.new()
-	b.box_id = IUuid.v4()
-	b.series_id = series.series_id
-	b.item_pool = PoolService.init_pool(state, b.box_id, series.series_id)
-	if b.item_pool == null:
+	# ── 造盒：品质 / 位子 / 寿命按品质默认；开盒价稍后按期望覆盖 ────────────────
+	var b := Box.make(q_box, picked, -1, -1, -1, &"generated")
+	if b == null:
 		return {"ok": false, "reason": R_POOL_INVALID, "box": null, "price": 0}
-	# 用抽出来的列表替换基础池（这是"随机池"，不是套系原样）
-	b.item_pool.base_items = picked
-	b.item_pool.regular_count = picked.size()
-	b.item_pool.revision += 1
-	b.modules = PoolService.empty_slots(series.socket_count)
-	b.uses_remaining = SeriesDef.expected_initial_uses(q_box)
-	b.size = 1
-	b.location = WarehouseService.place_box(b.size)
-	b.source = &"generated"
-	b.acquired_tick = int(Time.get_ticks_msec())
 
-	# 售价：**生成那一刻的期望**定死（之后编辑池子 / 装模块都不改价）。
-	# ⚠️ 此刻盒子**还没进 `state`**，`PoolService.get_pool_state()` 会查不到它（返回 null ⇒ M̄ = 0）；
-	#    所以直接走 `_compute()` 现算一份派生状态。
-	var ev := EvalService.evaluate_pool(PoolService._compute(b, b.item_pool.revision), series)
-	b.open_gem_cost = open_gem_cost_for(ev, q_box)
+	# ★ v0.64（用户裁决）：**传入的物品 = 显示，其余一律默认隐藏**。
+	# 隐藏 ≠ 禁用：它们**照样参与抽取**（权重照常、分布照常），只是**不在池子里展示**——
+	# 于是"我放进去的那件"是已知的，其余是暗盒；玩家可以花一次"显示"把它揭开（HIDDEN → SHOWN，单向）。
+	for i in range(1, b.item_pool.base_items.size()):
+		var d_hide := b.item_pool.base_items[i]
+		if d_hide != null:
+			b.item_pool.item_states[String(d_hide.item_id)] = ItemPool.ItemState.HIDDEN
+	# 开盒价：**生成那一刻的期望**定死（之后编辑池子 / 装模块都不改价）。
+	# ⚠️ 此刻盒子还没进 `state`，`get_pool_state()` 查不到它 ⇒ 直接 `_compute()` 现算。
+	var ev := EvalService.evaluate_pool(PoolService._compute(b, b.item_pool.revision))
+	b.gem_cost = open_cost_for(ev, q_box)
+	if grant:
+		grant_box(state, b)
+	return {"ok": true, "reason": R_OK, "box": b, "price": b.gem_cost}
 
-	state.add_box(b)
-	return {"ok": true, "reason": R_OK, "box": b, "price": b.open_gem_cost}
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  ★ v0.59：盲盒的**售出价格**（金币，按品质固定表）+ 卖盒入口
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# 用户裁决："**给盲盒添加售出价格**"；追问确认：**按品质固定价表**、**入口在市场页卖出区**、
+# **牌库 / 任务发的盒子也给保底价**（不是"只有生成的盒子才能卖"）。
+#
+# ⚠️ 它与 `Box.gem_cost`（**开盒原石价**）是**两件事**：
+#   · `gem_cost`：开这个盒子要花多少原石（生成时按期望算、定死；牌库盒按品质默认价）；
+#   · `sell_price_gold`：把这个盒子卖给别人能得多少金币（**只由品质决定**）。
+# 前者是"玩它"的成本，后者是"卖掉它"的收入。
+
+## 盲盒品质 1–4 的**售出价格**（金币，★ 用户给定的表）。
+const SELL_PRICE_BY_QUALITY := {1: 20, 2: 50, 3: 120, 4: 300}
+
+
+## 这个盒子能卖多少金币（★ 只由**品质**决定，与池子内容 / 期望无关）。
+##
+## **不存字段**：它是品质的纯函数 ⇒ 存下来就是第二个事实来源（改一次表就得迁移一次存档）。
+## 品质就是 `Box.quality`（v0.61：盒子自带品质，不再有套系）；
+## 套系解析不到 ⇒ 0（不可售，响亮地"没有价"而不是猜一个）。
+static func sell_price_gold(box: Box) -> int:
+	if box == null:
+		return 0
+	return int(SELL_PRICE_BY_QUALITY.get(clampi(box.quality, 1, 4), 0))
+
+
+## **卖出盲盒**（★ v0.59）：按 `sell_price_gold()` 发金币、销毁盒子。
+##
+## 拒绝：盒子不存在 / 在邮件（邮件里的不是可用持有）/ 售价为 0（套系解析不到）。
+static func sell_box(state: GameState, box_id: String) -> Dictionary:
+	var b: Box = state.find_box(box_id) if state != null else null
+	if b == null:
+		return {"ok": false, "reason": R_BOX_NOT_FOUND, "gold": 0}
+	if b.location != ItemConstants.LOC_WAREHOUSE:
+		return {"ok": false, "reason": ItemConstants.REASON_BOX_IN_MAIL, "gold": 0}
+	var price := sell_price_gold(b)
+	if price <= 0:
+		return {"ok": false, "reason": R_NOT_SELLABLE, "gold": 0}
+	state.remove_box(box_id)
+	WarehouseService.release_box(b.size)
+	ItemService.grant_currency(
+		ItemConstants.CURRENCY_GOLD, price, ItemConstants.CURRENCY_SOURCE_MILESTONE
+	)
+	return {"ok": true, "reason": R_OK, "gold": price}
 
 ## 品质档对应的**模板套系**（位子数 / 寿命 / 开盒原石价都取它）。
-## 约定：套系 id 形如 `series_q<N>`；找不到就退回同品质的第一个套系。
-static func _series_for_quality(q: int) -> SeriesDef:
-	var by_quality: SeriesDef = null
-	for sid in GachaCatalog.all_series_ids():
-		var s := GachaCatalog.get_series(sid)
-		if s == null or s.series_quality != q:
-			continue
-		if String(sid) == "series_q%d" % q:
-			return s
-		if by_quality == null:
-			by_quality = s
-	return by_quality

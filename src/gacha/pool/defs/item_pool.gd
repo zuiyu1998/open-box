@@ -34,7 +34,7 @@ const TOTAL_BP: int = 10000
 enum ItemState { SHOWN = 0, HIDDEN = 1, DISABLED = 2 }
 
 @export var box_id: String = ""                 # 稳定身份（归 01；`IUuid.v4()`，无转换点）
-@export var series_id: StringName = &""         # 基础池的来源（引用 01 的 SeriesDef）
+# ★ v0.61：`series_id` 已删除（套系概念取消）——池子的物品就是 `base_items` 本身。
 @export var regular_count: int = 0              # 冻结元数据：物品数（C6 的依据；★ v0.45：追加物品时同步 +1）
 @export var socket_count: int = 0               # 冻结元数据：镶嵌位数（C4）
 @export var revision: int = 0                   # 每次写入 +1

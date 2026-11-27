@@ -22,9 +22,6 @@ signal open_requested(times: int)
 signal socket_requested
 ## ★ v0.44：`unsocket_requested` 已随"拆卸"一起删除——**模块镶上即永久锁定**。
 ## ★ v0.45：池子成员与三态（可编辑字段，不走模块）
-signal pool_reveal_requested
-signal pool_disable_requested
-signal pool_add_requested
 ## ★ v0.51：浮层的排序变了（0 池内顺序 / 1 概率 / 2 价值 / 3 售价）
 signal pool_sort_requested(mode: int)
 ## ★ v0.52b：请求打开池子数据浮层——**先 refresh 再开**，保证打开时看到的是当前数据
@@ -45,15 +42,8 @@ signal box_changed
 @onready var _slot_picker: OptionButton = $Columns/Left/ModuleSection/SlotPicker
 @onready var _module_picker: OptionButton = $Columns/Left/ModuleSection/ModulePicker
 @onready var _socket_btn: Button = $Columns/Left/ModuleSection/ModuleButtons/SocketButton
-@onready var _pool_summary: Label = $Columns/Left/PoolSection/PoolSummary
-@onready var _pool_picker: OptionButton = $Columns/Left/PoolSection/PoolPicker
-@onready var _pool_state: Label = $Columns/Left/PoolSection/PoolState
-@onready var _pool_reveal_btn: Button = $Columns/Left/PoolSection/PoolButtons/RevealButton
-@onready var _pool_disable_btn: Button = $Columns/Left/PoolSection/PoolButtons/DisableButton
-@onready var _add_picker: OptionButton = $Columns/Left/PoolSection/AddRow/AddPicker
-@onready var _add_btn: Button = $Columns/Left/PoolSection/AddRow/AddButton
 ## ★ v0.50：池子数据浮层（用 `CanvasLayer` 承载，容器的排版不会碰到它）
-@onready var _pool_data_btn: Button = $Columns/Left/PoolSection/PoolButtons/PoolDataButton
+@onready var _pool_data_btn: Button = $Columns/Left/ModuleSection/ModuleButtons/PoolDataButton
 @onready var _overlay: Control = $PoolOverlayLayer/PoolOverlay
 @onready var _ov_note: Label = $PoolOverlayLayer/PoolOverlay/Frame/Body/Note
 @onready var _ov_rows: VBoxContainer = $PoolOverlayLayer/PoolOverlay/Frame/Body/Scroll/Rows
@@ -81,9 +71,6 @@ func _ready() -> void:
 	_open_ten.pressed.connect(func() -> void: open_requested.emit(10))
 	_open_all.pressed.connect(func() -> void: open_requested.emit(0))
 	_socket_btn.pressed.connect(func() -> void: socket_requested.emit())
-	_pool_reveal_btn.pressed.connect(func() -> void: pool_reveal_requested.emit())
-	_pool_disable_btn.pressed.connect(func() -> void: pool_disable_requested.emit())
-	_add_btn.pressed.connect(func() -> void: pool_add_requested.emit())
 	# ★ v0.50：浮层的开 / 关**完全在 View 内部**——它不改任何数据，不需要绕 Model / Controller
 	_pool_data_btn.pressed.connect(func() -> void: pool_data_requested.emit())
 	_ov_sort.item_selected.connect(func(i: int) -> void: pool_sort_requested.emit(i))
@@ -104,16 +91,6 @@ var slot_index: int:
 var module_index: int:
 	get:
 		return _module_picker.selected
-
-## ★ v0.45：池内物品下标 / 可添加物品下标。
-var pool_index: int:
-	get:
-		return _pool_picker.selected
-
-var add_index: int:
-	get:
-		return _add_picker.selected
-
 
 ## 用 Model 的快照渲染（调用方保证 @onready 已就绪——见 Controller 的 call_deferred）。
 func render(s: Dictionary) -> void:
@@ -136,12 +113,6 @@ func render(s: Dictionary) -> void:
 	_socket_btn.disabled = bool(s.get("socket_disabled", true))
 
 	# ── 左栏 · 池子（★ v0.45）─────────────────────────────────────────────────
-	_pool_summary.text = String(s.get("pool_summary", ""))
-	_pool_state.text = String(s.get("pool_state_text", ""))
-	_refill(_pool_picker, s.get("pool_options", []))
-	_refill(_add_picker, s.get("add_options", []))
-	_pool_reveal_btn.disabled = bool(s.get("pool_reveal_disabled", true))
-	_pool_disable_btn.disabled = bool(s.get("pool_disable_disabled", true))
 
 	# ── 池子数据浮层（★ v0.50）───────────────────────────────────────────────
 	_ov_note.text = String(s.get("pool_table_note", ""))
@@ -151,7 +122,6 @@ func render(s: Dictionary) -> void:
 			_ov_sort.add_item(m)
 	_ov_sort.select(int(s.get("pool_table_sort_mode", 0)))
 	_render_pool_table(s.get("pool_table_rows", []))
-	_add_btn.disabled = bool(s.get("pool_add_disabled", true))
 
 	# ── 左栏 · 下：生成物品 ───────────────────────────────────────────────────
 	_result_lbl.text = String(s.get("result", ""))
@@ -215,6 +185,7 @@ func _render_pool_table(rows) -> void:
 		_ov_rows.add_child(empty)
 		return
 	for r in arr:
+		var masked := bool(r.get("masked", false))
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 12)
 		var name_lbl := Label.new()
@@ -226,17 +197,17 @@ func _render_pool_table(rows) -> void:
 		state_lbl.custom_minimum_size = Vector2(160, 0)
 		row.add_child(state_lbl)
 		var w_lbl := Label.new()
-		w_lbl.text = "%d" % int(r.get("weight_bp", 0))
+		w_lbl.text = "—" if masked else "%d" % int(r.get("weight_bp", 0))
 		w_lbl.custom_minimum_size = Vector2(90, 0)
 		w_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row.add_child(w_lbl)
 		var p_lbl := Label.new()
-		p_lbl.text = "%.2f%%" % (float(r.get("prob", 0.0)) * 100.0)
+		p_lbl.text = "—" if masked else "%.2f%%" % (float(r.get("prob", 0.0)) * 100.0)
 		p_lbl.custom_minimum_size = Vector2(90, 0)
 		p_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row.add_child(p_lbl)
 		var v_lbl := Label.new()
-		v_lbl.text = "%d 金币" % int(r.get("value", 0))
+		v_lbl.text = "—" if masked else "%d 金币" % int(r.get("value", 0))
 		v_lbl.custom_minimum_size = Vector2(90, 0)
 		v_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row.add_child(v_lbl)

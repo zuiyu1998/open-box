@@ -14,9 +14,15 @@ var model: MarketModel = MarketModel.new()
 
 
 func _ready() -> void:
-	view.buy_requested.connect(_on_buy)
-	view.sell_requested.connect(_on_sell)
+	view.buy_item_requested.connect(_on_buy_item)
+	view.buy_box_requested.connect(_on_buy_box)
 	call_deferred("refresh")   # ★ 首次 render 推迟到 View 的 @onready 就绪之后
+
+
+## ★ v0.57：与其它页同形——顶层 `GameScreen.refresh()` 会经 `bind_state` 重渲染本页。
+## 没有它的话，**切 tab 回来市场页不会重画**（金币 / 库存 / 生成候选项都可能是旧的）。
+func bind_state(_state: GameState) -> void:
+	refresh()
 
 
 func refresh() -> void:
@@ -28,11 +34,13 @@ func snapshot() -> Dictionary:
 	return model.snapshot()
 
 
-func _on_buy() -> void:
-	model.buy(view.buy_index)
+## ★ v0.60：买盲盒（卡片直接带 box_id）
+func _on_buy_box(box_id: String) -> void:
+	model.buy_box(box_id)
 	refresh()
 
 
-func _on_sell() -> void:
-	model.sell(view.sell_index)
+## ★ v0.58：卡片上的购买按钮直接带 item_id（不再有"选中项"这一层）
+func _on_buy_item(item_id: StringName) -> void:
+	model.buy_item(item_id)
 	refresh()

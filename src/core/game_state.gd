@@ -183,13 +183,13 @@ func has_device() -> bool:
 
 ## 从落盘字典载入一个盒子 —— **v0.14「缺 `uses_remaining` 键 ⇒ 按品质补齐」的唯一落点**。
 ##
-## ★ **为什么补齐放在这一层**：补齐需要"该盒所属套系的品质"（`SeriesDef.series_quality`），
-##   而 `Box` 只带 `series_id`；要拿品质就必须能问注册表（`GachaCatalog`）——
+## ★ **为什么补齐放在这一层**：补齐需要"这个盒子的品质"，
+##   而 `Box.from_dict()` 只接受一个值、不做策略（v0.61：品质已在档里，直接读即可）——
 ##   那是**载入层**的能力。**`Box` 不该依赖注册表**，所以策略在这里、`Box.from_dict()`
 ##   只接受一个"缺键时用几"的值。
 ##
 ## ★ **只有缺键才补**：字典里**没有** `uses_remaining` ⇒ 取
-##   `SeriesDef.expected_initial_uses(series.series_quality)`（品质 1–4 → 10/15/20/25）。
+##   按盒子自带品质取默认值（`ItemConstants.box_uses()`：品质 1–4 → 10/15/20/25）。
 ##   **不是取 0**：`0` 在新语义下等于"归零 ⇒ 摧毁"，取 0 会让一份 v0.14 之前的存档
 ##   **把所有盒子一次性摧毁**。
 ## ★ **键存在时一律用档里的值**（哪怕它是 `0`——那是"这个盒子已经用尽"，是合法状态）。
@@ -197,10 +197,8 @@ func has_device() -> bool:
 static func box_from_dict(d: Dictionary) -> Box:
 	var backfill := 0
 	if not d.has("uses_remaining"):
-		var series := GachaCatalog.get_series(StringName(d.get("series_id", "")))
-		if series != null:
-			backfill = SeriesDef.expected_initial_uses(series.series_quality)
-	# 套系解析不到时 `Box.from_dict` 自己会返回 null（不静默降级），补不补都无所谓
+		# ★ v0.61：品质就在盒子档里 ⇒ 不再问注册表（套系已删除）
+		backfill = ItemConstants.box_uses(int(d.get("quality", 1)))
 	var b := Box.from_dict(d, backfill)
 	if b != null and b.location == ItemConstants.LOC_WAREHOUSE:
 		# ★ v0.26：读档时**按存档里的位置重建仓库占位**（不重新判定落位——位置是既成事实；

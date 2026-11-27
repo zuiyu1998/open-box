@@ -113,53 +113,10 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "镶嵌"
 
-[node name="PoolSection" type="VBoxContainer" parent="Columns/Left"]
-layout_mode = 2
-theme_override_constants/separation = 6
-
-[node name="PoolTitle" type="Label" parent="Columns/Left/PoolSection"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 18
-text = "③ 池子（显示 / 隐藏 / 禁用）"
-
-[node name="PoolSummary" type="Label" parent="Columns/Left/PoolSection"]
-layout_mode = 2
-autowrap_mode = 3
-text = "先选一个盲盒"
-
-[node name="PoolPicker" type="OptionButton" parent="Columns/Left/PoolSection"]
-layout_mode = 2
-
-[node name="PoolState" type="Label" parent="Columns/Left/PoolSection"]
-layout_mode = 2
-autowrap_mode = 3
-text = ""
-
-[node name="PoolButtons" type="HBoxContainer" parent="Columns/Left/PoolSection"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="RevealButton" type="Button" parent="Columns/Left/PoolSection/PoolButtons"]
+[node name="PoolDataButton" type="Button" parent="Columns/Left/ModuleSection/ModuleButtons"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "揭示为显示"
-
-[node name="DisableButton" type="Button" parent="Columns/Left/PoolSection/PoolButtons"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "禁用（不可逆）"
-
-[node name="AddRow" type="HBoxContainer" parent="Columns/Left/PoolSection"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="AddPicker" type="OptionButton" parent="Columns/Left/PoolSection/AddRow"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="AddButton" type="Button" parent="Columns/Left/PoolSection/AddRow"]
-layout_mode = 2
-text = "添加到池子"
+text = "池子数据"
 
 [node name="ResultSection" type="VBoxContainer" parent="Columns/Left"]
 layout_mode = 2
@@ -250,11 +207,6 @@ text = "开启全部"
 [node name="Spacer" type="Control" parent="Columns/Right"]
 layout_mode = 2
 size_flags_vertical = 3
-
-[node name="PoolDataButton" type="Button" parent="Columns/Left/PoolSection/PoolButtons"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "池子数据"
 
 [node name="Controller" type="Node" parent="."]
 script = ExtResource("2_ctrl")

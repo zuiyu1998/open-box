@@ -7,7 +7,6 @@ extends Resource
 
 @export var ok: bool = true
 @export var error: StringName = &""       # [补充] 纯函数不崩溃，用错误码返回
-@export var series_id: StringName = &""
 @export var box_id: String = ""           # 本次兑现的盒子身份（= Box.box_id，同类型、无转换）
 @export var item_id: StringName = &""     # 抽中 void 时为空串哨兵（不产出任何物品）
 @export var quality: int = 1              # 物品品质 1..6（白/绿/蓝/紫/金/红，v0.22）；void 时为 0
@@ -35,7 +34,7 @@ extends Resource
 
 ## 交付 02 的溯源三元组（核心 §4.2.1）：**只提供，不创建实例**。
 func to_source() -> Dictionary:
-	return {"series_id": series_id, "box_seed": seed, "draw_index": draw_index}
+	return {"box_seed": seed, "draw_index": draw_index}
 
 
 ## 错误结果（`ok == false`）。**非法输入一律返回它，不崩溃、不产出半个 GachaResult**。

@@ -13,7 +13,7 @@ class_name PoolState
 extends RefCounted
 
 var box_id: String = ""                  # 本状态属于哪一个盒子（缓存键的一半）
-var series_id: StringName = &""
+
 var revision: int = 0                    # 镜像 ItemPool.revision（07 的缓存键 = (box_id, revision)）
 var socket_count: int = 0                # 从该盒 item_pool 冻结（C4）
 var regular_count: int = 0               # 从该盒 item_pool 冻结（C6 的依据）
@@ -73,7 +73,6 @@ func banned_ids() -> Array[StringName]:
 func clone() -> PoolState:
 	var s := PoolState.new()
 	s.box_id = box_id
-	s.series_id = series_id
 	s.revision = revision
 	s.socket_count = socket_count
 	s.regular_count = regular_count

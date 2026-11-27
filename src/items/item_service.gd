@@ -8,6 +8,13 @@
 ## 本类是纯数据服务，不依赖场景树，可在无头模式跑单测。
 extends Node
 
+## ★ v0.69：**任何资源余额变化都会发这个信号**（种类 + 变更后的余额）。
+##
+## 为什么需要：顶栏（`GameScreen`）只在 `refresh()`（切 tab）时重读余额，
+## 于是"在市场页买完东西"这类**页面内事务**不会更新顶栏——旧的读数会一直挂着。
+## 本信号是"余额变了"的唯一广播点（`_apply_currency_delta` 是唯一写入实现）。
+signal currency_changed(kind: StringName, balance: int)
+
 # ── 持久状态 ────────────────────────────────────────────────────────────────────
 
 ## 仓库容量（**抽象单位**，不是"格数"）。数值归核心 D16 / 02 §11 M7，切片实测。
@@ -55,9 +62,6 @@ var currencies: Dictionary = {}
 ##     没有它每次调用都是 O(n)。
 var _by_id: Dictionary = {}
 
-## 供 01 注入：series_id -> Array[StringName]（该套系的可产出 item_id）。
-## `find_unstocked_items` 用它取候选集——SeriesDef 归 01，本系统不拥有它。
-var series_item_provider: Callable = Callable()
 
 ## 只读锁：置 true 后拒绝一切写入（测试用，验证"单写入方"）。
 var read_only: bool = false
@@ -612,6 +616,8 @@ func _apply_currency_delta(kind: StringName, delta: int) -> bool:
 		currencies.erase(key)
 	else:
 		currencies[key] = bal
+	# ★ v0.69：唯一写入点 ⇒ 唯一广播点（顶栏据此即时刷新，不必等切 tab）
+	currency_changed.emit(kind, bal)
 	return true
 
 
@@ -757,30 +763,6 @@ func resolve_item_id(category: StringName, quality: int) -> StringName:
 func snapshot() -> Array[ItemInstance]:
 	return instances.duplicate()
 
-
-## 「**当前仓库内无持有**」口径：返回候选集中仓库里没有任何实例的 item_id。
-##
-## ⚠️ **绝不能用于 01 的 ×1.5 加权**：若用仓库口径判"未拥有"，玩家可以把实例**压在邮件里**，
-## 让同一物品永远被算作未拥有，从而**刷到永久加成**（裁决 11 已验证）。
-## ×1.5 **只读 10 的收藏口径** `collected` / `is_collected`。两口径合法但名字必须可分。
-##
-## 候选集由 01 经 `series_item_provider` 注入（SeriesDef 归 01，本系统不拥有它）。
-func find_unstocked_items(series_id: StringName) -> Array[StringName]:
-	var out: Array[StringName] = []
-	if not series_item_provider.is_valid():
-		push_warning("ItemService.find_unstocked_items: series_item_provider 未注入（应由 01 设置）")
-		return out
-	var candidates: Array = series_item_provider.call(series_id)
-	if not (candidates is Array):
-		return out
-	for c in (candidates as Array):
-		var item_id := StringName(c)
-		var def := ItemCatalog.get_def(item_id)
-		if def == null:
-			continue
-		if count(def.category, def.quality, ItemConstants.LOC_WAREHOUSE) == 0:
-			out.append(item_id)  # 含隐藏物品；是否纳入 ×1.5 由 01 按 C3 裁决
-	return out
 
 
 # ══════════════════════════════════════════════════════════════════════════════

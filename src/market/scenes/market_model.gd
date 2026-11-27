@@ -1,9 +1,9 @@
 ## 市场页 —— Model（★ v0.38 MVC）。
 ##
-## **纯数据与业务，不碰 UI**。它只做三件事，全部经既有系统入口（本类不自己算账）：
-##   1. 展示：金币余额（读 `ItemService`）、刷新倒计时、上架清单、可售实例（读 `MarketService`）；
-##   2. 买入：走 `MarketService.buy()`（扣金币 + 发实例，原子）；
-##   3. 卖出：走 `MarketService.sell()`（转发 `ItemService.sell()` 换金币）。
+## **纯数据与业务，不碰 UI**。它只做两件事，全部经既有系统入口（本类不自己算账）：
+##   1. 展示：金币余额（读 `ItemService`）、刷新倒计时、上架清单、待售盲盒（读 `MarketService`）；
+##   2. 买入：买物品 `MarketService.buy()` / 买盲盒 `MarketService.buy_box()`。
+## ★ v0.63（用户裁决）：**卖出入口已从市场页移除**（买卖不对称：市场只卖，不回收）。
 ##
 ## 纪律：金币账 / 实例账仍归 02；本类只**发起**买卖、**只读**余额，不缓存副本、不自算价格。
 class_name MarketModel
@@ -21,7 +21,7 @@ func snapshot() -> Dictionary:
 	# 上架清单（读 MarketService，自动确保新鲜）
 	var ls := MarketService.listings_snapshot()
 	var listing_lines: Array[String] = []
-	var buy_options: Array[String] = []
+	var listing_cards: Array[Dictionary] = []
 	for l in ls:
 		var id: StringName = l["item_id"]
 		var def := ItemCatalog.get_def(id)
@@ -31,67 +31,56 @@ func snapshot() -> Dictionary:
 			name, qname, int(l["price"]), int(l["qty"]),
 		]
 		listing_lines.append(line)
-		buy_options.append(line)
-
-	# 可售实例（仓库里 sell_gold > 0 的实例）
-	var sell_options: Array[String] = []
-	for inst in ItemService.instances:
-		if not WarehouseService.is_warehouse(inst.instance_id):
-			continue
-		var def := ItemCatalog.get_def(inst.item_id)
-		if def == null or def.value <= 0:
-			continue
-		var name := def.display_name if def != null else String(inst.item_id)
-		sell_options.append("%s（%s）· 卖 %d 金币" % [
-			name, ItemConstants.quality_name(def.quality), def.value,
-		])
+		# ★ v0.58：一卡一件（View 按 2 列网格铺开，每卡自带购买按钮）
+		listing_cards.append({
+			"item_id": String(id),
+			"name": name,
+			"quality": qname,
+			"price": int(l["price"]),
+			"qty": int(l["qty"]),
+		})
 
 	return {
 		"gold": gold,
 		"refresh": countdown,
 		"listing_lines": listing_lines,
-		"buy_options": buy_options,
-		"buy_disabled": buy_options.is_empty(),
-		"sell_options": sell_options,
-		"sell_disabled": sell_options.is_empty(),
+		"listing_cards": listing_cards,
+		"buy_disabled": listing_cards.is_empty(),
+		# ★ v0.60：市场"待售盲盒"（每次刷新 8 个，每个一张卡）
+		"box_cards": _box_cards(),
+		"box_disabled": _box_cards().is_empty(),
 		"result": result,
 	}
 
 
-## 买入选中的上架项（`buy_index` = View 的 `BuyPicker` 选中下标）。
-func buy(buy_index: int) -> void:
-	var ls := MarketService.listings_snapshot()
-	if buy_index < 0 or buy_index >= ls.size():
-		result = "买入失败：请先选择要买的物品"
+## ★ v0.60：市场待售盲盒（元数据；买盒按钮带 box_id）。
+func _box_cards() -> Array[Dictionary]:
+	return MarketService.box_listings_snapshot()
+
+
+## **买下一个盲盒**（`box_id` 来自卡片按钮）。
+func buy_box(box_id: String) -> void:
+	var r := MarketService.buy_box(box_id)
+	if r["ok"]:
+		result = "买入盲盒成功：- %d 金币" % int(r["paid"])
+	else:
+		result = "买入盲盒失败：%s" % String(r["reason"])
+
+
+## ★ v0.58：**按 item_id 买入**（每个卡片自带购买按钮，不再有"选中下标"这一层）。
+func buy_item(item_id: StringName) -> void:
+	if item_id == &"":
+		result = "买入失败：物品为空"
 		return
-	var id: StringName = ls[buy_index]["item_id"]
-	var r := MarketService.buy(id, 1)
+	var r := MarketService.buy(item_id, 1)
 	if r["ok"]:
 		result = "买入成功：%s ×%d（- %d 金币）" % [
-			String(id), int(r["bought"]), int(r["paid"]),
+			String(item_id), int(r["bought"]), int(r["paid"]),
 		]
 	else:
 		result = "买入失败：%s" % String(r["reason"])
 
-
-## 卖出选中的可售实例（`sell_index` = View 的 `SellPicker` 选中下标）。
-func sell(sell_index: int) -> void:
-	var ids := _sellable_ids()
-	if sell_index < 0 or sell_index >= ids.size():
-		result = "卖出失败：请先选择要卖的物品"
-		return
-	var r := MarketService.sell([ids[sell_index]])
-	if r["ok"]:
-		result = "卖出成功：+ %d 金币" % int(r["gold"])
-	else:
-		result = "卖出失败：%s" % String(r["reason"])
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  内部
-# ══════════════════════════════════════════════════════════════════════════════
-
-## 距下次刷新的文案（读 MarketService；不在这里算时间戳）。
+## 距下次刷新的文案（读 `MarketService`；不在这里算时间戳）。
 func _countdown_text() -> String:
 	var s := MarketService.seconds_until_refresh()
 	if s <= 0:
@@ -99,15 +88,3 @@ func _countdown_text() -> String:
 	var h := s / 3600
 	var m := (s % 3600) / 60
 	return "距刷新 %dh %dm" % [h, m]
-
-
-## 仓库里可售实例的 instance_id（与 `snapshot()` 的 `sell_options` 同序）。
-func _sellable_ids() -> Array[String]:
-	var out: Array[String] = []
-	for inst in ItemService.instances:
-		if not WarehouseService.is_warehouse(inst.instance_id):
-			continue
-		var def := ItemCatalog.get_def(inst.item_id)
-		if def != null and def.value > 0:
-			out.append(inst.instance_id)
-	return out

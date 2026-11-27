@@ -63,8 +63,13 @@ func eq(a, b, what: String) -> void:
 #  夹具
 # ══════════════════════════════════════════════════════════════════════════════
 
-func _series_id(q: int) -> StringName:
-	return StringName("series_q%d" % q)
+## ★ v0.61：套系删除 ⇒ 用"品质 → 固定物品清单"代替（顺序确定，断言才稳）。
+func _items_for(q: int) -> Array[ItemDef]:
+	var out: Array[ItemDef] = []
+	var src: Array[ItemDef] = _items8 if q <= 2 else _items12
+	for it in src:
+		out.append(it)
+	return out
 
 
 func _setup() -> void:
@@ -88,21 +93,6 @@ func _setup() -> void:
 	_items8 = []
 	for i in 8:
 		_items8.append(defs[i])
-
-	# 四个品质各一个套系（物品数 / 位数 / 使用次数都按品质曲线）
-	for q in [1, 2, 3, 4]:
-		var s := SeriesDef.new()
-		s.series_id = _series_id(q)
-		s.series_quality = q
-		s.regular_count = SeriesDef.expected_regular_count(q)
-		s.socket_count = SeriesDef.expected_socket_count(q)
-		s.uses_per_box = SeriesDef.expected_initial_uses(q)
-		var src: Array[ItemDef] = _items8 if q <= 2 else _items12
-		var items: Array[ItemDef] = []
-		for it in src:
-			items.append(it)
-		s.regular_items = items
-		GachaCatalog.register_series(s)
 
 	GachaCatalog.register_module(_module(&"mod_ban_sd1", &"stardust_q1"))
 	GachaCatalog.register_module(_module(&"mod_ban_sd2", &"stardust_q2"))
@@ -149,18 +139,18 @@ func _module(id: StringName, target: StringName, op: int = ModuleDef.OpType.BAN,
 	return m
 
 
-func _new_box(sid: StringName = &"series_q2") -> Dictionary:
+func _new_box(quality: int = 2) -> Dictionary:
 	_setup()
 	var st := GameState.new_game()
-	var boxes := GachaService.grant_box(st, sid, 1, &"test")
+	var boxes := BoxTestKit.grant(st, 1, quality, _items_for(quality))
 	return {"state": st, "box": boxes[0]}
 
 
 ## **低预算夹具盒**（v0.14 裁决后必需）：真实寿命预算是 **10/15/20/25**，而镶嵌位只有 2/3/4/5——
 ## **"装满位子"再也烧不光预算**。凡是需要"把次数用光 ⇒ 盒子被摧毁"的场景，
 ## 都用这个夹具把预算显式压到低位（改的是测试场景，不是配置曲线）。
-func _new_box_with_budget(sid: StringName, uses: int) -> Dictionary:
-	var f := _new_box(sid)
+func _new_box_with_budget(quality: int, uses: int) -> Dictionary:
+	var f := _new_box(quality)
 	var bx: Box = f["box"]
 	bx.uses_remaining = uses
 	return f
@@ -222,19 +212,20 @@ func _test_initial_uses_curve() -> void:
 	_setup()
 	var expect := [10, 15, 20, 25]
 	for q in [1, 2, 3, 4]:
-		eq(SeriesDef.expected_initial_uses(q), expect[q - 1], "曲线：品质 %d ⇒ %d 次" % [q, expect[q - 1]])
+		eq(ItemConstants.box_uses(q), expect[q - 1], "曲线：品质 %d ⇒ %d 次" % [q, expect[q - 1]])
 	# ★ **锁定：预算与位数同源**（`expected_initial_uses` 必须由 `socket_curve()` 推出）。
 	#   用一条**机械判定**替代"注释里写请不要各自推导"——注释拦不住下一次改动。
 	for q in [1, 2, 3, 4]:
-		eq(SeriesDef.expected_initial_uses(q), SeriesDef.USES_PER_SOCKET * SeriesDef.expected_socket_count(q),
+		eq(ItemConstants.box_uses(q), ItemConstants.USES_PER_SOCKET * ItemConstants.box_socket_count(q),
 			"锁定：预算 == USES_PER_SOCKET × 位数（品质 %d）" % q)
-	# ★ **默认值也不手写**：新建的默认 `SeriesDef` 必须自洽（否则默认配置一加载就报 uses_curve）
-	var fresh := SeriesDef.new()
-	eq(fresh.uses_per_box, SeriesDef.expected_initial_uses(fresh.series_quality),
-		"默认 uses_per_box 由常量表达式推出 ⇒ 默认配置自洽（不再是手写的 15）")
+	# ★ **默认值也不手写**：按品质默认造出来的盒子必须自洽
+	for q2 in [1, 2, 3, 4]:
+		var fresh := Box.make(q2, _items_for(q2))
+		eq(fresh.uses_remaining, ItemConstants.box_uses(q2),
+			"品质 %d 的默认寿命由常量推出（不再是手写的 15）" % q2)
 	for q in [1, 2, 3, 4]:
 		var st := GameState.new_game()
-		var boxes := GachaService.grant_box(st, _series_id(q), 3, &"test")
+		var boxes := BoxTestKit.grant(st, 3, q, _items_for(q))
 		eq(boxes.size(), 3, "品质 %d：发出 3 个盒子" % q)
 		var all_match := true
 		var each_own := true
@@ -251,25 +242,15 @@ func _test_initial_uses_curve() -> void:
 		ok(each_own, "改一个盒子的次数不影响别的盒子（每盒可变）")
 
 	# 曲线是**被校验**的：配错必须报 uses_curve
-	var bad := SeriesDef.new()
-	bad.series_id = &"series_bad_uses"
-	bad.series_quality = 2
-	bad.regular_count = 8
-	bad.regular_items = _items8.duplicate()
-	bad.socket_count = 3
-	bad.uses_per_box = 3                                  # 品质 2 应为 15
-	ok(_codes(bad.validate()).has("uses_curve"), "uses_per_box 与品质不匹配 ⇒ 报 uses_curve")
-	bad.uses_per_box = 15
-	ok(not _codes(bad.validate()).has("uses_curve"), "改回 15 ⇒ 该条不再报")
-	bad.uses_per_box = 0
-	ok(_codes(bad.validate()).has("bad_uses"), "uses_per_box = 0 ⇒ 报 bad_uses（否则一发放即用尽）")
-
-	# 已记录的文档内部冲突（本套件把它**可见化**，不掩盖）：
-	# 品质 4 ⇒ socket_count 5 / regular_count 12 = 41.7%，超出 01 §4.1 [补充]③ 的 25%–40%
-	var q4 := GachaCatalog.get_series(&"series_q4")
-	ok(_codes(q4.validate()).has("socket_ratio"),
-		"已记录冲突：品质 4 的 5/12 = 41.7% 超出 25%–40% ⇒ 其 validate() 报 socket_ratio")
-
+	# ★ v0.61：套系删除后，"uses_per_box 与品质不匹配"这种**配置校验**没有对象了——
+	#   盒子自己存寿命，造盒时给什么就是什么。这里改为断言"显式给的寿命被原样保留"。
+	var bad := Box.make(2, _items_for(2), 3, 3)
+	eq(bad.uses_remaining, 3, "显式给的寿命被原样保留（不再有品质曲线校验）")
+	# ★ v0.61：套系校验没有了。品质 4 现在只由"默认造盒"体现：
+	var q4 := Box.make(4, _items_for(4))
+	eq(q4.item_pool.socket_count, 5, "品质 4 默认 5 个位子")
+	eq(q4.uses_remaining, 25, "品质 4 默认 25 次寿命")
+	eq(q4.item_pool.regular_count, 12, "品质 4 的池子是 12 件")
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  ② 连开三次
@@ -277,7 +258,7 @@ func _test_initial_uses_curve() -> void:
 
 func _test_three_draws_then_box_disappears() -> void:
 	print("— ② **低预算夹具盒**（预算 3）连开 3 次：2 → 1 → 0，第三次后盒子消失")
-	var f := _new_box_with_budget(&"series_q2", 3)
+	var f := _new_box_with_budget(2, 3)
 	var st: GameState = f["state"]
 	var bx: Box = f["box"]
 	var bid := bx.box_id
@@ -314,7 +295,7 @@ func _test_three_draws_then_box_disappears() -> void:
 	eq(bx.uses_remaining, 0, "次数不产生负值")
 
 	# 手工造一个"次数为 0 但还在清单里"的盒子（正常路径不会出现）⇒ 必须是 uses_exhausted
-	var zombie := GachaService.grant_box(st, &"series_q2", 1, &"test")[0]
+	var zombie := BoxTestKit.grant(st, 1, 2, _items_for(2))[0]
 	zombie.uses_remaining = 0
 	var before_n := st.box_count()
 	var before_i := ItemService.instances.size()
@@ -338,11 +319,11 @@ func _test_three_draws_then_box_disappears() -> void:
 ## 以及下面这条"装满 3 个 = 只剩 17 次、且再也拿不回来"的账面断言（运行期）。
 func _test_module_cost_is_permanent() -> void:
 	print("— ②b 装模块的寿命成本**不可退**（v0.44：拆卸已删除 ⇒ 沉没成本）")
-	var f := _new_box(&"series_q3")          # 品质 3 ⇒ 真实预算 20 次 / 4 个位
+	var f := _new_box(3)          # 品质 3 ⇒ 真实预算 20 次 / 4 个位
 	var st: GameState = f["state"]
 	var bx: Box = f["box"]
 	var uses0 := bx.uses_remaining
-	eq(uses0, SeriesDef.expected_initial_uses(3), "起点 == 品质 3 的预算（20）")
+	eq(uses0, ItemConstants.box_uses(3), "起点 == 品质 3 的预算（20）")
 
 	# ── 装 3 个模块：每个各扣 1 次 ──────────────────────────────────────────────
 	var s1 := PoolBuff.apply_module(st, bx.box_id, &"mod_ban_sd1", 0)
@@ -381,7 +362,7 @@ func _test_module_cost_is_permanent() -> void:
 
 func _test_snapshot_per_draw() -> void:
 	print("— ③ 每次抽取各得一份 `pool_snapshot`；两次之间编辑池子 ⇒ 第二份必须不同")
-	var f := _new_box(&"series_q3")          # 品质 3 ⇒ 真实预算 20 次（够"兑现→镶嵌→兑现"三步）
+	var f := _new_box(3)          # 品质 3 ⇒ 真实预算 20 次（够"兑现→镶嵌→兑现"三步）
 	var st: GameState = f["state"]
 	var bx: Box = f["box"]
 	var ps0 := PoolService.get_pool_state(st, bx.box_id)
@@ -411,7 +392,7 @@ func _test_snapshot_per_draw() -> void:
 	eq(int(r2.pool_snapshot["revision"]), 1, "第二份快照的 revision == 1")
 	eq(int(r2.pool_snapshot["void_mass_bp"]), int(floor(float(banned_before) * 0.4)),
 		"第二份快照的 void == 那一刻的 void")
-	eq(bx.uses_remaining, SeriesDef.expected_initial_uses(3) - 3, "三次动作各扣 1 次（20 → 17）：兑现、镶嵌、兑现")
+	eq(bx.uses_remaining, ItemConstants.box_uses(3) - 3, "三次动作各扣 1 次（20 → 17）：兑现、镶嵌、兑现")
 	ok(_same_weights(r2.pool_snapshot["weights_bp"], ps1.weights_bp),
 		"第二份快照 == **那一刻**的 PoolState 权重（逐项）")
 	eq(int(r2.pool_snapshot["weights_bp"]["stardust_q1"]), 0, "快照里那件已被排除（权重 0）")
@@ -424,7 +405,7 @@ func _test_snapshot_per_draw() -> void:
 
 	# 日志条目形状（核心 §14.2.7 / 01 §4.4）
 	var entry := GachaService.draw_log_entry(r2)
-	eq(entry.size(), 7, "日志条目 7 个键（逐字）")
+	eq(entry.size(), 6, "日志条目 6 个键（逐字；v0.61 删掉 series_id）")
 	ok(entry.has("pool_snapshot") and entry.has("is_void") and entry.has("item_id"),
 		"含 pool_snapshot / is_void / item_id")
 	ok(_same_weights(entry["pool_snapshot"]["weights_bp"], r2.pool_snapshot["weights_bp"]),
@@ -438,7 +419,7 @@ func _test_snapshot_per_draw() -> void:
 
 func _test_edit_applies_to_next_draw() -> void:
 	print("— ④ 编辑跨次生效：第 2 次抽取里被排除的物品**不再出现**（抽样验证）")
-	var f := _new_box(&"series_q3")          # 品质 3 ⇒ 真实预算 20 次
+	var f := _new_box(3)          # 品质 3 ⇒ 真实预算 20 次
 	var st: GameState = f["state"]
 	var bx: Box = f["box"]
 	var ps_before := PoolService.get_pool_state(st, bx.box_id)
@@ -455,8 +436,7 @@ func _test_edit_applies_to_next_draw() -> void:
 	eq(ps.void_mass_bp, int(floor(float(w_sd1_before) * 0.4)), "损耗 = 40% × 释放质量（C2）")
 
 	# 抽样：第 2 次将要用的那份分布里，它一次都不出现
-	var series := GachaCatalog.get_series(&"series_q3")
-	var ev := EvalService.evaluate_pool(ps, series)
+	var ev := EvalService.evaluate_pool(ps)
 	var hits := 0
 	var other_hits := 0
 	var failed_rolls := 0
@@ -477,7 +457,7 @@ func _test_edit_applies_to_next_draw() -> void:
 	ok(r2.ok, "第 2 次兑现成功")
 	ok(r2.item_id != &"stardust_q1", "实际抽到的不是被排除的那件")
 	eq(int(r2.pool_snapshot["weights_bp"]["stardust_q1"]), 0, "第 2 份快照也记录了这次排除")
-	eq(bx.uses_remaining, SeriesDef.expected_initial_uses(3) - 3, "三次动作各扣 1 次（20 → 17）：兑现、镶嵌、兑现")
+	eq(bx.uses_remaining, ItemConstants.box_uses(3) - 3, "三次动作各扣 1 次（20 → 17）：兑现、镶嵌、兑现")
 	eq(r2.draw_index, 2, "draw_index 第 2 次 == 2")
 
 
@@ -487,7 +467,7 @@ func _test_edit_applies_to_next_draw() -> void:
 
 func _test_validation_failure_consumes_no_use() -> void:
 	print("— ⑤ 校验失败不消耗任何一次使用（uses_remaining 与实例列表逐项不变）")
-	var f := _new_box(&"series_q2")
+	var f := _new_box(2)
 	var st: GameState = f["state"]
 	var bx: Box = f["box"]
 	var uses_before := bx.uses_remaining
@@ -518,28 +498,29 @@ func _test_validation_failure_consumes_no_use() -> void:
 
 	# 未注册套系（另一条校验失败路径）同样不消耗次数
 	var st2 := GameState.new_game()
-	var good := GachaService.grant_box(st2, &"series_q2", 1, &"test")[0]
+	var good := BoxTestKit.grant(st2, 1, 2, _items_for(2))[0]
 	var tmp := Box.new()
 	tmp.box_id = IUuid.v4()
-	tmp.series_id = &"series_offline"
-	tmp.item_pool = PoolService.init_pool(st2, tmp.box_id, &"series_q2")
+	tmp.quality = 2
+	tmp.item_pool = PoolService.build_pool(tmp.box_id, _items_for(2), 3)
 	tmp.modules = PoolService.empty_slots(3)
 	tmp.uses_remaining = 3
 	st2.add_box(tmp)
 	var g_before := good.uses_remaining
-	var bad := GachaService.redeem(st2, tmp, 0)
-	ok(not bad.ok, "未注册套系 ⇒ 失败")
-	eq(bad.error, GachaService.R_BAD_SERIES, "错误码 bad_series")
+	# 原石为 0 ⇒ 驳回（与"池子坏了"同一类"校验失败不消耗"分支）
+	var bad := GachaService.redeem(st2, tmp, 1)
+	ok(not bad.ok, "原石不足 ⇒ 失败")
+	eq(bad.error, GachaService.R_CURRENCY_INSUFFICIENT, "错误码 currency_insufficient")
 	eq(good.uses_remaining, g_before, "**别的盒子的次数也没被牵动**")
 	eq(tmp.uses_remaining, 3, "它自己的次数也没动")
 
 	# 镶嵌被闸门拒绝（V3 / V7）同样**不扣次数**
-	var f3 := _new_box(&"series_q2")
+	var f3 := _new_box(2)
 	var st3: GameState = f3["state"]
 	var bx3: Box = f3["box"]
 	ok(PoolBuff.apply_module(st3, bx3.box_id, &"mod_ban_sd1", 0)["ok"], "先成功镶一个（15 → 14）")
 	var uses_now := bx3.uses_remaining
-	eq(uses_now, SeriesDef.expected_initial_uses(2) - 1, "成功镶嵌扣 1 次（品质 2 的 15 → 14）")
+	eq(uses_now, ItemConstants.box_uses(2) - 1, "成功镶嵌扣 1 次（品质 2 的 15 → 14）")
 	var dup := PoolBuff.apply_module(st3, bx3.box_id, &"mod_ban_sd2", 0)     # 往占用位放 ⇒ V3
 	ok(not dup["ok"], "往占用位镶嵌 ⇒ 拒绝")
 	eq(dup["reason"], PoolService.R_SLOT_OCCUPIED, "原因码 slot_occupied（V3）")
@@ -574,7 +555,7 @@ func _test_validation_failure_consumes_no_use() -> void:
 
 func _test_modules_live_until_exhausted() -> void:
 	print("— ⑥ 模块留在盒子上，直到盒子被摧毁（归零即摧毁）")
-	var f := _new_box_with_budget(&"series_q3", 4)   # 夹具预算 4（真实曲线品质 3 = 20）：够走到摧毁
+	var f := _new_box_with_budget(3, 4)   # 夹具预算 4（真实曲线品质 3 = 20）：够走到摧毁
 	var st: GameState = f["state"]
 	var bx: Box = f["box"]
 	ok(PoolBuff.apply_module(st, bx.box_id, &"mod_ban_sd1", 0)["ok"], "镶一个排除模块（4 → 3）")
@@ -613,7 +594,7 @@ func _test_batch_k_is_uses_not_boxes() -> void:
 	print("— ⑦ k 的口径：跨 2 个盒子共 5 次使用 ⇒ k == 5（不是 2）")
 	_setup()
 	var st := GameState.new_game()
-	var boxes := GachaService.grant_box(st, &"series_q2", 2, &"test")
+	var boxes := BoxTestKit.grant(st, 2, 2, _items_for(2))
 	var a: Box = boxes[0]
 	var b: Box = boxes[1]
 	# 夹具：把两盒预算显式压到 3（真实曲线品质 2 = 15），否则 k=5 烧不光第 1 个盒子
@@ -655,7 +636,7 @@ func _test_batch_k_is_uses_not_boxes() -> void:
 	eq(ItemService.instances.size(), inst_before, "没有产生实例")
 
 	# 预校验失败（盒子不在清单里）⇒ 同样整批被拒
-	var other := GachaService.grant_box(st, &"series_q2", 1, &"test")[0]
+	var other := BoxTestKit.grant(st, 1, 2, _items_for(2))[0]
 	st.remove_box(other.box_id)
 	var bad2 := GachaService.redeem_batch(st, [other], [], 2)
 	eq(bad2.size(), 2, "2 条失败结果")
@@ -677,9 +658,9 @@ func _test_conservation() -> void:
 	var st := GameState.new_game()
 	var granted := 0
 	for _i in 4:
-		granted += GachaService.grant_box(st, &"series_q1", 1, &"test").size()   # 品质 1 ⇒ 每盒 10 次
+		granted += BoxTestKit.grant(st, 1, 1, _items_for(1)).size()   # 品质 1 ⇒ 每盒 10 次
 	eq(granted, 4, "已发放 4 个盒子")
-	eq(st.total_remaining_uses(), SeriesDef.expected_initial_uses(1) * 4,
+	eq(st.total_remaining_uses(), ItemConstants.box_uses(1) * 4,
 		"初始总次数 == 品质 1 的预算 × 4 盒（10 × 4 = 40）")
 
 	var draws := 0
@@ -704,7 +685,7 @@ func _test_conservation() -> void:
 		if target.is_exhausted():
 			exhausted += 1
 	ok(monotonic, "**uses_remaining 只减不增**（逐次检查，包括跨盒）")
-	eq(draws, SeriesDef.expected_initial_uses(1) * granted, "总共抽取 == 预算 × 盒数（每次兑现 −1）")
+	eq(draws, ItemConstants.box_uses(1) * granted, "总共抽取 == 预算 × 盒数（每次兑现 −1）")
 	eq(exhausted, granted, "用尽数 == 发放数（4）")
 	eq(st.box_count(), granted - exhausted, "**盒子总数 == 已发放 − 已用尽**（4 − 4 = 0）")
 	eq(st.total_remaining_uses(), 0, "剩余次数 0")
@@ -714,8 +695,8 @@ func _test_conservation() -> void:
 
 	# 发放过程中清点：部分用尽时两边同时成立
 	var st2 := GameState.new_game()
-	var b1 := GachaService.grant_box(st2, &"series_q1", 1, &"test")[0]    # 夹具：预算 2
-	var b2 := GachaService.grant_box(st2, &"series_q1", 1, &"test")[0]    # 夹具：预算 2
+	var b1 := BoxTestKit.grant(st2, 1, 1, _items_for(1))[0]    # 夹具：预算 2
+	var b2 := BoxTestKit.grant(st2, 1, 1, _items_for(1))[0]    # 夹具：预算 2
 	b1.uses_remaining = 2
 	b2.uses_remaining = 2
 	eq(st2.box_count(), 2, "2 个盒子")
@@ -729,7 +710,7 @@ func _test_conservation() -> void:
 
 	# **两个消耗点合起来守恒**：初始总次数 == 镶嵌数 + 兑现数 + 剩余
 	var st3 := GameState.new_game()
-	var pair := GachaService.grant_box(st3, &"series_q3", 2, &"test")    # 夹具：各 4 次（真实曲线品质 3 = 20）
+	var pair := BoxTestKit.grant(st3, 2, 3, _items_for(3))    # 夹具：各 4 次（真实曲线品质 3 = 20）
 	pair[0].uses_remaining = 4
 	pair[1].uses_remaining = 4
 	eq(st3.total_remaining_uses(), 8, "两个盒子共 8 次（夹具：各 4 次）")
@@ -756,7 +737,7 @@ func _test_conservation() -> void:
 
 func _test_uses_remaining_is_persisted() -> void:
 	print("— ⑨ 入档：`uses_remaining` 随盒子落盘 / 读回（不丢、不凭空补）")
-	var f := _new_box_with_budget(&"series_q2", 3)    # 夹具预算 3（真实曲线品质 2 = 15）
+	var f := _new_box_with_budget(2, 3)    # 夹具预算 3（真实曲线品质 2 = 15）
 	var st: GameState = f["state"]
 	var bx: Box = f["box"]
 	ok(PoolBuff.apply_module(st, bx.box_id, &"mod_ban_sd1", 0)["ok"], "镶一个模块（3 → 2）")
@@ -767,10 +748,9 @@ func _test_uses_remaining_is_persisted() -> void:
 	# ★ v0.45：池子子集从 5 键变 **7 键**——追加物品与三态必须落盘，
 	#   否则"玩家加进池子的物品 / 设的隐藏禁用"会在读档时静默丢失。
 	# ★ v0.55：再 +`pool_item_ids`（生成的盲盒随机池要整份落盘）⇒ **8 键**
-	eq(d["item_pool"].size(), 8, "池子落**八项子集**（原五项 + extra_item_ids + item_states + pool_item_ids）")
-	eq(d["item_pool"]["pool_item_ids"], [] as Array[StringName],
-		"牌库发的盒子池子 = 套系原样 ⇒ 不写 pool_item_ids（省体积、旧档契约不变）")
-	eq(d["item_pool"]["extra_item_ids"], [] as Array[StringName], "本盒没加过物品 ⇒ 空数组")
+	eq(d["item_pool"].size(), 6, "池子落**六项子集**（box_id / regular_count / socket_count / revision / item_states / pool_item_ids）")
+	eq((d["item_pool"]["pool_item_ids"] as Array).size(), 8,
+		"★ v0.61：**没有套系可推导 ⇒ 物品列表永远整份落盘**（8 件）")
 	eq(d["item_pool"]["item_states"], {}, "本盒没改过三态 ⇒ 空字典（缺键 = 显示）")
 	eq(int(d["item_pool"]["revision"]), 1, "revision 入档 == 1")
 	eq(d["modules"].size(), 1, "模块落**稀疏序列**（1 条）")
@@ -780,10 +760,10 @@ func _test_uses_remaining_is_persisted() -> void:
 	ok(back != null, "读回成功")
 	eq(back.uses_remaining, 1, "**读回后次数不丢**（3 → 1 原样回来）")
 	eq(back.box_id, bx.box_id, "身份逐位不变")
-	eq(back.series_id, &"series_q2", "套系不变")
+	eq(back.quality, 2, "品质不变")
 	eq(back.source, &"test", "来源不变")
 	eq(back.item_pool.revision, 1, "revision 读回")
-	eq(back.item_pool.socket_count, 3, "socket_count 由套系解析回来")
+	eq(back.item_pool.socket_count, 3, "socket_count 从档里读回")
 	eq(back.item_pool.regular_count, 8, "regular_count 读回")
 	eq(back.modules.size(), 3, "定长长度仍 == socket_count")
 	eq(back.module_at(0).module_id, &"mod_ban_sd1", "模块逐项还原")
@@ -794,12 +774,12 @@ func _test_uses_remaining_is_persisted() -> void:
 	d2.erase("uses_remaining")
 	var legacy := GameState.box_from_dict(d2)
 	ok(legacy != null, "缺键的档仍能载入")
-	eq(legacy.uses_remaining, SeriesDef.expected_initial_uses(2),
+	eq(legacy.uses_remaining, ItemConstants.box_uses(2),
 		"**缺键 ⇒ 按品质补齐**（品质 2 ⇒ 15，取自 series 的品质而不是取 0）")
 	ok(not legacy.is_exhausted(), "补齐后**不在「已摧毁」状态**")
 	ok(legacy.to_dict().has("uses_remaining"), "补齐后 `to_dict()` 里已经带上该键")
-	eq(int(legacy.to_dict()["uses_remaining"]), SeriesDef.expected_initial_uses(2), "补齐的值原样入档")
-	eq(GameState.box_from_dict(legacy.to_dict()).uses_remaining, SeriesDef.expected_initial_uses(2),
+	eq(int(legacy.to_dict()["uses_remaining"]), ItemConstants.box_uses(2), "补齐的值原样入档")
+	eq(GameState.box_from_dict(legacy.to_dict()).uses_remaining, ItemConstants.box_uses(2),
 		"**往返一次后值不变**（键已在档里 ⇒ 不再走补齐分支）")
 
 	# ★ 反向：键存在且为 `0` ⇒ **不许被好心补满**（`0` = 已用尽，是合法状态）
@@ -809,10 +789,10 @@ func _test_uses_remaining_is_persisted() -> void:
 	eq(Box.from_dict(d_zero).uses_remaining, 0, "底层 `Box.from_dict` 同样尊重档里的 0")
 	ok(GameState.box_from_dict(d_zero).is_exhausted(), "它确实处于「已用尽」状态")
 
-	# 未知套系 ⇒ 拒绝载入（不静默降级成基础池）
+	# ★ v0.61：没有套系可"未知"了 —— 改为**缺物品列表** ⇒ 拒绝载入（不静默造空池）
 	var d3 := d.duplicate(true)
-	d3["series_id"] = "series_offline"
-	ok(GameState.box_from_dict(d3) == null, "未知 series_id ⇒ 返回 null（禁止静默降级）")
+	d3["item_pool"].erase("pool_item_ids")
+	ok(GameState.box_from_dict(d3) == null, "缺 pool_item_ids ⇒ 返回 null（禁止静默造空池）")
 	ok(Box.from_dict(d3) == null, "底层 `Box.from_dict` 同样拒绝")
 
 
@@ -822,7 +802,7 @@ func _test_uses_remaining_is_persisted() -> void:
 
 func _test_two_spend_points_share_counter() -> void:
 	print("— ⑩ 两个消耗点共用同一个 `uses_remaining`：**装模块 −1、兑现 −1**")
-	var f := _new_box_with_budget(&"series_q3", 4)   # 夹具预算 4（真实曲线品质 3 = 20）
+	var f := _new_box_with_budget(3, 4)   # 夹具预算 4（真实曲线品质 3 = 20）
 	var st: GameState = f["state"]
 	var bx: Box = f["box"]
 	eq(bx.uses_remaining, 4, "初始 4 次（夹具预算）")
@@ -853,7 +833,7 @@ func _test_zero_by_socket_destroys_box() -> void:
 	# ── 路径 ①：连续装模块至 0（**一次都没兑现过**）──────────────────────────────
 	_setup()
 	var st := GameState.new_game()
-	var bx := GachaService.grant_box(st, &"series_q2", 1, &"test")[0]
+	var bx := BoxTestKit.grant(st, 1, 2, _items_for(2))[0]
 	# ★ **夹具重构**：新曲线下品质 1 有 10 次预算却只有 2 个位 ⇒"装满位子"再也烧不光预算。
 	#   这里把预算压到 3（= q2 的位数），于是"连续装模块至 0"仍可被触发；
 	#   **被覆盖的语义不变**：归零即摧毁，且这条路径**从未兑现过**（合法自毁）。
@@ -890,7 +870,7 @@ func _test_zero_by_socket_destroys_box() -> void:
 
 	# ── 路径 ②：装模块后再兑现至 0 ────────────────────────────────────────────
 	var st2 := GameState.new_game()
-	var bx2 := GachaService.grant_box(st2, &"series_q2", 1, &"test")[0]
+	var bx2 := BoxTestKit.grant(st2, 1, 2, _items_for(2))[0]
 	bx2.uses_remaining = 3           # 夹具预算 3（真实曲线品质 2 = 15）
 	ok(PoolBuff.apply_module(st2, bx2.box_id, &"mod_ban_sd1", 0)["ok"], "装模块一次（3 → 2）")
 	var ids2_before := _instance_ids()
@@ -931,14 +911,14 @@ func _test_box_is_a_held_thing() -> void:
 	ItemService.warehouse_capacity = 2          # 只放得下 2 个盒子
 	var st := GameState.new_game()
 
-	var b1 := GachaService.grant_box(st, &"series_q2", 1, &"test")[0]
+	var b1 := BoxTestKit.grant(st, 1, 2, _items_for(2))[0]
 	eq(b1.location, ItemConstants.LOC_WAREHOUSE, "放得下 ⇒ 落仓库")
 	eq(b1.size, 1, "每盒固定 1 单位")
 	eq(ItemService.warehouse_usage()["used"], 1, "**仓库已用把盲盒算进去**（used = 1）")
 
-	var b2 := GachaService.grant_box(st, &"series_q2", 1, &"test")[0]
+	var b2 := BoxTestKit.grant(st, 1, 2, _items_for(2))[0]
 	eq(ItemService.warehouse_usage()["used"], 2, "两个盒子 = 2 单位")
-	var b3 := GachaService.grant_box(st, &"series_q2", 1, &"test")[0]
+	var b3 := BoxTestKit.grant(st, 1, 2, _items_for(2))[0]
 	eq(b3.location, ItemConstants.LOC_MAIL, "仓库满 ⇒ 新盒子**进邮件**（被动产出永不丢失）")
 	eq(ItemService.warehouse_usage()["used"], 2, "邮件盒子**不占**仓库容量")
 	eq(st.pending_boxes.size(), 3, "邮件里的盒子仍在清单里（是玩家的）")
@@ -948,7 +928,7 @@ func _test_box_is_a_held_thing() -> void:
 	var r := GachaService.redeem(st, b3, 30)
 	eq(r.ok, false, "邮件盒子兑现被拒")
 	eq(r.error, ItemConstants.REASON_BOX_IN_MAIL, "原因码 = box_in_mail")
-	eq(b3.uses_remaining, SeriesDef.expected_initial_uses(2), "被拒 ⇒ 一次寿命都不扣")
+	eq(b3.uses_remaining, ItemConstants.box_uses(2), "被拒 ⇒ 一次寿命都不扣")
 	eq(ItemService.instances.size(), 0, "被拒 ⇒ 不产出实例")
 
 	# 邮件里的盒子：**不可镶嵌**
@@ -956,7 +936,7 @@ func _test_box_is_a_held_thing() -> void:
 	eq(sock["ok"], false, "邮件盒子镶嵌被拒")
 	eq(sock["reason"], ItemConstants.REASON_BOX_IN_MAIL, "原因码同样是 box_in_mail")
 	eq(b3.modules[0], null, "被拒 ⇒ modules 未写入")
-	eq(b3.uses_remaining, SeriesDef.expected_initial_uses(2), "被拒 ⇒ 寿命未扣")
+	eq(b3.uses_remaining, ItemConstants.box_uses(2), "被拒 ⇒ 寿命未扣")
 
 	# 腾出空间后可领回
 	ItemService.warehouse_capacity = 3
@@ -969,11 +949,11 @@ func _test_box_is_a_held_thing() -> void:
 	# 领回后就能正常兑现
 	var r2 := GachaService.redeem(st, b3, 0)
 	ok(r2.ok, "领回后可以兑现")
-	eq(b3.uses_remaining, SeriesDef.expected_initial_uses(2) - 1, "兑现扣 1 次寿命")
+	eq(b3.uses_remaining, ItemConstants.box_uses(2) - 1, "兑现扣 1 次寿命")
 
 	# 「放不下就部分成功」
 	ItemService.warehouse_capacity = 3
-	var b4 := GachaService.grant_box(st, &"series_q2", 2, &"test")
+	var b4 := BoxTestKit.grant(st, 2, 2, _items_for(2))
 	eq(b4[0].location, ItemConstants.LOC_MAIL, "满仓时新盒进邮件（第 1 个）")
 	eq(b4[1].location, ItemConstants.LOC_MAIL, "满仓时新盒进邮件（第 2 个）")
 	# 注意：前面那次兑现产出了 1 件物品（`size == 2`）——**物品与盲盒共用同一份容量账**，
@@ -989,7 +969,7 @@ func _test_box_is_a_held_thing() -> void:
 	_setup()
 	ItemService.warehouse_capacity = 10
 	var st2 := GameState.new_game()
-	var solo := GachaService.grant_box(st2, &"series_q2", 1, &"test")[0]
+	var solo := BoxTestKit.grant(st2, 1, 2, _items_for(2))[0]
 	solo.uses_remaining = 1
 	eq(ItemService.warehouse_usage()["used"], 1, "建盒后占 1 单位")
 	var used_before_redeem: int = int(ItemService.warehouse_usage()["used"])
@@ -1009,7 +989,7 @@ func _test_device_gate() -> void:
 	var bare := GameState.new()
 	ok(not bare.has_device(), "裸 GameState 没有设备（has_device() == false）")
 	eq(bare.device_count(), 0, "设备数 == 0")
-	var boxes := GachaService.grant_box(bare, &"series_q2", 1, &"test")
+	var boxes := BoxTestKit.grant(bare, 1, 2, _items_for(2))
 	eq(boxes.size(), 1, "**发盒不受门槛限制**（门槛只摆在两个消耗寿命的动作上）")
 	var bx: Box = boxes[0]
 	var uses_before := bx.uses_remaining
@@ -1042,13 +1022,13 @@ func _test_device_gate() -> void:
 	var armed := GameState.new_game()
 	ok(armed.has_device(), "**新游戏初始化后即有设备**（开局送一台基础装置）")
 	eq(armed.device_count(), 1, "正好一台")
-	var bx2: Box = GachaService.grant_box(armed, &"series_q2", 1, &"test")[0]
-	eq(bx2.uses_remaining, SeriesDef.expected_initial_uses(2), "新盒子拿到完整预算（15）")
+	var bx2: Box = BoxTestKit.grant(armed, 1, 2, _items_for(2))[0]
+	eq(bx2.uses_remaining, ItemConstants.box_uses(2), "新盒子拿到完整预算（15）")
 	ok(PoolBuff.apply_module(armed, bx2.box_id, &"mod_ban_sd1", 0)["ok"], "有设备 ⇒ **装模块放行**")
-	eq(bx2.uses_remaining, SeriesDef.expected_initial_uses(2) - 1, "放行后照常扣 1 次寿命")
+	eq(bx2.uses_remaining, ItemConstants.box_uses(2) - 1, "放行后照常扣 1 次寿命")
 	var rd := GachaService.redeem(armed, bx2, 0, 7)
 	ok(rd.ok, "有设备 ⇒ **开盒放行**")
-	eq(bx2.uses_remaining, SeriesDef.expected_initial_uses(2) - 2, "兑现也照常扣 1 次")
+	eq(bx2.uses_remaining, ItemConstants.box_uses(2) - 2, "兑现也照常扣 1 次")
 	# ★ **"永远是 0 台"这条路径在实测上不存在**：新游戏直接就能开盒
 	ok(rd.ok and not rd.is_void and rd.item_id != &"",
 		"**新游戏初始化后即可开盒**：开局那台设备足以让「开盒 → 物品 → 交付任务」跑起来"

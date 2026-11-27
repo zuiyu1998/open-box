@@ -23,34 +23,39 @@ text = ""
 [node name="Sep" type="HSeparator" parent="."]
 layout_mode = 2
 
-[node name="Listings" type="Label" parent="."]
+[node name="ListingsTitle" type="Label" parent="."]
 layout_mode = 2
-autowrap_mode = 3
-text = "市场暂无可购买的物品"
+text = "在售（每件一个购买按钮）"
 
-[node name="BuyRow" type="HBoxContainer" parent="."]
+[node name="Scroll" type="ScrollContainer" parent="."]
 layout_mode = 2
-theme_override_constants/separation = 8
+size_flags_vertical = 3
+size_flags_stretch_ratio = 1.0
 
-[node name="BuyPicker" type="OptionButton" parent="BuyRow"]
+[node name="Grid" type="GridContainer" parent="Scroll"]
 layout_mode = 2
 size_flags_horizontal = 3
+columns = 2
+theme_override_constants/h_separation = 12
+theme_override_constants/v_separation = 12
 
-[node name="BuyButton" type="Button" parent="BuyRow"]
+[node name="BoxSep" type="HSeparator" parent="."]
+
+[node name="BoxTitle" type="Label" parent="."]
 layout_mode = 2
-text = "买一件"
+text = "盲盒（每张卡片一个购买按钮）"
 
-[node name="SellRow" type="HBoxContainer" parent="."]
+[node name="BoxScroll" type="ScrollContainer" parent="."]
 layout_mode = 2
-theme_override_constants/separation = 8
+size_flags_vertical = 3
+size_flags_stretch_ratio = 1.8
 
-[node name="SellPicker" type="OptionButton" parent="SellRow"]
+[node name="BoxGrid" type="GridContainer" parent="BoxScroll"]
 layout_mode = 2
 size_flags_horizontal = 3
-
-[node name="SellButton" type="Button" parent="SellRow"]
-layout_mode = 2
-text = "卖一件"
+columns = 2
+theme_override_constants/h_separation = 12
+theme_override_constants/v_separation = 12
 
 [node name="Result" type="Label" parent="."]
 layout_mode = 2

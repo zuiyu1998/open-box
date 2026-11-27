@@ -1,55 +1,18 @@
-## 套系与模块的注册表（01-gacha.md §4.1 / §5.2.3 V7）。
+## 模块的注册表（01-gacha.md §5.2.3 V7）。
 ##
-## 存在的两个理由：
-##   1. V7 要求"`module_id` 能在 `ModuleDef` 注册表查到"——**注册表必须真的存在**；
-##   2. `ItemPool` 只落 `series_id`（基础池**不逐盒落盘**），载入时**必须**由 `series_id`
-##      解析回 `SeriesDef`（01 §4.3 的裁决），解析的宿主就是这里。
-##
-## `[补充]` **宿主的选择**：文档要求"注册表"与"由 `series_id` 解析"两件事存在，
-## 但**没有指定宿主**。这里按仓库既有先例落地——02 的 `ItemCatalog` 是 autoload 单例，
-## 本类同样注册为 autoload（`GachaCatalog`），于是 `PoolService` 的静态方法无需额外入参。
+## ★ v0.61（用户裁决）：**套系（`SeriesDef`）已整体删除**——本类现在只管 `ModuleDef`：
+##   · 盒子的品质 / 位子 / 寿命 / 开盒价都是 `Box` 自己的字段；
+##   · 池子的物品就是 `ItemPool.base_items`（逐盒落盘），不再由模板推导。
 extends Node
 
-## series_id(String) -> SeriesDef
-var _series: Dictionary = {}
 ## module_id(String) -> ModuleDef
 var _modules: Dictionary = {}
-
-## ★ v0.26：**套系内容目录**——`SeriesDef` 的 `.tres` 放这里，`_ready()` 自动载入。
-## **加一个套系 = 加一个 `.tres`，不改代码**（与 `ItemCatalog` 的两个内容目录同一纪律）。
-## 内容里的 `regular_items` 是对 02 的 `ItemDef` 资源（`src/items/content/items/*.tres`）的**引用**，
-## 所以**物品内容必须先于套系内容就位**（否则 `validate()` 会报 `null_item` / 引用不存在）。
-const SERIES_CONTENT_DIR := "res://src/gacha/content"
 
 ## ★ v0.41：**模块内容目录**——`ModuleDef` 的 `.tres` 放这里，`_ready()` 自动载入。
 ## **加一个模块 = 加一个 `.tres`，不改代码**（与套系 / 物品 / 货币三个内容目录同一纪律）。
 ## 模块的 `targets` 必须指向**池内物品**（`s01_XX` 之类），否则 `PoolService` 会以
 ## `unknown_target` 拒绝镶嵌——所以内容里的目标要跟套系池子对得上。
 const MODULE_CONTENT_DIR := "res://src/gacha/content/modules"
-
-
-## ★ v0.26：从内容目录载入全部 `SeriesDef`（幂等；同 id 覆盖）。返回载入条数。
-func load_series_content() -> int:
-	var n := 0
-	var dir := DirAccess.open(SERIES_CONTENT_DIR)
-	if dir == null:
-		push_warning(
-			"GachaCatalog: 打不开套系内容目录 `%s`（没有套系内容时是正常的）" % SERIES_CONTENT_DIR
-		)
-		return 0
-	dir.list_dir_begin()
-	var fname := dir.get_next()
-	while fname != "":
-		if not dir.current_is_dir() and fname.ends_with(".tres"):
-			var path := SERIES_CONTENT_DIR + "/" + fname
-			if ResourceLoader.exists(path):
-				var res = load(path)
-				if res is SeriesDef:
-					register_series(res as SeriesDef)
-					n += 1
-		fname = dir.get_next()
-	dir.list_dir_end()
-	return n
 
 
 ## ★ v0.41：从内容目录载入全部 `ModuleDef`（幂等；同 id 覆盖）。返回载入条数。
@@ -80,15 +43,8 @@ func load_module_content() -> int:
 
 
 func _ready() -> void:
-	load_series_content()
+	# ★ v0.61：**套系已删除**——不再载入套系内容，也没有"品质模板"这回事。
 	load_module_content()   # ★ v0.41：模块内容（许愿机「模块镶嵌」区要用）
-
-
-func register_series(def: SeriesDef) -> void:
-	if def == null or def.series_id == &"":
-		push_error("GachaCatalog.register_series: 传入了 null 或 series_id 为空的 SeriesDef")
-		return
-	_series[String(def.series_id)] = def
 
 
 func register_module(def: ModuleDef) -> void:
@@ -98,27 +54,12 @@ func register_module(def: ModuleDef) -> void:
 	_modules[String(def.id)] = def
 
 
-func get_series(series_id: StringName) -> SeriesDef:
-	return _series.get(String(series_id), null) as SeriesDef
-
-
 func get_module(module_id: StringName) -> ModuleDef:
 	return _modules.get(String(module_id), null) as ModuleDef
 
 
-func has_series(series_id: StringName) -> bool:
-	return _series.has(String(series_id))
-
-
 func has_module(module_id: StringName) -> bool:
 	return _modules.has(String(module_id))
-
-
-func all_series_ids() -> Array[StringName]:
-	var out: Array[StringName] = []
-	for k in _series.keys():
-		out.append(StringName(k))
-	return out
 
 
 func all_module_ids() -> Array[StringName]:
@@ -129,17 +70,12 @@ func all_module_ids() -> Array[StringName]:
 
 
 func clear() -> void:
-	_series.clear()
 	_modules.clear()
 
 
 ## 配置校验（加载时）。返回 { ok, errors }——**只拦非法配置、不改任何数值**。
 func validate() -> Dictionary:
 	var errors: Array[String] = []
-	for k in _series.keys():
-		var s: SeriesDef = _series[k] as SeriesDef
-		for p in s.validate():
-			errors.append("SeriesDef `%s`：%s" % [k, p])
 	for k in _modules.keys():
 		var m: ModuleDef = _modules[k] as ModuleDef
 		for p in m.validate():

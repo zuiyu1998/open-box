@@ -48,8 +48,7 @@ func bind(s: GameState) -> void:
 ##   View 报的是 -1；若照 -1 算，位子与模块列表都会是空表，而**程序设置 `selected`
 ##   不会发 `item_selected`** ⇒ 页面永远停在"空"上（实测踩过）。归一化后首帧就自洽。
 func snapshot(
-	box_index: int = -1, slot_index: int = -1, module_index: int = -1, pool_index: int = -1,
-	add_index: int = -1
+	box_index: int = -1, slot_index: int = -1, module_index: int = -1
 ) -> Dictionary:
 	var dev: Device = null if state == null else DeviceService.primary_device(state)
 	var boxes := _boxes()
@@ -71,10 +70,7 @@ func snapshot(
 			"slot_options": [] as Array[String], "slot_detail": "—",
 			"module_options": [] as Array[String],
 			"socket_disabled": true,
-			"pool_summary": "先选一个盲盒", "pool_options": [] as Array[String],
-			"pool_state_text": "", "add_options": [] as Array[String],
-			"pool_reveal_disabled": true, "pool_disable_disabled": true,
-			"pool_add_disabled": true, "pool_table_rows": [] as Array,
+			"pool_table_rows": [] as Array,
 			"pool_table_note": "", "pool_table_totals": "", "pool_table_sort_mode": 0,
 			"operator": _operator_block(),
 		}
@@ -92,8 +88,8 @@ func snapshot(
 	var effect := ""
 	if def != null:
 		var spec: DeviceLevelSpec = def.spec_for_level(dev.level)
-		effect = "可开套系品质 ≤ %d · 开盒成本 %d%%" % [
-			spec.unlock_series_quality_max if spec != null else 0,
+		effect = "可开盲盒品质 ≤ %d · 开盒成本 %d%%" % [
+			spec.unlock_quality_max if spec != null else 0,
 			int(round((spec.open_cost_bp if spec != null else 10000) / 100.0)),
 		]
 
@@ -112,12 +108,13 @@ func snapshot(
 
 	var opts: Array[String] = []
 	for b in boxes:
-		opts.append("%s（寿命 %d）" % [String(b.box_id).substr(0, 8), b.uses_remaining])
+		# ★ v0.61：套系删除后没有"套系名"可显示 ⇒ 用**品质 + 剩余寿命**（比 id 可读）
+		opts.append("品质 %d · 剩余 %d 次" % [b.quality, b.uses_remaining])
 
 	var stats := _box_stats(box_index, boxes)
 	var slots := _slots_block(box_index, boxes, slot_index)
 	var mods := _modules_block(box_index, boxes, slot_index)
-	var pool := _pool_block(box_index, boxes, pool_index)
+
 	var table := _pool_table_block(box_index, boxes)
 
 	return {
@@ -134,17 +131,10 @@ func snapshot(
 		"slot_options": slots["options"], "slot_detail": slots["detail"],
 		"module_options": mods["options"],
 		"socket_disabled": mods["socket_disabled"],
-		"pool_summary": pool["summary"],
-		"pool_options": pool["options"],
-		"pool_state_text": pool["state_text"],
-		"add_options": pool["add_options"],
-		"pool_reveal_disabled": pool["reveal_disabled"],
-		"pool_disable_disabled": pool["disable_disabled"],
 		"pool_table_rows": table["rows"],
 		"pool_table_note": table["note"],
 		"pool_table_totals": table["totals"],
 		"pool_table_sort_mode": table.get("sort_mode", 0),
-		"pool_add_disabled": pool["add_disabled"],
 		"operator": _operator_block(),
 	}
 
@@ -184,34 +174,14 @@ func _norm_slot(slot_index: int, box: Box) -> int:
 
 ## ★ v0.48：池内物品下标归一化——**未选 / 越界 ⇒ 取第 0 项**（与 `_norm_box` / `_norm_slot` 同一惯例）。
 ## 空池子 ⇒ -1。
-func _norm_pool(pool: ItemPool, pool_index: int) -> int:
-	if pool == null or pool.base_items.is_empty():
-		return -1
-	if pool_index < 0 or pool_index >= pool.base_items.size():
-		return 0
-	return pool_index
-
-
-## 选中盒子的「剩余开盒次数」与「期望」（★ v0.47：期望改成**金币口径**，并扣掉模块成本）。
-##
-## 三个数（全部由 07 算，本类不自己求和）：
-##   · **单次毛期望** = `EvalService.m_bar_gold()` = Σ pᵢ × `value`ᵢ（金币/次；★ v0.52 价值即售价）；
-##   · **模块成本 C** = `EvalService.module_gold_cost()` = 该盒已镶嵌模块的 `gold_cost` 之和；
-##   · **净期望** = `剩余次数 × 单次毛期望 − C`（用户裁决：**不按次数摊，一次性全额扣**）。
-##
-## 为什么净期望是"剩余次数合计"而不是"每次"：C 是**这个盒子**的沉没成本（模块镶上即永久，v0.44），
-## 减到单次上会变成一个维度不对的数（每开一次扣光全部模块钱）。所以净期望回答的是
-## **"把这个盒子剩下的次数全开完，扣掉模块本钱后净得多少金币"**；单次毛期望另起一行给出。
 func _box_stats(box_index: int, boxes: Array) -> Dictionary:
 	var empty := {"uses": "剩余开盒次数 —", "expectation": "期望 —"}
 	var b := _selected_box(box_index, boxes)
 	if b == null:
 		return empty
-	var series := GachaCatalog.get_series(b.series_id)
-	if series == null:
-		return {"uses": "剩余开盒次数 %d" % b.uses_remaining, "expectation": "期望 —"}
+
 	var ps := PoolService.get_pool_state(state, b.box_id)
-	var ev := EvalService.evaluate_pool(ps, series)
+	var ev := EvalService.evaluate_pool(ps)
 	var per_open := EvalService.m_bar_gold(ev)
 	var module_cost := EvalService.module_gold_cost(b)
 	var remaining := maxi(b.uses_remaining, 0)
@@ -283,85 +253,6 @@ func _modules_block(box_index: int, boxes: Array, slot_index: int) -> Dictionary
 #  左栏 · 池子（★ v0.45：成员与三态 = 池子上的可编辑字段，不走模块）
 # ══════════════════════════════════════════════════════════════════════════════
 
-## 池子块。返回 `{summary, options, state_text, add_options, reveal_disabled, disable_disabled, add_disabled}`。
-##
-## ⚠️ **一个刻意的例外**：`隐藏` 的契约是"不进入玩家可见的池子陈列"，
-##   但**这个编辑列表里必须列出全部物品**——否则被隐藏的物品就再也选不到、改不回来。
-##   所以这里列全，用后缀标明三态。
-##
-## ★ v0.48：两个按钮的可用性由**当前状态**决定（单向链，不是循环）：
-##   · **揭示**只对**隐藏**可用；
-##   · **禁用**只对**显示**可用（隐藏的必须先揭示，禁用的已是终局）。
-func _pool_block(box_index: int, boxes: Array, pool_index: int) -> Dictionary:
-	var b := _selected_box(box_index, boxes)
-	if b == null or b.item_pool == null:
-		return {
-			"summary": "先选一个盲盒", "options": [] as Array[String], "state_text": "",
-			"add_options": [] as Array[String],
-			"reveal_disabled": true, "disable_disabled": true, "add_disabled": true,
-		}
-	# ★ 与 `_norm_box` / `_norm_slot` 同一惯例：**未选 ⇒ 取第 0 项**。
-	#   否则首次渲染时 picker 还是空的（`selected == -1`），两个按钮会先灰一帧。
-	pool_index = _norm_pool(b.item_pool, pool_index)
-
-	var pool := b.item_pool
-	var shown := 0
-	var hidden := 0
-	var disabled := 0
-	var options: Array[String] = []
-	for d in pool.base_items:
-		if d == null:
-			continue
-		var st := pool.state_of(d.item_id)
-		var tag := ""
-		match st:
-			ItemPool.ItemState.HIDDEN:
-				hidden += 1
-				tag = "（隐藏）"
-			ItemPool.ItemState.DISABLED:
-				disabled += 1
-				tag = "（禁用）"
-			_:
-				shown += 1
-		options.append("%s%s" % [d.display_name if d.display_name != "" else String(d.item_id), tag])
-
-	var summary := "池子 %d 件 · 显示 %d / 隐藏 %d / 禁用 %d" % [
-		pool.base_items.size(), shown, hidden, disabled,
-	]
-	var state_text := ""
-	var cur_state := ItemPool.ItemState.SHOWN
-	var has_sel := pool_index >= 0 and pool_index < pool.base_items.size()
-	if has_sel:
-		cur_state = pool.state_of(pool.base_items[pool_index].item_id)
-		state_text = "选中：%s" % _state_name(cur_state)
-
-	# 可添加的候选：**已注册、且不在这个池子里**的物品
-	var add_options: Array[String] = []
-	for id in ItemCatalog.all_item_ids():
-		if pool.has_item(id):
-			continue
-		var def := ItemCatalog.get_def(id)
-		add_options.append(def.display_name if def != null and def.display_name != "" else String(id))
-
-	return {
-		"summary": summary,
-		"options": options,
-		"state_text": state_text,
-		"add_options": add_options,
-		# ★ v0.48：揭示只在"隐藏"时可点；禁用只在"显示"时可点
-		"reveal_disabled": not has_sel or cur_state != ItemPool.ItemState.HIDDEN,
-		"disable_disabled": not has_sel or cur_state != ItemPool.ItemState.SHOWN,
-		"add_disabled": add_options.is_empty(),
-	}
-
-
-## ★ v0.50：**池子数据浮层**的表格（只读）。
-##
-## 返回 `{rows, note, totals}`：
-##   · `rows[i] = {name, state, weight_bp, prob, value}`，顺序 = 池内顺序；
-##   · **隐藏的物品不列**（v0.48：隐藏 = 不进玩家可见的陈列），只在 `note` 里给出"另有 N 件未揭示"；
-##   · `prob` 来自 **07 的求值**（含"未拥有 ×1.5"，所以它是**真实抽中概率**，不是 `weight_bp/10000`）；
-##   · `totals` 一句话给出 件数 / Σ概率 / void / 单次毛期望（金币）。
 func _pool_table_block(box_index: int, boxes: Array) -> Dictionary:
 	var b := _selected_box(box_index, boxes)
 	if b == null or b.item_pool == null:
@@ -370,13 +261,14 @@ func _pool_table_block(box_index: int, boxes: Array) -> Dictionary:
 	if ps == null:
 		return {"rows": [] as Array, "note": "池子不可用", "totals": ""}
 
-	var series := GachaCatalog.get_series(b.series_id)
-	var ev := EvalService.evaluate_pool(ps, series) if series != null else null
+	var ev := EvalService.evaluate_pool(ps)
 	var prob_of: Dictionary = {}
 	if ev != null:
 		for i in ev.item_ids.size():
 			prob_of[ev.item_ids[i]] = float(ev.probs[i])
 
+	# ★ v0.66（用户裁决）：**隐藏项也出行**，只是**这一行不显示任何信息**（名称/权重/概率/价值全部打码）。
+	#   统计口径仍按**全池**算（隐藏项权重照旧参与，零和不变）。
 	var rows: Array = []
 	var hidden := 0
 	var prob_sum := 0.0
@@ -384,17 +276,26 @@ func _pool_table_block(box_index: int, boxes: Array) -> Dictionary:
 		if d == null:
 			continue
 		var st := b.item_pool.state_of(d.item_id)
-		if st == ItemPool.ItemState.HIDDEN:
-			hidden += 1
-			continue
 		var p := float(prob_of.get(d.item_id, 0.0))
 		prob_sum += p
+		if st == ItemPool.ItemState.HIDDEN:
+			hidden += 1
+			rows.append({
+				"name": "？？？",
+				"state": "隐藏（信息不展示）",
+				"weight_bp": 0,
+				"prob": 0.0,
+				"value": 0,
+				"masked": true,
+			})
+			continue
 		rows.append({
 			"name": d.display_name if d.display_name != "" else String(d.item_id),
 			"state": _state_name(st),
 			"weight_bp": ps.weight_of(d.item_id),
 			"prob": p,
 			"value": d.value,
+			"masked": false,
 		})
 
 	# ★ v0.51：排序。**只在"呈现顺序"上动**——`rows` 是副本，池子数据与分布一概不变。
@@ -405,6 +306,11 @@ func _pool_table_block(box_index: int, boxes: Array) -> Dictionary:
 		for i in rows.size():
 			order[rows[i]["name"]] = i
 		rows.sort_custom(func(a, b) -> bool:
+			# ★ v0.66：打码行（隐藏）没有可比值 ⇒ 一律沉底，避免混进排名里泄露"它大概值多少"
+			var ma := bool(a.get("masked", false))
+			var mb := bool(b.get("masked", false))
+			if ma != mb:
+				return mb
 			var va := float(a[key])
 			var vb := float(b[key])
 			if va != vb:
@@ -412,10 +318,10 @@ func _pool_table_block(box_index: int, boxes: Array) -> Dictionary:
 			return int(order[a["name"]]) < int(order[b["name"]])
 		)
 
-	var note := "共 %d 件参与陈列" % rows.size()
+	var note := "共 %d 件" % rows.size()
 	note += "　｜　排序：%s" % SORT_MODES[pool_sort_mode]
 	if hidden > 0:
-		note += "；**另有 %d 件未揭示（隐藏，不在陈列里）**" % hidden
+		note += "；其中 **%d 件隐藏（行在，信息不展示）**" % hidden
 	var totals := "Σ概率 %.2f%%　+　void %.2f%%　=　100.00%%　｜　单次毛期望 ≈ %.1f 金币" % [
 		prob_sum * 100.0, float(ps.void_mass_bp) / 100.0, EvalService.m_bar_gold(ev),
 	]
@@ -435,71 +341,6 @@ func _state_name(st: int) -> String:
 ## ★ v0.48：**揭示**选中的池内物品（隐藏 → 显示）。
 ## 用户裁决的三态是一条**单向链**：添加→显示、隐藏→(揭示)→显示、显示→(禁用)→禁用；
 ## 没有"显示 → 隐藏"，也没有"禁用 → 显示"（终局）。所以 UI 是**两个按钮**，不是一个循环。
-func reveal_pool_item(box_index: int, pool_index: int) -> void:
-	_apply_pool_action(box_index, pool_index, true)
-
-
-## ★ v0.48：**禁用**选中的池内物品（**只有显示能被禁用**；隐藏的必须先揭示）。
-func disable_pool_item(box_index: int, pool_index: int) -> void:
-	_apply_pool_action(box_index, pool_index, false)
-
-
-func _apply_pool_action(box_index: int, pool_index: int, reveal: bool) -> void:
-	var boxes := _boxes()
-	box_index = _norm_box(box_index, boxes)
-	var b := _selected_box(box_index, boxes)
-	if b == null or b.item_pool == null:
-		open_result = "操作失败：请先选择盲盒"
-		return
-	pool_index = _norm_pool(b.item_pool, pool_index)
-	if pool_index < 0 or pool_index >= b.item_pool.base_items.size():
-		open_result = "操作失败：请先选择池内物品"
-		return
-	var def := b.item_pool.base_items[pool_index]
-	var nm := def.display_name if def.display_name != "" else String(def.item_id)
-	var r := (
-		PoolBuff.reveal(state, b.box_id, def.item_id)
-		if reveal else PoolBuff.disable(state, b.box_id, def.item_id)
-	)
-	if r["ok"]:
-		open_result = "%s → %s" % [nm, "显示（已揭示）" if reveal else "禁用"]
-	else:
-		# 把"为什么不行"直接说出来，别让玩家对着灰按钮猜
-		var why := String(r["reason"])
-		match why:
-			"not_revealed":
-				why = "它还是隐藏状态，必须先揭示才能禁用"
-			"state_terminal":
-				why = "它已经是禁用（终局，不能改回）"
-			"no_downgrade":
-				why = "没有「显示 → 隐藏」这个动作"
-		open_result = "操作失败：%s" % why
-
-
-## 把第 `add_index` 个候选物品加进池子。
-func add_pool_item(box_index: int, add_index: int) -> void:
-	var boxes := _boxes()
-	box_index = _norm_box(box_index, boxes)
-	var b := _selected_box(box_index, boxes)
-	if b == null or b.item_pool == null:
-		open_result = "添加失败：请先选择盲盒"
-		return
-	var ids: Array[StringName] = []
-	for id in ItemCatalog.all_item_ids():
-		if not b.item_pool.has_item(id):
-			ids.append(id)
-	if add_index < 0 or add_index >= ids.size():
-		open_result = "添加失败：请先选择要加入的物品"
-		return
-	var r := PoolBuff.add_item(state, b.box_id, ids[add_index])
-	var def := ItemCatalog.get_def(ids[add_index])
-	var nm := def.display_name if def != null and def.display_name != "" else String(ids[add_index])
-	if r["ok"]:
-		open_result = "已加入池子：%s" % nm
-	else:
-		open_result = "添加失败：%s" % String(r["reason"])
-
-
 func _targets_in_pool(mdef: ModuleDef, pool_ids: Array) -> bool:
 	if mdef.targets.is_empty():
 		return false

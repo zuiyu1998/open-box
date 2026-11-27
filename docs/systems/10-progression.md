@@ -498,7 +498,12 @@ COLLECTING ──(所有已解锁套系的 regular_count 个物品全部集齐)�
     - **不变量**：**三态不得改变 `revision` 之外的任何持久事实**——`extra_item_ids` 只记"加进来的 id"，**物品定义仍来自内容表**（不得把 `ItemDef` 序列化进档）。
     - **红线**：**不得**在迁移里"顺手把三态清零"或"按当前套系重建池子"（那是 P1 静默改档）。
 
-13. **★ v0.55 增补：`item_pool` 子集再加 `pool_item_ids`（生成的盲盒随机池），`Box` 加 `open_gem_cost`（开盒原石价）；版本号不动（`[补充]`）**：
+14. **★ v0.61：盒子的存档形状变了（套系删除）；旧档里的 `series_id` 已不可解析 ⇒ 拒绝载入，不静默降级**：
+    - 新增 `quality` / `gem_cost`（缺失 ⇒ 品质 1 / 按品质默认价）；`series_id` / `open_gem_cost` 删除；
+    - `item_pool` 子集 = `box_id` / `regular_count` / `socket_count` / `revision` / `item_states` / **`pool_item_ids`（永远整份写）**；
+    - **缺 `pool_item_ids` ⇒ 返回 `null`**（旧套系档无法还原池子）；`uses_remaining` 缺失时的补齐改用 `ItemConstants.box_uses(quality)`；
+    - `schema_version` 不动（仍是"新增字段 + 载入补齐"）。
+\n13. **★ v0.55 增补：`item_pool` 子集再加 `pool_item_ids`（生成的盲盒随机池），`Box` 加 `open_gem_cost`（开盒原石价）；版本号不动（`[补充]`）**：
     - **为什么变**：01 新增"盲盒生成"——池子是**随机凑的**（传入物品 + 若干更低品质物品），完全不等于 `series_id` 解析出的套系列表。不落盘 ⇒ 读档退回套系原样（玩家的池子被静默换掉）。
     - **口径**：仍是"新增字段 + 载入补齐" ⇒ **`schema_version` 不动（仍 v6）**，无迁移步骤。
     - **载入规则**：① `pool_item_ids` **缺失或为空 ⇒ 按 `series_id` 重建**（旧档 / 牌库发的盒子，行为不变）；② 存在 ⇒ **以它为准重建 `base_items`**（顺序即产出顺序），其中已下线的 id **跳过并告警**（不静默替换）；③ **`extra_item_ids` 在 `pool_item_ids` 已重建时只记身份、不再 append**（否则每次存读都会多出一件：实测 9 → 10 → 11…）；④ `open_gem_cost` 缺失 ⇒ **0**（= 回退套系价）。

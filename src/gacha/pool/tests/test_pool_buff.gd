@@ -84,14 +84,6 @@ func _setup() -> Dictionary:
 		ItemCatalog.register(d)
 		defs.append(d)
 
-	var series := SeriesDef.new()
-	series.series_id = &"series_buff"
-	series.series_quality = 2
-	series.regular_count = N
-	series.socket_count = 3
-	series.regular_items = defs
-	GachaCatalog.register_series(series)
-
 	# 一件"池外"物品（用来测 add_item）
 	var extra := ItemDef.new()
 	extra.item_id = &"extra_q1"
@@ -100,10 +92,12 @@ func _setup() -> Dictionary:
 	extra.quality = 1
 	extra.value = 1
 	extra.size = Vector2i(1, 1)
-	extra.rarity = 50
+	extra.rarity = 10
 	ItemCatalog.register(extra)
 
-	# 一个 BAN 模块（目标在池内）
+	# ★ v0.61：套系删除 ⇒ 盒子用 `BoxTestKit` 按品质造（池子 = 上面那些物品）
+	var bx_items: Array[ItemDef] = defs.duplicate()
+	# 夹具模块（BAN，目标在池内）
 	var mod := ModuleDef.new()
 	mod.id = &"mod_ban_sd1"
 	mod.display_name = "排除 物品 1"
@@ -114,7 +108,7 @@ func _setup() -> Dictionary:
 
 	var st := GameState.new_game()
 	ItemService.grant_currency(ItemConstants.CURRENCY_GOLD, 500, ItemConstants.CURRENCY_SOURCE_INIT)
-	var boxes := GachaService.grant_box(st, &"series_buff", 1, &"test")
+	var boxes := BoxTestKit.grant(st, 1, 2, bx_items)
 	return {"state": st, "box": boxes[0]}
 
 

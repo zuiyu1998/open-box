@@ -23,6 +23,12 @@ const REFRESH_SECONDS := 6 * 3600
 ## 上架格数（一次刷新随机抽多少个不同物品）。
 const SLOT_COUNT := 6
 
+## ★ v0.60：**每次刷新生成多少个盲盒用于售卖**（用户裁决：8 个；每个一张卡片 + 一个购买按钮）。
+const BOX_SLOTS := 8
+
+## 每个上架盲盒的池子件数（含材料那一件）。
+const BOX_POOL_COUNT := 8
+
 ## 每格库存件数（买走一件 −1，归零即该格售罄）。
 const STOCK_PER_SLOT := 1
 
@@ -34,6 +40,10 @@ const BUY_PRICE_MULTIPLIER := 2
 
 ## 上架清单：每格 `{ "item_id": StringName, "price": int, "qty": int }`。
 var listings: Array[Dictionary] = []
+
+## ★ v0.60：**盲盒上架库存**（脱离 `GameState` 的"待售盒子"——买下才进玩家仓库）。
+## 刷新时**未卖出的旧盒直接丢掉**（它们是市场库存，不是玩家的东西）。
+var box_listings: Array[Box] = []
 
 ## 本次上架的 Unix 时间戳（秒）。`ensure_fresh()` 据此判断是否要刷新。
 var refreshed_at_unix: int = 0
@@ -77,8 +87,94 @@ func refresh(seed_override: int = -1, now_unix: int = -1) -> void:
 			"price": def.value * BUY_PRICE_MULTIPLIER,
 			"qty": STOCK_PER_SLOT,
 		})
+	_roll_box_listings()
 	refreshed_at_unix = now_unix if now_unix >= 0 else int(Time.get_unix_time_from_system())
 
+
+## ★ v0.60：生成本次上架的 8 个盲盒（**不交付给玩家**，买下才进仓库）。
+##
+## 材料从**已注册物品**里随机抽（用它的品质决定盲盒品质），池子件数 `BOX_POOL_COUNT`；
+## 抽到凑不够件数的材料就跳过、换一个（品质 1 的材料也能靠"同品质补齐"生成）。
+## 目标 8 个；内容不足时**少于 8 个也是合法结果**（不静默塞假盒）。
+func _roll_box_listings() -> void:
+	box_listings.clear()                       # 未卖出的旧盒直接丢（用户裁决：销毁）
+	var st: GameState = GameSession.state
+	if st == null:
+		return
+	var pool: Array[StringName] = []
+	for id in ItemCatalog.all_item_ids():
+		if ItemCatalog.get_def(id) != null:
+			pool.append(id)
+	if pool.is_empty():
+		return
+	_shuffle(pool)
+	# 件数自适应：材料品质越低、可用物品越少 ⇒ 按"最多能凑多少"取（3…BOX_POOL_COUNT）。
+	# 否则低品质材料会凑不满 8 件、整批少盒（真实内容与测试夹具都会遇到）。
+	var guard := 0
+	while box_listings.size() < BOX_SLOTS and guard < BOX_SLOTS * 8:
+		guard += 1
+		var material: StringName = pool[_rng.randi_range(0, pool.size() - 1)]
+		var src := ItemCatalog.get_def(material)
+		if src == null:
+			continue
+		var capacity := 1
+		for id in pool:
+			var d := ItemCatalog.get_def(id)
+			if d == null or d.item_id == material:
+				continue
+			if d.quality <= src.quality:
+				capacity += 1
+		var want := mini(BOX_POOL_COUNT, capacity)
+		if want < 3:
+			continue
+		var r := GachaService.generate_box(st, material, want, _rng.randi(), false)
+		if not r["ok"]:
+			continue
+		box_listings.append(r["box"] as Box)
+
+
+## 盲盒上架清单（**元数据副本**；买盒要的是 `box_id`，Box 实例不外传）。
+func box_listings_snapshot() -> Array[Dictionary]:
+	ensure_fresh()
+	var out: Array[Dictionary] = []
+	for b in box_listings:
+		out.append({
+			"box_id": b.box_id,
+			"quality": b.quality,
+			"size": b.item_pool.base_items.size() if b.item_pool != null else 0,
+			"gem_cost": b.gem_cost,
+			"price": GachaService.sell_price_gold(b),
+		})
+	return out
+
+
+## ★ v0.60：**买下一个盲盒**（金币 = 它的品质卖价；买下后进玩家仓库）。
+func buy_box(box_id: String) -> Dictionary:
+	ensure_fresh()
+	var idx := -1
+	for i in box_listings.size():
+		if box_listings[i].box_id == box_id:
+			idx = i
+			break
+	if idx < 0:
+		return {"ok": false, "reason": &"not_listed", "paid": 0}
+	var b: Box = box_listings[idx]
+	var price := GachaService.sell_price_gold(b)
+	if price <= 0:
+		return {"ok": false, "reason": &"not_listed", "paid": 0}
+	var res := ItemService.transact([{
+		"op": ItemConstants.OP_CURRENCY,
+		"kind": ItemConstants.CURRENCY_GOLD,
+		"delta": -price,
+	}])
+	if not res["ok"]:
+		return {"ok": false, "reason": StringName(res["reason"]), "paid": 0}
+	# 交付：从"上架库存"转入玩家仓库（盒子永不丢失 ⇒ 放不下进邮件）
+	b.location = WarehouseService.place_box(b.size)
+	if GameSession.state != null:
+		GameSession.state.add_box(b)
+	box_listings.remove_at(idx)
+	return {"ok": true, "reason": ItemConstants.REASON_OK, "paid": price, "box_id": box_id}
 
 ## 惰性刷新：距上次上架 ≥ `REFRESH_SECONDS` 就自动重抽。
 ## `now_unix < 0` 用系统当前时间（测试可传固定值）。
@@ -178,6 +274,15 @@ func sell(instance_ids: Array[String]) -> Dictionary:
 	return ItemService.sell(instance_ids)
 
 
+## ★ v0.59：**卖出盲盒**——转发 `GachaService.sell_box()`（按品质固定价表发金币、销毁盒子）。
+## 市场同样**不另定价**。
+func sell_box(box_id: String) -> Dictionary:
+	var st: GameState = GameSession.state
+	if st == null:
+		return {"ok": false, "reason": &"no_state", "gold": 0}
+	return GachaService.sell_box(st, box_id)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  存档形状（★ v0.38：只提供形状，等 10 落地后接上）
 # ══════════════════════════════════════════════════════════════════════════════
@@ -214,6 +319,7 @@ func from_save_dict(d: Dictionary) -> void:
 ## 清空（新游戏 / 测试重置）。
 func reset() -> void:
 	listings.clear()
+	box_listings.clear()          # ★ v0.60：上架盲盒也一并清掉（未卖出的直接丢）
 	refreshed_at_unix = 0
 	_rng = null
 

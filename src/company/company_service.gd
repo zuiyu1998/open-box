@@ -10,7 +10,7 @@
 ##
 ## **三条核心规则**：
 ##   · **等级**：升级要提交固定配方（`{item_id: count}`），消耗后 +1，有上限 `MAX_LEVEL`；
-##   · **培养路线**：互斥，选一条（`select_route`），决定产出的盲盒系列（`series` 列表）与买价；
+##   · **培养路线**：互斥，选一条（`select_route`），决定产出的盲盒**品质**与买价；
 ##   · **定时产出**：每 `PRODUCTION_INTERVAL`（当前 1 小时）自动产 `PRODUCTION_BATCH` 盒进库存，
 ##     库存有上限 `STOCK_CAP`，满了不产出。
 ##
@@ -30,16 +30,16 @@ const STOCK_CAP := 10
 ## 公司等级上限。
 const MAX_LEVEL := 5
 
-## ★ 培养路线（骨架：当前只有 `series_01`，故先内置一条示范路线）。
+## ★ 培养路线（v0.61：套系删除后，路线直接给**盲盒品质**与买价）。
 ##
 ## **将来多系列后改为内容配置**（`.tres`，与 ItemCatalog / GachaCatalog 同一纪律），
 ## 见 `docs/systems/14-company.md` §7 M1。
-## 每条：`name` 显示名、`series` 可产出的盲盒系列列表、`prices` 每个系列的金币买价（🔧 可标定）。
+## 每条：`name` 显示名、`qualities` 可产出的盲盒品质列表、`prices` 每个品质的金币买价（🔧 可标定）。
 const ROUTES := {
 	&"standard": {
 		"name": "标准线",
-		"series": [&"series_01"],
-		"prices": {&"series_01": 100},
+		"qualities": [2],
+		"prices": {2: 100},
 	},
 }
 
@@ -60,7 +60,7 @@ var level: int = 1
 ## 当前培养路线 id（互斥：一次只选一条）。
 var route_id: StringName = &"standard"
 
-## 盲盒库存：`{ "series_id": StringName, "produced_at": int }`（产出的顺序 = 列表顺序）。
+## 盲盒库存：`{ "quality": int, "produced_at": int }`（产出的顺序 = 列表顺序）。
 var stock: Array[Dictionary] = []
 
 ## 上次产出的 Unix 时间戳（秒）。`ensure_produced()` 据此判断是否要再产一批。
@@ -87,19 +87,19 @@ func upgrade_requirement() -> Dictionary:
 
 
 ## 某系列的买价（金币）。**不在当前路线的系列里 / 未标价 → 返回 0（0 = 买不到，不是免费）**。
-func buy_price(series_id: StringName) -> int:
+func buy_price(quality: int) -> int:
 	var route := current_route()
 	if route.is_empty():
 		return 0
 	var prices: Dictionary = route.get("prices", {})
-	return int(prices.get(series_id, 0))
+	return int(prices.get(quality, 0))
 
 
 ## 库存里某个系列的盒数。
-func stock_of(series_id: StringName) -> int:
+func stock_of(quality: int) -> int:
 	var n := 0
 	for s in stock:
-		if StringName(s["series_id"]) == series_id:
+		if int(s["quality"]) == quality:
 			n += 1
 	return n
 
@@ -179,23 +179,22 @@ func upgrade(state: GameState) -> Dictionary:
 
 ## 产出一批盲盒进库存（库存满则跳过）。`now_unix >= 0` 注入时间戳（测试）。
 ##
-## 产出的系列 = 当前路线的 `series` 列表（当前只有 1 个系列，取第一个；将来多系列轮换 / 按等级解锁）。
+## 产出的品质 = 当前路线的 `qualities` 列表（当前只有 1 个品质；将来多品质轮换 / 按等级解锁）。
 func produce(now_unix: int = -1) -> int:
 	var now := now_unix if now_unix >= 0 else int(Time.get_unix_time_from_system())
 	var route := current_route()
 	if route.is_empty():
 		return 0
-	var series_list: Array = route.get("series", [])
-	if series_list.is_empty():
+	var quality_list: Array = route.get("qualities", [])
+	if quality_list.is_empty():
 		return 0
 
 	var produced := 0
 	for _i in PRODUCTION_BATCH:
 		if stock.size() >= STOCK_CAP:
 			break
-		# 骨架：只取第一个系列（将来按等级 / 路线在多个系列里轮换，见 §7 M2）
-		var sid: StringName = series_list[0]
-		stock.append({"series_id": sid, "produced_at": now})
+		# 骨架：只取第一个品质（将来按等级 / 路线在多个品质里轮换，见 §7 M2）
+		stock.append({"quality": int(quality_list[0]), "produced_at": now})
 		produced += 1
 	last_production_unix = now
 	return produced
@@ -214,21 +213,21 @@ func ensure_produced(now_unix: int = -1) -> void:
 
 ## 买一盒库存盲盒：**先扣金币（02 事务）→ 再发盒（01）**。
 ##
-## 返回 `{ ok, reason, series_id, paid }`：
+## 返回 `{ ok, reason, quality, paid }`：
 ##  · `not_listed`（系列不在当前路线）/ `out_of_stock`（库存无该系列）/
 ##    `currency_insufficient`（金币不够）/ `no_space`（放不下——由 grant_box 的 place_box 落邮件，
 ##    见下）。
 ## ⚠️ **原子性边界（裁决 13）**：扣金币（02）与发盒（01）是**两个系统**，不承诺跨系统原子。
 ##   实际顺序 = 预检（金币够 / 有库存）→ 扣金币 → 发盒；发盒失败概率极低（系列已在路线里注册）。
 ##   盲盒是**被动产出**（放不下进邮件、永不丢失），故不存在"扣了钱盒子凭空消失"。
-func buy(series_id: StringName, state: GameState) -> Dictionary:
+func buy(quality: int, state: GameState) -> Dictionary:
 	var fail := func(reason: StringName) -> Dictionary:
-		return {"ok": false, "reason": reason, "series_id": String(series_id), "paid": 0}
+		return {"ok": false, "reason": reason, "quality": quality, "paid": 0}
 
-	var price := buy_price(series_id)
+	var price := buy_price(quality)
 	if price <= 0:
 		return fail.call(&"not_listed")
-	if stock_of(series_id) <= 0:
+	if stock_of(quality) <= 0:
 		return fail.call(&"out_of_stock")
 	if ItemService.currency_balance(ItemConstants.CURRENCY_GOLD) < price:
 		return fail.call(ItemConstants.REASON_CURRENCY_INSUFFICIENT)
@@ -243,17 +242,17 @@ func buy(series_id: StringName, state: GameState) -> Dictionary:
 		return fail.call(StringName(pay["reason"]))
 
 	# ② 从库存移除一盒（FIFO 里第一个该系列）
-	var removed := _take_from_stock(series_id)
+	var removed := _take_from_stock(quality)
 	if removed < 0:
 		# 理论上不可达（预检过库存）；防御：金币已扣，只能继续发盒
 		return fail.call(&"out_of_stock")
 
 	# ③ 发盒（01；落位走 WarehouseService.place_box）
-	var boxes := GachaService.grant_box(state, series_id, 1, &"company")
-	if boxes.is_empty():
+	var box := GachaService.grant_random_box(state, quality, 0, &"company")
+	if box == null:
 		return fail.call(&"grant_failed")
 
-	return {"ok": true, "reason": ItemConstants.REASON_OK, "series_id": String(series_id), "paid": price}
+	return {"ok": true, "reason": ItemConstants.REASON_OK, "quality": quality, "paid": price}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -265,7 +264,7 @@ func to_save_dict() -> Dictionary:
 	var arr: Array = []
 	for s in stock:
 		arr.append({
-			"series_id": String(s["series_id"]),
+			"quality": int(s["quality"]),
 			"produced_at": int(s["produced_at"]),
 		})
 	return {
@@ -287,7 +286,7 @@ func from_save_dict(d: Dictionary) -> void:
 			if e is Dictionary:
 				var ed: Dictionary = e
 				stock.append({
-					"series_id": StringName(ed.get("series_id", "")),
+					"quality": int(ed.get("quality", 1)),
 					"produced_at": int(ed.get("produced_at", 0)),
 				})
 	last_production_unix = int(d.get("last_production_unix", 0))
@@ -306,9 +305,9 @@ func reset() -> void:
 # ══════════════════════════════════════════════════════════════════════════════
 
 ## 从库存移除一盒（第一个匹配的系列），返回其下标；没找到 → -1。
-func _take_from_stock(series_id: StringName) -> int:
+func _take_from_stock(quality: int) -> int:
 	for i in stock.size():
-		if StringName(stock[i]["series_id"]) == series_id:
+		if int(stock[i]["quality"]) == quality:
 			stock.remove_at(i)
 			return i
 	return -1

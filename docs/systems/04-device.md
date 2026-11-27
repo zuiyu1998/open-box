@@ -1,6 +1,9 @@
 # 04 · 设备系统
 
 - 上游：`../core-design.md` **v0.18（设备系统负责三件事：开启盲盒 / 镶嵌模块 / 设备升级；开盒消耗**原石**；§4.4 / §4.8 / §15 D23 / D24 / §16.13）**；更早沿革见核心 §16（§16.10 / §16.11 / §16.12）
+> **★ v0.61（用户裁决：去除套系）**：品质门控的比较对象从"套系品质"改为 **`Box.quality`**；
+> 开盒基准价从 `SeriesDef.gem_cost` 改为 **`Box.gem_cost`**（每盒自己存）。`DeviceLevelSpec.unlock_series_quality_max`
+> 已改名 **`unlock_quality_max`**。读数口径（折扣曲线、`floori`）不变。
 - 依赖系统：`01-gacha.md`（**两个动作的执行者与唯一写入方**：`GachaService.redeem()` / `redeem_batch()`、`PoolService.socket()`；**开盒原石成本的基准 `SeriesDef.gem_cost` 归 01 的内容配置**；★ v0.44：`unsocket()` 已删除）、`02-item.md`（**资源（货币类）的账**：原石余额的唯一写入方是 `ItemService`）、`10-progression.md`（**开局那台的发放事实 + 存档布局**）、`08-ui-panels.md`（呈现）
 - 被依赖：`01-gacha.md`（本系统是"开盒 / 镶嵌"两个动作的**入口发起方**，并向它传入本次开盒的原石成本）、`08-ui-panels.md`（架上 / 原石读数 / 升级入口 / 各禁用态）、`10-progression.md`（设备 id 与等级事实）
 

@@ -155,7 +155,7 @@ func _test_route_mutually_exclusive() -> void:
 	eq(CompanyService.route_id, &"standard", "默认路线 = standard")
 	var r := CompanyService.current_route()
 	ok(not r.is_empty(), "当前路线存在")
-	ok((r.get("series", []) as Array).has(&"series_01"), "路线产出 series_01")
+	ok((r.get("qualities", []) as Array).has(2), "路线产出品质 2")
 
 	# 不存在的路线 ⇒ 拒绝、状态不变
 	ok(not CompanyService.select_route(&"nope"), "未知路线 ⇒ 拒绝")
@@ -172,7 +172,7 @@ func _test_produce_on_interval() -> void:
 	# 首次 ensure_produced ⇒ 立即产一批
 	CompanyService.ensure_produced(1000)
 	eq(CompanyService.stock.size(), CompanyService.PRODUCTION_BATCH, "首次产出 = PRODUCTION_BATCH 盒")
-	eq(StringName(CompanyService.stock[0]["series_id"]), &"series_01", "产出的是路线的 series_01")
+	eq(int(CompanyService.stock[0]["quality"]), 2, "产出的是路线的品质 2")
 
 	# 未到 1 小时 ⇒ 不再产
 	CompanyService.ensure_produced(1000 + CompanyService.PRODUCTION_INTERVAL - 1)
@@ -195,21 +195,21 @@ func _test_produce_respects_stock_cap() -> void:
 func _test_buy_grants_box_and_charges() -> void:
 	_reset()
 	CompanyService.ensure_produced(1000)
-	var price: int = CompanyService.buy_price(&"series_01")
+	var price: int = CompanyService.buy_price(2)
 	ok(price > 0, "买价 > 0")
 	_give_gold(price)
 
 	var st := GameState.new_game()
 	var gold_before := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
 	var box_before := st.box_count()
-	var stock_before := CompanyService.stock_of(&"series_01")
+	var stock_before := CompanyService.stock_of(2)
 
-	var r := CompanyService.buy(&"series_01", st)
+	var r := CompanyService.buy(2, st)
 	ok(r["ok"], "买入成功")
 	eq(int(r["paid"]), price, "付款 = 买价")
 	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD), gold_before - price, "金币 −买价")
 	eq(st.box_count(), box_before + 1, "盲盒 +1（落仓库/邮件由 place_box 决定）")
-	eq(CompanyService.stock_of(&"series_01"), stock_before - 1, "库存 −1")
+	eq(CompanyService.stock_of(2), stock_before - 1, "库存 −1")
 
 
 func _test_buy_atomic_on_insufficient_gold() -> void:
@@ -218,12 +218,12 @@ func _test_buy_atomic_on_insufficient_gold() -> void:
 	var st := GameState.new_game()
 	# ★ new_game() 会自动发开局 10000 金币 ⇒ 显式清空，构造"金币不足"
 	ItemService.currencies.clear()
-	var stock_before := CompanyService.stock_of(&"series_01")
+	var stock_before := CompanyService.stock_of(2)
 	var box_before := st.box_count()
-	var r := CompanyService.buy(&"series_01", st)
+	var r := CompanyService.buy(2, st)
 	ok(not r["ok"], "金币不足 ⇒ 买入失败")
 	eq(r["reason"], ItemConstants.REASON_CURRENCY_INSUFFICIENT, "原因 = currency_insufficient")
-	eq(CompanyService.stock_of(&"series_01"), stock_before, "库存不减（原子）")
+	eq(CompanyService.stock_of(2), stock_before, "库存不减（原子）")
 	eq(st.box_count(), box_before, "无新盲盒（原子）")
 
 
@@ -232,7 +232,7 @@ func _test_buy_out_of_stock() -> void:
 	# 库存为空 ⇒ 买不到
 	var st := GameState.new_game()
 	_give_gold(100000)
-	var r := CompanyService.buy(&"series_01", st)
+	var r := CompanyService.buy(2, st)
 	ok(not r["ok"], "无库存 ⇒ 买入失败")
 	eq(r["reason"], &"out_of_stock", "原因 = out_of_stock")
 

@@ -17,7 +17,6 @@ const UPGRADE_L2 := 40      # 夹具曲线：升到 2 级的价格
 var _pass := 0
 var _fail := 0
 var _defs: Array[ItemDef] = []
-var _series: SeriesDef
 
 
 func _ready() -> void:
@@ -97,16 +96,7 @@ func _setup() -> void:
 		ItemCatalog.register(d)
 		_defs.append(d)
 
-	_series = SeriesDef.new()
-	_series.series_id = &"series_01"
-	_series.series_quality = 2
-	_series.regular_count = N
-	_series.socket_count = 3
-	_series.uses_per_box = SeriesDef.expected_initial_uses(2)
-	_series.gem_cost = GEM_BASE
-	_series.regular_items = _defs.duplicate()
-	GachaCatalog.register_series(_series)
-
+	# ★ v0.61：套系删除 ⇒ 盒子由 `BoxTestKit` 按品质造（开盒价在 `_new_state` 里显式给 GEM_BASE）
 	var m := ModuleDef.new()
 	m.id = &"mod_ban_sd5"
 	m.display_name = "排除 5 号"
@@ -130,7 +120,7 @@ func _device_def() -> DeviceDef:
 	for r in rows:
 		var spec := DeviceLevelSpec.new()
 		spec.level = int(r[0])
-		spec.unlock_series_quality_max = int(r[1])
+		spec.unlock_quality_max = int(r[1])
 		spec.open_cost_bp = int(r[2])
 		spec.upgrade_cost_gems = int(r[3])
 		levels.append(spec)
@@ -153,7 +143,9 @@ func _new_state(gems: int = -1, gold: int = -1, lv: int = 1) -> Dictionary:
 		ItemConstants.INIT_GOLD if gold < 0 else gold,
 		ItemConstants.CURRENCY_SOURCE_INIT
 	)
-	var boxes := GachaService.grant_box(st, &"series_01", 1, &"test")
+	var boxes := BoxTestKit.grant(st, 1, 2, _defs, 3, -1)
+	# 夹具口径：开盒基准价 = GEM_BASE（与 v0.61 前一致）
+	boxes[0].gem_cost = GEM_BASE
 	return {"state": st, "box": boxes[0]}
 
 
@@ -169,7 +161,7 @@ func _test_content_and_catalog() -> void:
 	ok(start != null, "开局装置已注册（缺它 ⇒ 永远是 0 台）")
 	if start != null:
 		eq(start.levels.size(), 3, "内容配置载入成功：3 档等级（`.tres` 有效）")
-		eq(start.unlock_series_quality_max(1), 2, "等级 1 能开品质 ≤ 2 的套系（切片不死锁）")
+		eq(start.unlock_quality_max(1), 2, "等级 1 能开品质 ≤ 2 的套系（切片不死锁）")
 		eq(start.upgrade_cost_to_next(1), 40, "升到 2 级的价格 = 40 原石")
 		eq(start.upgrade_cost_to_next(3), -1, "满级 ⇒ 无下一级（-1）")
 		ok(start.validate().is_empty(), "内容定义本身通过校验")
@@ -181,7 +173,7 @@ func _test_content_and_catalog() -> void:
 	var probs := broken.validate()
 	ok(not probs.is_empty(), "等级不连续 ⇒ 校验报错（不得静默当连续）")
 	var shrink := _device_def()
-	shrink.levels[2].unlock_series_quality_max = 1
+	shrink.levels[2].unlock_quality_max = 1
 	ok(not shrink.validate().is_empty(), "升级把准入变小 ⇒ 校验报错（升级不许变成惩罚）")
 	DeviceCatalog.clear()
 	DeviceCatalog.register(_device_def())
@@ -250,7 +242,7 @@ func _test_redeem_atomicity_and_insufficient() -> void:
 	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GEM), 0, "**原石恰好减少 `gem_cost`**")
 	if not r.is_void:
 		eq(ItemService.instances.size(), insts + 1, "非 void ⇒ 恰好一个新实例")
-	eq(bx.uses_remaining, SeriesDef.expected_initial_uses(2) - 1, "寿命恰好 −1")
+	eq(bx.uses_remaining, ItemConstants.box_uses(2) - 1, "寿命恰好 −1")
 	ok(ItemService.check_conservation(), "守恒等式仍成立")
 
 	# 不足：余额 = cost − 1 ⇒ 链首拒绝，什么都不动
@@ -271,7 +263,7 @@ func _test_batch_precheck() -> void:
 	print("— T13 ④：整批预检按**整批总成本**判定（§5.1 / §5.8）")
 	var f := _new_state(GEM_BASE * 2 - 1)
 	var st: GameState = f["state"]
-	var boxes := GachaService.grant_box(st, &"series_01", 2, &"test")
+	var boxes := BoxTestKit.grant(st, 2, 2, _defs)
 	var gems_before := ItemService.currency_balance(ItemConstants.CURRENCY_GEM)
 	var uses_before := boxes[0].uses_remaining + boxes[1].uses_remaining
 	var res := DeviceService.redeem_batch(st, boxes, 2, [1, 2])
@@ -283,7 +275,7 @@ func _test_batch_precheck() -> void:
 	# 够 ⇒ 全部成功
 	var f2 := _new_state(GEM_BASE * 2)
 	var st2: GameState = f2["state"]
-	var boxes2 := GachaService.grant_box(st2, &"series_01", 2, &"test")
+	var boxes2 := BoxTestKit.grant(st2, 2, 2, _defs)
 	var res2 := DeviceService.redeem_batch(st2, boxes2, 2, [1, 2])
 	eq(res2.size(), 2, "k = 2")
 	ok(res2[0].ok and res2[1].ok, "整批成功")
@@ -308,7 +300,7 @@ func _test_upgrade() -> void:
 	eq(st.devices[0].device_id, id, "设备 id 不变（升级不是换一台）")
 	eq(DeviceService.open_cost(st, bx), 18, "**立刻生效**：开盒成本降到 18")
 	eq(bx.item_pool.socket_count, 3, "**功率面不动**：镶嵌位数仍是 3")
-	eq(bx.uses_remaining, SeriesDef.expected_initial_uses(2), "寿命预算口径不动")
+	eq(bx.uses_remaining, ItemConstants.box_uses(2), "寿命预算口径不动")
 	eq(ItemService.instances.size(), 0, "升级不产生任何实例")
 
 	# 原石不足
@@ -338,14 +330,7 @@ func _test_level_gate_only_for_opening() -> void:
 	var st: GameState = f["state"]
 	var bx: Box = f["box"]
 	ok(DeviceService.can_open(st, bx), "品质 2 的套系 vs 等级 1（上限 2）⇒ 可开")
-	# 换一个品质 3 的套系（夹具里临时加一个）
-	var s3 := SeriesDef.new()
-	s3.series_id = &"series_q3"
-	s3.series_quality = 3
-	s3.regular_count = 12
-	s3.socket_count = 4
-	s3.uses_per_box = SeriesDef.expected_initial_uses(3)
-	s3.gem_cost = GEM_BASE
+	# ★ v0.61：品质 3 的盒子（不再需要临时套系）
 	var defs3: Array[ItemDef] = _defs.duplicate()
 	for i in 4:
 		var d := ItemDef.new()
@@ -354,14 +339,11 @@ func _test_level_gate_only_for_opening() -> void:
 		d.category = &"crystal"
 		d.quality = 1 + (i % 3)
 		d.value = 2
-		d.size = Vector2i(2, 1)   # ★ v0.37：二维尺寸（占 2 格）
+		d.size = Vector2i(2, 1)
 		d.rarity = 10
 		ItemCatalog.register(d)
 		defs3.append(d)
-	s3.regular_items = defs3
-	GachaCatalog.register_series(s3)
-	var bx3: Box = GachaService.grant_box(st, &"series_q3", 1, &"test")[0]
-
+	var bx3: Box = BoxTestKit.grant(st, 1, 3, defs3)[0]
 	ok(not DeviceService.can_open(st, bx3), "品质 3 的套系 vs 等级 1 ⇒ 不可开")
 	eq(DeviceService.redeem(st, bx3, 1).error, DeviceService.R_DEVICE_LEVEL_LOW,
 		"开盒 ⇒ device_level_low")
@@ -406,7 +388,7 @@ func _test_socket_gold_and_occupied_slot() -> void:
 		DeviceService.R_CURRENCY_INSUFFICIENT, "金币差 1 ⇒ currency_insufficient")
 	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD), MOD_GOLD - 1, "金币未扣")
 	eq(bx2.occupied_count(), 0, "modules 未写入")
-	eq(bx2.uses_remaining, SeriesDef.expected_initial_uses(2), "寿命未扣")
+	eq(bx2.uses_remaining, ItemConstants.box_uses(2), "寿命未扣")
 
 	# 仓库满也不影响镶嵌（它不产出实例）
 	var full := _new_state(1000, MOD_GOLD * 2, 1)   # ★ 两个模块的预算：两次镶嵌各扣一次
@@ -430,7 +412,9 @@ func _test_starting_state_has_no_deadlock() -> void:
 	var st := GameState.new_game()
 	ok(st.has_device(), "开局有一台装置")
 	ok(DeviceService.has_device(st), "DeviceService.has_device() = true")
-	var boxes := GachaService.grant_box(st, &"series_01", 1, &"test")
+	var boxes := BoxTestKit.grant(st, 1, 2, _defs, 3, -1)
+	# 夹具口径：开盒基准价 = GEM_BASE（与 v0.61 前一致）
+	boxes[0].gem_cost = GEM_BASE
 	var bx: Box = boxes[0]
 	ok(DeviceService.can_open(st, bx), "开局那台（等级 1）能开切片品质 2 的套系")
 	var cost := DeviceService.open_cost(st, bx)

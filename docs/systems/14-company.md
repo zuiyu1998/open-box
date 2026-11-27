@@ -1,6 +1,9 @@
 # 14 · 公司系统
 
 - 上游：`../core-design.md`（**v0.39**：新增第 14 个系统）
+> **★ v0.61（套系删除）**：培养路线不再给"系列列表"，改为给 **`qualities`（品质列表）+ 按品质的买价**；
+> 库存条目的键从 `series_id` 改为 **`quality`**；买盒时由 `GachaService.grant_random_box(quality, …)` 现造一个盒子。
+> `buy_price(q)` / `stock_of(q)` / `buy(q, state)` 的参数都是 **int 品质**。
 - 依赖系统：`01-gacha.md`（盲盒 `Box` / `SeriesDef` / `grant_box`）、`02-item.md`（物品 / 金币余额 / 消耗）、`12-warehouse.md`（盲盒落位）、`10-progression.md`（存档）
 - 被依赖：`08` / `11`（公司页）、`01`（买盲盒走 `grant_box`）
 - 定位：**"公司几级、走哪条培养路线、产出哪些盲盒、多少钱买"只有这一份答案**。

@@ -2195,6 +2195,253 @@ res://
 
 ---
 
+### 16.36 v0.55 → v0.57
+
+**"盲盒生成"接到市场页（第 13 系统）：市场只转发，材料不消耗。**
+
+用户裁决："**在市场上使用盲盒生成的功能生成盲盒**"。
+
+**四条：**
+1. **入口**：市场页底部「生成盲盒」区——**材料下拉**（列仓库物品，标 `品质 N → 盲盒品质 M`）+ **件数 SpinBox（3–20，默认 8）** + 「生成」+ 结果行。
+2. **市场只转发**：`MarketService.generate_box(item_id, count)` → `GachaService.generate_box()`。**品质映射 / 随机池 / 定价一律不在 13 重算**（与"市场不另定买卖价"同一条纪律）。
+3. **材料不消耗**（01 的裁决）：市场只借它的品质；`item_id` 取自仓库实例，**实例数不变**。
+4. **结果行必须报出**：盲盒品质 / 件数 / **开盒原石价** / 盒子 id —— 这是玩家判断"值不值得造"的全部依据。
+
+**附带修复**：`MarketController` 之前**没有 `bind_state()`**，顶层 `GameScreen.refresh()`（切 tab）**不会重渲染市场页**（金币 / 库存 / 生成候选都可能是旧的）。已补齐，与其它页同形。
+
+---
+
+### 16.37 v0.57 → v0.58
+
+**市场页上架清单改成"一行 2 列 + 每件一个购买按钮"。**
+
+用户裁决："**修改市场的页面布局，物品售卖改成一行2列，并且每个物品有单独个购买按钮**"。
+
+**四条：**
+1. **版面**：`Listings` 单标签 + 一个 `BuyRow`（下拉 + 一个"买一件"）→ **`ScrollContainer` 内的 `GridContainer(columns = 2)`**；每张卡片：`名称（品质）` / `价格 · 剩 N 件` / **自己的「购买」**。
+2. **模型形状**：新增 `listing_cards`（`{item_id, name, quality, price, qty}`）；**买入入口从"按下标"改为 `buy_item(item_id)`**——卡片直接带 id，**去掉"当前选中项"这个中间状态**（少一处可能与视图不一致的地方）。
+3. **卡片代码建**：上架件数固定但内容随刷新变，静态节点会对不上；重建用 `remove_child()` + `queue_free()`，避免同帧旧卡残留。
+4. **为什么 2 列**：6 件竖排会把「卖出 / 生成盲盒」挤出屏幕；2 列让它们一屏可见，且按钮与自己的格子绑定，误点概率更低。
+
+---
+
+### 16.38 v0.58 → v0.59
+
+**给盲盒加"售出价格"：按品质固定价表，可卖；牌库盒也有保底价。**
+
+用户裁决："**给盲盒添加售出价格**"（追问确认：**按品质固定价表**；**入口在市场页卖出区**；**牌库 / 任务发的盒子也给保底价**）。
+
+**四条：**
+1. **价表**：`SELL_PRICE_BY_QUALITY = {1: 20, 2: 50, 3: 120, 4: 300}`（金币）；`sell_price_gold(box)` 取所属套系的 `series_quality`。
+2. **不存字段**：卖价是品质的**纯函数** ⇒ 存下来就是第二个事实来源（改表要迁移存档）。解析不到品质 ⇒ 0 = 不可售。
+3. **牌库盒也按品质有价**——不是"只有生成的盒子才能卖"。
+4. **卖出**：`GachaService.sell_box()`——按卖价发金币、销毁盒子、释放占位；拒绝：不存在 / 在邮件 / 卖价 0。入口在市场页（`MarketService.sell_box()` 转发）。
+
+⚠️ **与 `open_gem_cost` 的分工**：`open_gem_cost` = **开这个盒子要花的原石**（生成时按期望定死）；`sell_price_gold` = **把这盒子卖掉的收入**（按品质查表）。**一个"玩它"，一个"卖它"**，不得混淆。
+
+---
+
+### 16.39 v0.59 → v0.60
+
+**市场每次刷新生成 8 个盲盒售卖，每个一个购买按钮。**
+
+用户裁决："**市场每次刷新生成8个盲盒用于售卖。每个盲盒都有一个购买按钮**"（追问确认：**物品与盲盒并存**；**买价 = 品质表卖价（金币）**；**刷新时未售出的旧盒销毁**）。
+
+**五条：**
+1. **并存**：原 6 件物品上架保留，另加「盲盒」区（`BOX_SLOTS = 8`），2 列网格、每卡一个「购买盲盒」。
+2. **只造不交付**：`generate_box(..., grant = false)` —— 上架盒是**市场库存**，不进玩家清单；买下才 `add_box` 并落位（放不下进邮件，盒子永不丢失）。
+3. **买价** = `sell_price_gold()`（品质表 20/50/120/300 金币）。
+4. **刷新丢弃未售出**：它们不是玩家的东西，不进清单。
+5. **池子件数自适应 3…8**：材料品质越低可用物品越少，按能凑多少取；否则低品质材料凑不满件数，整批会少盒。
+
+**顺带两处基础设施修正：**
+- **`GachaCatalog.ensure_quality_templates()`**：为品质 1–4 **兜底创建** `series_auto_q<N>`（确定性 id ⇒ 读档可复原）。真实内容只有 `series_01`（品质 2），没有模板的品质**根本造不出盒子**。
+- **`SOCKET_RATIO_MAX` 0.40 → 0.42**：核心 §4.1.1 的权威表里 **品质 4 = 5 位子 / 12 件 = 41.7%**，旧上限把**权威表本身**判成非法（`test_box_uses` 里那条"已记录冲突"的用例因此改为断言"通过"）。这是**规格内部矛盾**，不是内容配错。
+
+---
+
+### 16.40 v0.60 → v0.61
+
+**去除"套系"概念：`SeriesDef` 与 `series_id` 整体删除，盒子自带全部属性。**
+
+用户裁决："**去除套系相关的概念**"（追问确认：**连数据模型一起去掉**；**盒子自带全部属性**；**原来挂在套系上的常量由每个盒子自己存**）。
+
+**为什么这不是"改个名字"**：套系是盒子骨架的唯一出处——品质、位子数、寿命预算、开盒原石价、池子物品表全挂在它上面，并牵动 01/02/04/07/10/13/14/15 七个系统。删除前统计：**代码 478 处 / 37 个文件，文档 811 处 / 20 个文件**。
+
+**新的数据形状（唯一权威）：**
+1. **`Box`**：`box_id` / **`quality`（1–4）** / **`gem_cost`（开盒原石价）** / `item_pool` / `modules` / `uses_remaining` / `location` / `size` / `source`。**没有 `series_id`、没有 `open_gem_cost`**。
+2. **`ItemPool`**：`box_id` / `regular_count` / `socket_count` / `revision` / `base_items` / `item_states` / `extra_item_ids`。**没有 `series_id`**。
+3. **造盒唯一入口 `Box.make(quality, items, socket, uses, gem_cost)`**；`socket/uses/gem_cost` 传 `-1` ⇒ 取 `ItemConstants.box_*` 的品质默认值（**只是默认值**，改表不影响已存在的盒子）。
+4. **发盒**：`GachaService.grant_box(state, box)`；"按品质随机造一盒"用 `grant_random_box(quality, count, source, seed)`。
+5. **品质默认曲线**（原 `SeriesDef` 的静态方法搬进 `ItemConstants`）：件数 8/8/12/12、位子 2/3/4/5、寿命 = 5 × 位子（10/15/20/25）、开盒价 30/30/40/50。
+
+**连带改动：**
+- `EvalService.evaluate_pool(pool_state)` 去参数；未拥有加权 `UNOWNED_WEIGHT_MULT = 1.5` 变常量；`m_bar()` / `headline()` 也去 `series`。
+- `DeviceService`：门控比较 `Box.quality`、开盒价取 `Box.gem_cost`；方法 `series_quality_of` → `box_quality_of`；`DeviceLevelSpec.unlock_series_quality_max` → `unlock_quality_max`。
+- `CompanyService`：路线 `series` 列表 → **`qualities`**，库存键 `series_id` → `quality`，买入时现造盒子。
+- `WarehouseService.initialize()`：开局送**品质 2 的随机盒**（原来送 `series_01`）。
+- `GachaCatalog` 只剩模块注册表（套系注册 / 内容载入 / 品质模板全部删除）；`series_01.tres`、`SeriesDef`、`gen_series_content.gd` 删除。
+- **存档**：盒子的 `item_pool` 子集改为 6 键且 `pool_item_ids` **永远整份写**；**缺该键 ⇒ 拒绝载入**（旧套系档无法还原池子）。见 `10-progression.md` 第 14 条。
+
+**测试影响：** 删除 `test_series_content`（整份在测套系内容）；新增 `BoxTestKit`（测试用"确定性造盒"，避免 `grant_random_box` 打乱顺序使断言变成空壳）。全量 **2003 条**。
+
+---
+
+### 16.41 v0.61 → v0.62
+
+**撤销市场页的「生成盲盒」入口（v0.57 加的那一段）。**
+
+用户裁决："**去除市场场景生产盲盒的功能**"（追问确认：**只删「生成盲盒」区**；保留"每次刷新 8 个待售盲盒"与「卖盲盒」）。
+
+**删掉的：**
+- 市场页节点 `GenSep` / `GenTitle` / `GenHint` / `GenRow`（材料下拉 + 件数 SpinBox + 生成按钮）；
+- `MarketModel.generate_box()` 与 `_gen_options()` / `_gen_ids()` / `_gen_hint()`，以及快照键 `gen_options` / `gen_disabled` / `gen_hint`；
+- `MarketService.generate_box()`（转发 `GachaService.generate_box()` 的那一层）；
+- 视图信号 `generate_requested`、控制器 `_on_generate()`。
+
+**保留的**：`GachaService.generate_box()` 本身（市场**刷新时**生成 8 个待售盲盒仍要用它，那是系统产出而非玩家操作）、待售盲盒区、卖盲盒。
+
+**顺带修的启动缺陷**：`MarketService` 在 autoload 初始化时先 `refresh()` 了一次——那时 `GameSession.state` 还是 `null`，`_roll_box_listings()` 只能产出 0 个盒子，但刷新时间戳已经记下 ⇒ 之后 `ensure_fresh()` 认为"还算新鲜"，市场会一直显示"本次刷新没有可售盲盒"。修法：`box_listings_snapshot()` 在"列表为空且已有 `state`"时补一次 roll。
+
+---
+
+### 16.42 v0.62 → v0.63
+
+**市场页去掉「卖一件」与「卖盲盒」：市场只卖不收。**
+
+用户裁决："**市场页面去除卖一件和卖盲盒**"。
+
+**删掉的（页面侧）：**
+- 场景节点 `SellRow`（`SellPicker` / `SellButton`）、`SellBoxRow`（`SellBoxPicker` / `SellBoxButton`）；`MarketView._ready()` 随之清空并删除（市场页的按钮都是代码建的卡片按钮）。
+- 视图信号 `sell_requested` / `sell_box_requested`、下标 `sell_index` / `sell_box_index`、渲染里的 `sell_options` / `sell_box_*` 分支。
+- 控制器 `_on_sell()` / `_on_sell_box()`。
+- `MarketModel.sell()` / `sell_box()` / `_sellable_ids()` / `_sellable_boxes()` / `_sell_box_options()`；快照键 `sell_options` / `sell_disabled` / `sell_box_options` / `sell_box_disabled`。
+
+**保留的（服务层）**：`MarketService.sell()`（转发 `ItemService.sell()`）与 `sell_box()`（转发 `GachaService.sell_box()`）**仍在**——它们是 13 对 02/01 的能力契约，`test_market_service` 继续覆盖；只是**页面不再提供入口**。卖物品 / 卖盒子以后若有别的入口（仓库页、NPC 等），直接调这两个方法即可。
+
+**市场页最终形态**：`金币 → 刷新倒计时 → 在售物品（2 列，各自「购买」）→ 待售盲盒（2 列，各自「购买盲盒」）→ 结果行`。
+
+**测试**：删掉"卖出真发金币 / 实例消失"与"卖盲盒"两段页面级用例，改为断言**页面上不存在 `SellRow` / `SellBoxRow`**（防止以后有人把卖出控件加回来而不自知）。
+
+---
+
+### 16.43 v0.63 → v0.64
+
+**生成的盲盒：传入的物品显示，其余一律默认隐藏。**
+
+用户裁决："**盲盒生成功能时，除了传入的物品是显示，其余物品的状态是默认隐藏的**"。
+
+**规则**（`GachaService.generate_box()` 造盒之后、算价之前）：
+1. **第一件 = 传入物品 = `SHOWN`**（不写 `item_states`，缺键即显示）；
+2. **其余全部写成 `HIDDEN`**（`item_states[item_id] = ItemState.HIDDEN`）；
+3. **隐藏 ≠ 禁用**：它们**照常参与抽取**——`weights_bp` 长度不变、`Σ == 10000`、`enabled_items()` 数量不变；只是**不在池子表格里展示**；
+4. 玩家可以花一次「显示」把某件揭开（`HIDDEN → SHOWN`，**单向**，与 v0.45 的三态链一致；`DISABLED` 仍是终点）。
+
+**作用范围**：**所有走 `generate_box()` 的盒子**——包括市场每次刷新生成的那 8 个待售盒（它们买下后同样是"只露材料"）。`Box.make()` / `grant_random_box()`（公司产盒、任务发盒）**不应用**这条规则：它们的池子是整份随机的，没有"传入的物品"可言。
+
+**为什么这么定**：生成盒的语义是"**我拿一件东西当引子，赌盒子里其余的运气**"——如果全部显示，玩家在下单前就能精确算期望，赌博性消失；如果全部隐藏，玩家的投入又毫无反馈。只露材料那一件，恰好把"确定性"和"未知"各留一半。
+
+**测试**：`test_gacha_service` 新增 6 条——材料为 `SHOWN`、其余 N−1 件全 `HIDDEN`、`hidden_ids()` 同步、`enabled_items()` 数量不变（隐藏不是禁用）、`weights_bp` 长度不变、`is_zero_sum()` 仍成立。
+
+---
+
+### 16.44 v0.64 → v0.65
+
+**隐藏项"存在但不显示信息"：池子计数包含它们，展示里只是不露内容。**
+
+用户裁决："**池子数据显示未隐藏的物品，只是不显示对应的信息**"（追问确认：**列出但不显示信息（？？？）**）。
+
+**规则：**
+1. **池子计数与分布**：隐藏项**照旧算在池子里**（`池子 N 件`、`weights_bp`、`Σ == 10000` 都不变）——"隐藏"从来不是"不存在"。
+2. **下拉（显示 / 禁用 / 池子数据的选择器）**：隐藏项写成 **`？？？（隐藏）· 第 N 位`**——**名字、品质、价值一律不给**，只留位置（位置不泄露身份，但足够选中它去「显示」）。
+3. **浮层表格**：**不出隐藏项的行**；`note` 里注明"另有 K 件未揭示（隐藏，不在陈列里）"，`totals` 仍按**全池**算（地方展示与统计口径分开）。
+4. **禁用项保留名字**：三态是单向下行（`HIDDEN → SHOWN → DISABLED`），能禁用说明它**已经被揭示过**，身份是已知的，藏起来反而误导。
+
+**为什么**：v0.64 让生成的盒子"只露材料"，如果下拉里还按名字列出其余几件，**谜底等于白送**（看一眼下拉就知道池子里有什么）。所以信息要按"是否已揭示"分级，而不是按"是否存在"。
+
+**测试**：`_test_pool_hidden_info`——下拉项数 = 池子件数、隐藏项的 display_name **零出现**、每件隐藏项都有 `？？？` 占位、浮层行数 ≤ 显示项数、`note` 含"未揭示"。
+
+---
+
+### 16.45 v0.65 → v0.66
+
+**更正：隐藏项在池子数据列表里"行在、信息不展示"（v0.65 把它们从列表里剔掉了，不对）。**
+
+用户裁决："**池子数据的隐藏物品显示在列表中，只是不显示信息**"。
+
+**最终规则（取代 v0.65 的"不出行"）：**
+1. **计数 / 分布**：隐藏项照常计入（`池子 N 件`、`weights_bp`、`Σ == 10000`）。
+2. **浮层表格**：**每件一行**，隐藏行的 `名称 = ？？？`，`状态 = 隐藏（信息不展示）`，**权重 / 概率 / 价值全部渲染为 `—`**。
+3. **下拉**：`？？？（隐藏）· 第 N 位`（不给名字）。
+4. **排序**：打码行**一律沉底**——否则按概率/价值排序时，它们的位置本身就泄露了"大概值多少"。
+5. **注脚**：`共 N 件 ｜ 排序：… ；其中 K 件隐藏（行在，信息不展示）`。
+6. **禁用项**保留名字与真实数值（禁用前必须先揭示，身份与数值都已公开）。
+
+**为什么"行在"比"不出行"好**：玩家需要看到"池子里一共有几件、其中几件我还不知道"——**缺席会让人以为池子只有 1 件**；而"行在但打码"既保住信息边界，又给出正确的规模感。这也是 v0.64"只露材料"的完整表达：**数量公开、内容保密**。
+
+**测试**：`_test_pool_hidden_info` 改为断言 6 行全在、每个打码行的 name=`？？？` 且 weight/prob/value = 0；`_test_pool_overlay` 里两处"隐藏项被排除 ⇒ 少一行"改成"仍占一行"。
+
+---
+
+### 16.46 v0.66 → v0.67
+
+**去掉开局默认送的盲盒：新游戏仓库为空。**
+
+用户裁决："**去除默认的盲盒设置**"（追问确认：指**开局默认送的那个品质 2 随机盒**，不是品质默认值表）。
+
+**改动**：`WarehouseService.initialize()` 只做 `reset_box_usage()` + `reset_locations()`，**不再调用 `grant_random_box()`**；常量 `INITIAL_BOX_QUALITY` 删除。
+
+**后果（有意为之）**：
+1. 新游戏 **0 个盒子**：许愿机页的盲盒选择为空、池子区显示"先选一个盲盒"、开盒 / 镶嵌按钮置灰——**优雅降级**，不是报错。
+2. 盒子现在只有三条产出路径：**市场买**（每次刷新 8 个待售）、**公司产**（`grant_random_box`）、**任务/里程碑发**。
+3. 因此玩家的第一个盒子**必须自己买**——经济闭环从"白送一个盒子"变成"先赚金币再买"。
+
+**测试**：全量 2030 条**一条都不用改**——夹具都是显式发盒，没有依赖"开局送"的断言（这本身说明原来的默认赠与是**测试未覆盖的隐式行为**）。
+
+---
+
+### 16.47 v0.67 → v0.68
+
+**许愿机页去掉池子编辑：只留「池子数据」按钮，挪到「镶嵌」右边。**
+
+用户裁决："**去除许愿机页面的池子相关的功能，只保留池子数据这个按钮，将这个按钮放在模块镶嵌的右边**"。
+
+**删掉的（页面侧）：**
+- 左栏整个 `PoolSection`：`PoolTitle` / `PoolSummary` / `PoolPicker` / `PoolState` / `PoolButtons`（`RevealButton` / `DisableButton`）/ `AddRow`（`AddPicker` / `AddButton`）。
+- 视图信号 `pool_reveal_requested` / `pool_disable_requested` / `pool_add_requested`，下标 `pool_index` / `add_index`，渲染里对应的 `_refill` / `disabled` 分支。
+- 控制器 `_on_pool_reveal()` / `_on_pool_disable()` / `_on_pool_add()`。
+- 模型 `_pool_block()` / `_norm_pool()` / `reveal_pool_item()` / `disable_pool_item()` / `_apply_pool_action()` / `add_pool_item()`；快照键 `pool_summary` / `pool_options` / `pool_state_text` / `add_options` / `pool_reveal_disabled` / `pool_disable_disabled` / `pool_add_disabled`；`snapshot()` 的 `pool_index` / `add_index` 参数。
+
+**保留并移动的**：`PoolDataButton` 从 `PoolSection/PoolButtons` 移到 **`ModuleSection/ModuleButtons`**，与「镶嵌」同一行、同宽（`size_flags_horizontal = 3`），**排在同一行的第二个**。浮层（池子数据）本身与其中的排序、打码规则全部保留。
+
+**后果（必须说清）**：UI 上**不再有"揭示 / 禁用 / 添加"入口**。也就是说：
+1. 生成盒里被隐藏的物品，**玩家在界面上没有办法揭开**（`HIDDEN → SHOWN` 的链路仍在 `PoolBuff.reveal()`，只是没有按钮）；
+2. 玩家也不能再往池子里加物品、不能禁用物品。
+⇒ 池子变成**纯只读**（只能看数据）。这是本次裁决的直接结果；若将来要恢复"揭示"，最小改动是给浮层的某一行加一个按钮（模型方法需要一并恢复）。
+
+**测试**：删除 `_test_pool_editor`（整段测的就是被删的编辑 UI），改写 `_test_pool_hidden_info`（只断言浮层的"行在、信息打码"与页面结构），`_test_structure` / `_test_pool_overlay` 的节点路径改到 `ModuleSection/ModuleButtons`。
+
+---
+
+### 16.48 v0.68 → v0.69
+
+**顶栏金币 / 原石读数不再滞后：余额一变就重画（不再依赖切 tab）。**
+
+用户报告："**tab页面的金币数据和原石数据没有在市场购买后更新**"。
+
+**根因**：顶栏（`GameScreen._refresh_currency()`）**只在 `GameScreen.refresh()` 时**重读余额，而 `refresh()` 的触发点只有"切 tab / `bind_state`"。市场页里的买入是一次**页面内事务**（`MarketService.buy()` → `ItemService.transact()`），它只让**市场页自己**重渲染，顶栏那两行文字停在旧值上。
+
+**修法（单一广播点）：**
+1. `ItemService` 新增 `signal currency_changed(kind: StringName, balance: int)`；
+2. 广播点放在 **`_apply_currency_delta()`**——余额的**唯一写入实现**（`transact` 的 `currency` op 只经它落地）；
+3. `GameScreen._ready()` 订阅它 → `_on_currency_changed()` → `_refresh_currency()`。
+
+**为什么这样而不是"每个页面手动通知顶栏"**：那会变成"N 个调用方各自记得刷顶栏"，漏一个就是这次的 bug。广播挂在**唯一写入点**上，所有现存与将来的资源变动（买 / 卖 / 开盒 / 升级 / 任务奖励）自动覆盖。
+
+**测试**：新增回归用例 `_test_top_bar_updates_after_buy`——买入后断言顶栏文字**发生变化**，且变化量**正好等于该件的买价**（不是随便变了就行）。
+
+---
+
 ## 17. 一句话总结
 
 **盲盒的期望是玩家手里一个可编辑的池子，而同一个池子里的位子是定死的。**

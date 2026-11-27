@@ -47,7 +47,7 @@ static func has_device(state: GameState) -> bool:
 
 ## **开盒侧**的判定：**"有一台设备的等级能开这个盒子"**。
 ##
-## 比较对象 = **该盒所属套系的品质**（`series_quality`）vs **设备等级的准入上限**。
+## 比较对象 = **盒子自带的品质**（`Box.quality`，v0.61 起不再有套系）vs **设备等级的准入上限**。
 ## ★ 这一条就是 D21 预写的回滚点：判定从此**必须知道"是哪个盒子"**（故签名带 `box`）。
 static func can_open(state: GameState, box: Box) -> bool:
 	return _device_for_open(state, box) != null
@@ -63,7 +63,7 @@ static func can_open(state: GameState, box: Box) -> bool:
 static func _device_for_open(state: GameState, box: Box) -> Device:
 	if state == null or box == null:
 		return null
-	var q := series_quality_of(box)
+	var q := box_quality_of(box)
 	if q <= 0:
 		return null
 	var best: Device = null
@@ -74,7 +74,7 @@ static func _device_for_open(state: GameState, box: Box) -> Device:
 		var def := DeviceCatalog.get_device(d.device_id)
 		if def == null:
 			continue
-		if def.unlock_series_quality_max(d.level) < q:
+		if def.unlock_quality_max(d.level) < q:
 			continue
 		var bp := def.open_cost_bp(d.level)
 		if best == null or bp < best_bp or (bp == best_bp and d.level > best.level):
@@ -84,24 +84,16 @@ static func _device_for_open(state: GameState, box: Box) -> Device:
 
 
 ## 该盒所属套系的品质（0 = 套系解析不到 ⇒ 一律拒绝，不猜）。
-static func series_quality_of(box: Box) -> int:
-	if box == null:
-		return 0
-	var series := GachaCatalog.get_series(box.series_id)
-	return series.series_quality if series != null else 0
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  职责一：开启盲盒（校验 + 计价 + 转发；核心 §4.4 / §4.8）
-# ══════════════════════════════════════════════════════════════════════════════
+## ★ v0.61：盒子自带品质（套系删除后不再查表）。
+static func box_quality_of(box: Box) -> int:
+	return box.quality if box != null else 0
 
 ## **本次开盒要花的原石**（唯一计价口径，整数）：
 ##
 ##     gem_cost = floori( 基准价 × open_cost_bp(设备等级) / 10000 )
 ##
-## ★ v0.56：**基准价 = `box.open_gem_cost`（生成出来的盒子自带价）**；它为 `0` 时才回退到
-##   `SeriesDef.gem_cost`。这样"按期望定价的生成盒"与"牌库发的固定价盒"共用一个扣费入口。
-## · **基准归 01**（套系价 / 生成时的定价）、**折扣归 04 的等级曲线**；
+## ★ v0.61：**基准价 = `Box.gem_cost`**（每个盒子自己存开盒原石价）。
+## · **基准归 01**（生成时的定价 / 品质默认价）、**折扣归 04 的等级曲线**；
 ## · **一律 `floori`**（与 02 / 06 的取整纪律一致）；结果恒 ≥ 0（`bp = 0` ⇒ 免费）；
 ## · **无设备 / 等级不足 / 套系解析不到 ⇒ 返回 -1**（调用方先看 `can_open`，
 ##   这个 -1 只是"不该被用来计价"的响亮信号，**不得**当成 0 用）。
@@ -109,13 +101,10 @@ static func open_cost(state: GameState, box: Box) -> int:
 	var d := _device_for_open(state, box)
 	if d == null:
 		return -1
-	var series := GachaCatalog.get_series(box.series_id)
-	if series == null:
-		return -1
 	var def := DeviceCatalog.get_device(d.device_id)
 	if def == null:
 		return -1
-	var base := box.open_gem_cost if box.open_gem_cost > 0 else series.gem_cost
+	var base := box.gem_cost
 	return floori(float(base) * float(def.open_cost_bp(d.level)) / 10000.0)
 
 
@@ -132,7 +121,7 @@ static func redeem(state: GameState, box: Box, seed_override: int = -1) -> Gacha
 		return GachaResult.failure(R_NO_DEVICE)
 	if not can_open(state, box):
 		# 有设备但等级不够 / 套系解析不到：两种情形分开报，便于 UI 给"直达升级"的下一跳
-		var q := series_quality_of(box)
+		var q := box_quality_of(box)
 		if q > 0:
 			return GachaResult.failure(R_DEVICE_LEVEL_LOW)
 		return GachaResult.failure(R_NO_DEVICE_DEF)

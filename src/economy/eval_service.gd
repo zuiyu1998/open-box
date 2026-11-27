@@ -19,7 +19,6 @@ class PoolEvaluation:
 	var is_normalized: bool = false
 	var box_id: String = ""                        # 这份求值属于哪个盒子（类型 String，同 Box.box_id）
 	var revision: int = 0                          # 求值时的 pool_state.revision（缓存校验用）
-	var series_id: StringName = &""
 	## `[补充-实现必需]` **物品 id 顺序**。
 	##
 	## 07 §4 原文的 `PoolEvaluation` 只有 `probs: PackedFloat32Array`，而
@@ -58,8 +57,12 @@ const TOTAL_BP := ItemPool.TOTAL_BP              # 10000：全部质量（含 vo
 ##   （`10-progression.md` 的 T5 与 01 的 T2 都按 `≤ 1.0` 断言）。
 ##   这也正是 §5.1 那句"**全部物品一起归一化**、不再有独立占 2% 不参与归一化的那一项"的读法。
 ##   **该读法需要 07 的拥有者确认**（原文措辞可两解）。
-static func evaluate_pool(pool_state: PoolState, series: SeriesDef) -> PoolEvaluation:
-	if pool_state == null or series == null:
+## ★ v0.61：**不再接收套系**——未拥有加权倍率变成常量（套系曾是它唯一的来源）。
+const UNOWNED_WEIGHT_MULT := 1.5
+
+
+static func evaluate_pool(pool_state: PoolState) -> PoolEvaluation:
+	if pool_state == null:
 		return null
 	# ★ v0.47：**范围 = 该盒池子里当前参与抽取的物品**，不再是"套系固定列表"。
 	#   理由：v0.45 起池子可以**追加物品**、可以**禁用**物品；若仍按 `series.regular_items` 取范围，
@@ -71,7 +74,6 @@ static func evaluate_pool(pool_state: PoolState, series: SeriesDef) -> PoolEvalu
 	var ev := PoolEvaluation.new()
 	ev.box_id = pool_state.box_id
 	ev.revision = pool_state.revision
-	ev.series_id = pool_state.series_id
 	ev.item_ids = ids
 	ev.void_prob = float(pool_state.void_mass_bp) / float(TOTAL_BP)
 
@@ -82,7 +84,7 @@ static func evaluate_pool(pool_state: PoolState, series: SeriesDef) -> PoolEvalu
 
 	# 2. 未拥有 ×1.5，然后按比例归一回原总质量
 	var mass := BpAlloc.sum_of(w)
-	var mult := series.unowned_weight_mult
+	var mult := UNOWNED_WEIGHT_MULT
 	if is_collected_provider.is_valid() and mass > 0 and not is_equal_approx(mult, 1.0):
 		var scaled: Dictionary = {}
 		for id in ids:
@@ -115,7 +117,7 @@ static func is_collected(item_id: StringName) -> bool:
 ## ★ v0.47：取值改为**按 `ev.item_ids` 逐件查 `ItemCatalog`**（原来按下标对
 ## `series.regular_items`）。池子可追加物品之后，"分布下标"与"套系列表下标"不再一一对应，
 ## 按下标取会把值安到错的物品上。`series` 参数保留只为签名兼容（不再参与计算）。
-static func m_bar(ev: PoolEvaluation, _series: SeriesDef = null) -> float:
+static func m_bar(ev: PoolEvaluation) -> float:
 	if ev == null:
 		return 0.0
 	var total := 0.0
@@ -169,7 +171,7 @@ static func module_gold_cost(box: Box) -> int:
 ## 同一套系的两个盒子可以有不同 `best_item`（某盒排除了原本的头奖）。
 ## ★ v0.47：与 `m_bar` 同理，改为**按 `ev.item_ids` 逐件查表**（池子可追加物品后，
 ## 下标不再等于套系列表下标）；`series` 参数保留只为签名兼容。
-static func headline(ev: PoolEvaluation, _series: SeriesDef = null) -> Dictionary:
+static func headline(ev: PoolEvaluation) -> Dictionary:
 	var out := {"best_item_id": &"", "best_item_prob": 0.0, "ev": 0.0, "gold": 0.0}
 	if ev == null:
 		return out

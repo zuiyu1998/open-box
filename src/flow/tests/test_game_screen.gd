@@ -37,11 +37,15 @@ func _ready() -> void:
 	_reset_world()
 	await _test_wish_machine_layout()
 	_reset_world()
-	await _test_pool_editor()
 	_reset_world()
 	await _test_pool_overlay()
+	await _test_pool_hidden_info()
 	_reset_world()
 	await _test_market_page()
+	_reset_world()
+	await _test_top_bar_updates_after_buy()
+	_reset_world()
+	await _test_market_boxes()
 	_reset_world()
 	await _test_tab_switch_refreshes()
 	_reset_world()
@@ -87,6 +91,10 @@ func _reset_world() -> void:
 	CompanyService.reset()
 	MarketService.reset()
 	OperatorService.reset()
+	# ★ v0.57：仓库的"占格账"也归 0——否则上一条用例占满容量后，
+	#   本用例 `ItemService.grant()` 会把物品丢进**邮件**，`is_warehouse()` 为 false ⇒ 生成候选为空。
+	WarehouseService.reset_locations()
+	WarehouseService.reset_box_usage()
 
 
 func _make_screen():
@@ -252,7 +260,7 @@ func _test_warehouse_page() -> void:
 
 	print("— §3.1 仓库页：注入状态后读真实数据")
 	var st := GameState.new_game()
-	var boxes := GachaService.grant_box(st, &"series_01", 1, &"test")
+	var boxes := _grant_test_boxes(st, 1)
 	eq(boxes.size(), 1, "夹具：发 1 个盒子")
 	scr.bind_state(st)
 	await get_tree().process_frame
@@ -315,7 +323,7 @@ func _test_wish_machine_device() -> void:
 
 	eq(s["device_name"], "许愿机", "★ 设备名就是「许愿机」")
 	ok(String(s["level"]).find("Lv.1 / Lv.3") >= 0, "等级行（%s）" % s["level"])
-	ok(String(s["effect"]).find("可开套系品质") >= 0, "显示本级效果：可开套系品质上限（%s）" % s["effect"])
+	ok(String(s["effect"]).find("可开盲盒品质") >= 0, "显示本级效果：可开盲盒品质上限（%s）" % s["effect"])
 	ok(String(s["effect"]).find("开盒成本") >= 0, "显示本级效果：开盒折扣（%s）" % s["effect"])
 	eq(s["gem"], "原石 10000", "显示原石余额（开局 10000）")
 	ok(String(s["upgrade_text"]).find("升级（40 原石）") >= 0, "升级价取自 04（%s）" % s["upgrade_text"])
@@ -353,7 +361,7 @@ func _test_wish_machine_device() -> void:
 func _test_wish_machine_open() -> void:
 	print("— §3.2 开盒：走 04 的入口，结果与消耗都对")
 	var st := GameState.new_game()
-	var boxes := GachaService.grant_box(st, &"series_01", 1, &"test")
+	var boxes := _grant_test_boxes(st, 1)
 	var bx: Box = boxes[0]
 	var uses_before := bx.uses_remaining
 	var inst_before := ItemService.instances.size()
@@ -400,7 +408,7 @@ func _test_wish_machine_open() -> void:
 	_reset_world()
 	ItemService.warehouse_capacity = 1
 	var st2 := GameState.new_game()
-	var b1 := GachaService.grant_box(st2, &"series_01", 2, &"test")
+	var b1 := _grant_test_boxes(st2, 2)
 	eq(b1[0].location, ItemConstants.LOC_WAREHOUSE, "第一个盒子落仓库")
 	eq(b1[1].location, ItemConstants.LOC_MAIL, "仓库满 ⇒ 第二个进邮件")
 	var scr2 = await _make_screen()
@@ -421,7 +429,7 @@ func _test_wish_machine_layout() -> void:
 	_reset_world()
 	OperatorService.reset()
 	var st := GameState.new_game()
-	var boxes := GachaService.grant_box(st, &"series_01", 1, &"test")
+	var boxes := _grant_test_boxes(st, 1)
 	var bx: Box = boxes[0]
 	var scr = await _make_screen()
 	scr.bind_state(st)
@@ -517,297 +525,12 @@ func _test_wish_machine_layout() -> void:
 #  ④c 许愿机页：池子（显示 / 隐藏 / 禁用 + 添加）★ v0.45
 # ══════════════════════════════════════════════════════════════════════════════
 
-func _test_pool_editor() -> void:
-	print("— §3.2c 池子：三态轮转真改池子，摘要跟着更新")
-	_reset_world()
-	OperatorService.reset()
-	var st := GameState.new_game()
-	var boxes := GachaService.grant_box(st, &"series_01", 1, &"test")
-	var bx: Box = boxes[0]
-	var scr = await _make_screen()
-	scr.bind_state(st)
-	await get_tree().process_frame
-	var wish: Node = scr.page_node("WishPage")
-	var ctrl: Node = wish.get_node("Controller")
-	var left: Node = wish.get_node("Columns/Left")
-
-	ok(left.get_node_or_null("PoolSection/PoolPicker") != null, "左栏有「池子」段")
-
-	var s: Dictionary = ctrl.snapshot()
-	var n0: int = (s["pool_options"] as Array).size()
-	eq(n0, bx.item_pool.base_items.size(), "池子列表 = 池内件数（%d）" % n0)
-	ok(String(s["pool_summary"]).find("池子 %d 件" % n0) >= 0, "摘要报出件数（%s）" % s["pool_summary"])
-
-	var reveal_btn: Button = left.get_node("PoolSection/PoolButtons/RevealButton")
-	var disable_btn: Button = left.get_node("PoolSection/PoolButtons/DisableButton")
-	var first_id: StringName = bx.item_pool.base_items[0].item_id
-
-	print("— §3.2c 禁用：只有显示能禁用；禁用后退出分布且终局")
-	eq(reveal_btn.disabled, true, "显示态的物件 ⇒「揭示」置灰（没什么可揭示的）")
-	eq(disable_btn.disabled, false, "显示态 ⇒「禁用」可点")
-	disable_btn.pressed.emit()
-	await get_tree().process_frame
-	var s1: Dictionary = ctrl.snapshot()
-	eq(bx.item_pool.state_of(first_id), ItemPool.ItemState.DISABLED, "第 1 件变成禁用")
-	ok(String(s1["pool_summary"]).find("禁用 1") >= 0, "摘要：禁用 1（%s）" % s1["pool_summary"])
-	ok(String(s1["pool_state_text"]).find("禁用") >= 0, "状态行说明是禁用（%s）" % s1["pool_state_text"])
-	eq(reveal_btn.disabled, true, "禁用后 ⇒「揭示」置灰（终局不可逆）")
-	eq(disable_btn.disabled, true, "禁用后 ⇒「禁用」也置灰")
-	var ps := PoolService.get_pool_state(st, bx.box_id)
-	eq(ps.weights_bp.has(first_id), false, "禁用项已退出 weights_bp")
-	ok(ps.is_zero_sum(), "其余物品重新归一，Σ == 10000")
-
-	print("— §3.2c 揭示：隐藏态才能揭示；隐藏的不能直接禁用")
-	# 隐藏态由数据层构造（玩家没有"显示→隐藏"这个动作）
-	var second_id: StringName = bx.item_pool.base_items[1].item_id
-	bx.item_pool.set_state(second_id, ItemPool.ItemState.HIDDEN)
-	bx.item_pool.revision += 1
-	# 在池子下拉里**选中那一件**再看按钮（按钮的可用性跟着选中项走）
-	var pool_picker: OptionButton = left.get_node("PoolSection/PoolPicker")
-	pool_picker.select(1)
-	scr.refresh()
-	await get_tree().process_frame
-	var s2: Dictionary = ctrl.snapshot()
-	eq(reveal_btn.disabled, false, "隐藏态 ⇒「揭示」可点")
-	eq(disable_btn.disabled, true, "隐藏态 ⇒「禁用」置灰（还没揭示）")
-	ok(String(s2["pool_summary"]).find("隐藏 1") >= 0, "摘要：隐藏 1（%s）" % s2["pool_summary"])
-	# 直接调模型：隐藏的禁用必须被拒，并给出人能看懂的理由
-	ctrl.model.disable_pool_item(1, 1)
-	var s2b: Dictionary = ctrl.snapshot()
-	ok(String(s2b["result"]).find("必须先揭示") >= 0, "隐藏的禁用 ⇒ 提示「必须先揭示」（%s）" % s2b["result"])
-	eq(bx.item_pool.state_of(second_id), ItemPool.ItemState.HIDDEN, "状态没变")
-	reveal_btn.pressed.emit()
-	await get_tree().process_frame
-	var s2c: Dictionary = ctrl.snapshot()
-	eq(bx.item_pool.state_of(second_id), ItemPool.ItemState.SHOWN, "揭示后变成显示")
-	ok(String(s2c["pool_summary"]).find("隐藏 0") >= 0, "摘要：隐藏 0（%s）" % s2c["pool_summary"])
-	eq(reveal_btn.disabled, true, "揭示后 ⇒「揭示」又置灰（已是显示）")
-	eq(disable_btn.disabled, false, "揭示后 ⇒「禁用」可点（它现在是显示）")
-
-	print("— §3.2c 添加：把池外物品加进池子")
-	var add_n: int = (s2c["add_options"] as Array).size()
-	ok(add_n > 0, "有可添加的候选（%d 件池外物品）" % add_n)
-	var add_btn: Button = left.get_node("PoolSection/AddRow/AddButton")
-	add_btn.pressed.emit()
-	await get_tree().process_frame
-	var s4: Dictionary = ctrl.snapshot()
-	eq((s4["pool_options"] as Array).size(), n0 + 1, "池子 +1 件")
-	eq(bx.item_pool.base_items.size(), n0 + 1, "ItemPool 真的多了一件")
-	eq(bx.item_pool.extra_item_ids.size(), 1, "记进 extra_item_ids（要落盘）")
-	ok(String(s4["result"]).find("已加入池子") >= 0, "结果行报告加入成功（%s）" % s4["result"])
-	ok((s4["add_options"] as Array).size() < add_n, "候选列表少了一件（它已经在池里）")
-	scr.queue_free()
-	await get_tree().process_frame
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  ⑤ 市场页
-# ══════════════════════════════════════════════════════════════════════════════
-
-func _test_market_page() -> void:
-	print("— §3.3 市场页：显示金币 / 刷新倒计时 / 上架清单")
-	_reset_world()
-	MarketService.reset()
-	var st := GameState.new_game()
-	var scr = await _make_screen()
-	scr.bind_state(st)
-	await get_tree().process_frame
-	var mkt: Node = scr.page_node("MarketPage")
-	var ctrl: Node = mkt.get_node("Controller")
-	var s: Dictionary = ctrl.snapshot()
-
-	ok(String(s["gold"]).find("金币") >= 0, "显示金币余额（%s）" % s["gold"])
-	ok(String(s["refresh"]).find("距刷新") >= 0, "显示刷新倒计时（%s）" % s["refresh"])
-	eq((s["listing_lines"] as Array).size(), MarketService.SLOT_COUNT,
-		"上架清单 = SLOT_COUNT 格")
-	eq((s["buy_options"] as Array).size(), MarketService.SLOT_COUNT,
-		"买入下拉选项数 == 上架格数")
-	eq(s["buy_disabled"], false, "有货 ⇒ 买按钮可点")
-	eq(s["sell_disabled"], true, "仓库无可售实例 ⇒ 卖按钮置灰")
-
-	print("— §3.3 市场页：买入真扣金币、真发实例")
-	# 发一笔金币足够买任意一件上架品
-	ItemService.grant_currency(ItemConstants.CURRENCY_GOLD, 100000,
-		ItemConstants.CURRENCY_SOURCE_INIT)
-	scr.refresh()
-	await get_tree().process_frame
-	var gold_before := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
-	var inst_before := ItemService.instances.size()
-	var buy_btn: Button = mkt.get_node("BuyRow/BuyButton")
-	buy_btn.pressed.emit()
-	await get_tree().process_frame
-	var s2: Dictionary = ctrl.snapshot()
-	ok(String(s2["result"]).find("买入成功") >= 0, "买入成功（%s）" % s2["result"])
-	ok(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD) < gold_before, "金币真扣")
-	ok(ItemService.instances.size() > inst_before, "真发了一个实例")
-
-	print("— §3.3 市场页：卖出真发金币、实例消失")
-	# 现在仓库里至少有刚才买入的那一件（可售），卖按钮应可点
-	var s3: Dictionary = ctrl.snapshot()
-	eq(s3["sell_disabled"], false, "有可售实例 ⇒ 卖按钮可点")
-	var sell_btn: Button = mkt.get_node("SellRow/SellButton")
-	var gold_before_sell := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
-	var inst_before_sell := ItemService.instances.size()
-	sell_btn.pressed.emit()
-	await get_tree().process_frame
-	var s4: Dictionary = ctrl.snapshot()
-	ok(String(s4["result"]).find("卖出成功") >= 0, "卖出成功（%s）" % s4["result"])
-	ok(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD) > gold_before_sell, "金币真增")
-	ok(ItemService.instances.size() < inst_before_sell, "实例被销毁")
-	scr.queue_free()
-	await get_tree().process_frame
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  ⑥ 切 tab 刷新（★ v0.38：修复"仓库页不显示新物品"）
-# ══════════════════════════════════════════════════════════════════════════════
-
-func _test_tab_switch_refreshes() -> void:
-	print("— §3.4 切 tab 刷新：别处加物品后切回仓库页能看到")
-	_reset_world()
-	var st := GameState.new_game()
-	var scr = await _make_screen()
-	scr.bind_state(st)
-	await get_tree().process_frame
-	var wh: Node = scr.page_node("WarehousePage")
-	var items_lbl: Label = wh.get_node("Items")
-
-	ok(String(items_lbl.text).find("还没有物品") >= 0, "前置：开局仓库无物品（View 已渲染）")
-
-	# 直接 grant 一件物品（不经过 scr.refresh()）——模拟在别的页开盒 / 买进物品
-	ItemService.grant(&"home_q1", {"kind": ItemConstants.KIND_UNLOCK})
-	# ★ View 的 Label 文本是上次 render 写的，未切 tab 不更新
-	ok(String(items_lbl.text).find("还没有物品") >= 0, "未切 tab ⇒ View 仍是旧值（尚未刷新）")
-
-	# ★ v0.54：默认落在许愿机（0）⇒ 切到仓库页（1）就会触发 `tab_changed` ⇒ 重新渲染出新物品
-	var tabs: TabContainer = scr.get_node("Tabs")
-	eq(tabs.current_tab, 0, "前置：默认在许愿机（第一个 tab）")
-	tabs.current_tab = 1          # 切到仓库页
-	await get_tree().process_frame
-	ok(String(items_lbl.text).find("家居物品") >= 0, "切到仓库页 ⇒ View 显示新物品")
-	ok(String(items_lbl.text).find("白×1") >= 0, "档位计数也更新")
-	scr.queue_free()
-	await get_tree().process_frame
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  ⑦ 公司页
-# ══════════════════════════════════════════════════════════════════════════════
-
-func _test_company_page() -> void:
-	print("— §3.5 公司页：显示等级 / 路线 / 升级配方 / 产出 / 库存 / 金币")
-	_reset_world()
-	CompanyService.reset()
-	var st := GameState.new_game()
-	var scr = await _make_screen()
-	scr.bind_state(st)
-	await get_tree().process_frame
-	var cmp: Node = scr.page_node("CompanyPage")
-	var ctrl: Node = cmp.get_node("Controller")
-	var s: Dictionary = ctrl.snapshot()
-
-	ok(String(s["level"]).find("Lv.1 / Lv.5") >= 0, "显示公司等级（%s）" % s["level"])
-	ok(String(s["route"]).find("标准线") >= 0, "显示培养路线（%s）" % s["route"])
-	ok(String(s["upgrade_text"]).find("升级") >= 0, "显示升级按钮文案（%s）" % s["upgrade_text"])
-	ok(String(s["gold"]).find("金币") >= 0, "显示金币余额（%s）" % s["gold"])
-
-	print("— §3.5 公司页：升级真提交物品")
-	# 开局仓库无物品 ⇒ 升级置灰（配方物品不足）
-	eq(s["upgrade_disabled"], true, "配方物品不足 ⇒ 升级置灰")
-	# 提交配方物品（home_q1 ×1）
-	ItemService.grant(&"home_q1", {"kind": ItemConstants.KIND_UNLOCK})
-	scr.refresh()
-	await get_tree().process_frame
-	var s2: Dictionary = ctrl.snapshot()
-	eq(s2["upgrade_disabled"], false, "配方物品够 ⇒ 升级可点")
-	var up_btn: Button = cmp.get_node("UpgradeButton")
-	up_btn.pressed.emit()
-	await get_tree().process_frame
-	var s3: Dictionary = ctrl.snapshot()
-	ok(String(s3["result"]).find("升级成功") >= 0, "升级成功（%s）" % s3["result"])
-	ok(String(s3["level"]).find("Lv.2") >= 0, "面板等级刷新（%s）" % s3["level"])
-
-	print("— §3.5 公司页：买盲盒真扣金币发盒")
-	# 产出库存 + 给金币
-	CompanyService.ensure_produced(1000)
-	ItemService.grant_currency(ItemConstants.CURRENCY_GOLD, 100000,
-		ItemConstants.CURRENCY_SOURCE_INIT)
-	scr.refresh()
-	await get_tree().process_frame
-	var s4: Dictionary = ctrl.snapshot()
-	eq(s4["buy_disabled"], false, "有库存 + 金币够 ⇒ 买盲盒可点")
-	var box_before := st.box_count()
-	var buy_btn: Button = cmp.get_node("BuyButton")
-	buy_btn.pressed.emit()
-	await get_tree().process_frame
-	var s5: Dictionary = ctrl.snapshot()
-	ok(String(s5["result"]).find("买入成功") >= 0, "买盲盒成功（%s）" % s5["result"])
-	eq(st.box_count(), box_before + 1, "盲盒 +1（发进清单）")
-	scr.queue_free()
-	await get_tree().process_frame
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  ⑧ 干员页
-# ══════════════════════════════════════════════════════════════════════════════
-
-func _test_operator_page() -> void:
-	print("— §3.6 干员页：显示等级 / 路线 / 排除目标 / 出战状态")
-	_reset_world()
-	OperatorService.reset()
-	var st := GameState.new_game()
-	var scr = await _make_screen()
-	scr.bind_state(st)
-	await get_tree().process_frame
-	var opr: Node = scr.page_node("OperatorPage")
-	var ctrl: Node = opr.get_node("Controller")
-	var s: Dictionary = ctrl.snapshot()
-
-	ok(String(s["level"]).find("Lv.1 / Lv.5") >= 0, "显示干员等级（%s）" % s["level"])
-	ok(String(s["route"]).find("精准线") >= 0, "显示养成路线（%s）" % s["route"])
-	ok(String(s["bans"]).find("排除") >= 0, "显示排除目标（%s）" % s["bans"])
-	eq(s["toggle_active"], true, "默认出战（active == true）")
-	ok(String(s["toggle_text"]).find("出战中") >= 0, "出战按钮文案（%s）" % s["toggle_text"])
-
-	print("— §3.6 干员页：出战切换（无代价，即时生效）")
-	var toggle_btn: Button = opr.get_node("ToggleButton")
-	toggle_btn.pressed.emit()
-	await get_tree().process_frame
-	var s2: Dictionary = ctrl.snapshot()
-	eq(s2["toggle_active"], false, "点击后未出战")
-	ok(String(s2["bans"]).find("无排除") >= 0, "未出战 ⇒ 排除目标清空（%s）" % s2["bans"])
-	toggle_btn.pressed.emit()
-	await get_tree().process_frame
-	var s3: Dictionary = ctrl.snapshot()
-	eq(s3["toggle_active"], true, "再点恢复出战")
-
-	print("— §3.6 干员页：升级真提交物品")
-	eq(s3["upgrade_disabled"], true, "配方物品不足 ⇒ 升级置灰")
-	ItemService.grant(&"home_q1", {"kind": ItemConstants.KIND_UNLOCK})
-	scr.refresh()
-	await get_tree().process_frame
-	var s4: Dictionary = ctrl.snapshot()
-	eq(s4["upgrade_disabled"], false, "配方物品够 ⇒ 升级可点")
-	var up_btn: Button = opr.get_node("UpgradeButton")
-	up_btn.pressed.emit()
-	await get_tree().process_frame
-	var s5: Dictionary = ctrl.snapshot()
-	ok(String(s5["result"]).find("升级成功") >= 0, "升级成功（%s）" % s5["result"])
-	ok(String(s5["level"]).find("Lv.2") >= 0, "面板等级刷新（%s）" % s5["level"])
-	scr.queue_free()
-	await get_tree().process_frame
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  ④d 池子数据浮层（★ v0.50：按钮在许愿机页，浮层列池子数据）
-# ══════════════════════════════════════════════════════════════════════════════
-
 func _test_pool_overlay() -> void:
 	print("— §3.2d 池子数据浮层：按钮在页面上，浮层列数据、隐藏项不列")
 	_reset_world()
 	OperatorService.reset()
 	var st := GameState.new_game()
-	var boxes := GachaService.grant_box(st, &"series_01", 1, &"test")
+	var boxes := _grant_test_boxes(st, 1)
 	var bx: Box = boxes[0]
 	var scr = await _make_screen()
 	scr.bind_state(st)
@@ -820,8 +543,8 @@ func _test_pool_overlay() -> void:
 	var totals: Label = wish.get_node("PoolOverlayLayer/PoolOverlay/Frame/Body/Totals")
 	var close_btn: Button = wish.get_node("PoolOverlayLayer/PoolOverlay/Frame/Body/CloseButton")
 
-	var data_btn: Button = left.get_node("PoolSection/PoolButtons/PoolDataButton")
-	ok(data_btn != null, "许愿机页有「池子数据」按钮")
+	var data_btn: Button = left.get_node("ModuleSection/ModuleButtons/PoolDataButton")
+	ok(data_btn != null, "「池子数据」按钮在**模块镶嵌的右边**")
 	eq(overlay.visible, false, "默认不显示浮层")
 
 	# 基础表格：8 件全显示 ⇒ 8 行
@@ -829,7 +552,7 @@ func _test_pool_overlay() -> void:
 		"浮层列出 %d 行（= 池内件数）" % bx.item_pool.base_items.size())
 	ok(String(totals.text).find("100.00%") >= 0, "合计行给出 Σ概率 + void = 100.00%（%s）" % totals.text)
 	ok(String(totals.text).find("金币") >= 0, "合计行给出金币期望")
-	ok(String(note.text).find("未揭示") < 0, "没有隐藏项 ⇒ 不提示未揭示")
+	ok(String(note.text).find("隐藏") < 0, "没有隐藏项 ⇒ 不提示隐藏")
 
 	print("— §3.2d 点按钮开浮层；隐藏项不列但计数提示")
 	data_btn.pressed.emit()
@@ -847,9 +570,10 @@ func _test_pool_overlay() -> void:
 	bx.item_pool.revision += 1
 	scr.refresh()
 	await get_tree().process_frame
-	eq(rows.get_child_count(), bx.item_pool.base_items.size() - 1,
-		"隐藏项被排除 ⇒ 少一行（禁用项仍在表里）")
-	ok(String(note.text).find("另有 1 件未揭示") >= 0, "提示里说明有 1 件未揭示（%s）" % note.text)
+	# ★ v0.66：隐藏项**行还在**，只是这一行不显示信息
+	eq(rows.get_child_count(), bx.item_pool.base_items.size(),
+		"隐藏项**仍占一行**（行在、信息打码；禁用项也在表里）")
+	ok(String(note.text).find("隐藏") >= 0, "提示里说明有隐藏项（%s）" % note.text)
 	# 禁用行：概率与权重都是 0
 	var found_disabled := false
 	for ch in rows.get_children():
@@ -972,5 +696,352 @@ func _test_tab_style_survives_first_layout() -> void:
 	var rect := bar.get_tab_rect(0)
 	ok(rect.size.y >= 40.0, "布局结束后 tab 高度仍 ≥ 40px（实际 %.0f）" % rect.size.y)
 	ok(rect.size.x >= 90.0, "布局结束后 tab 宽度仍 ≥ 90px（实际 %.0f）" % rect.size.x)
+	scr.queue_free()
+	await get_tree().process_frame
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ⑤b 市场页：生成盲盒（★ v0.57：用物品品质换盲盒，不消耗该物品）
+# ══════════════════════════════════════════════════════════════════════════════
+
+## ★ v0.62：市场**不再有"生成盲盒"入口**（用户裁决），本用例只测"待售盲盒"与"卖盲盒"。
+func _test_market_boxes() -> void:
+	_reset_world()
+	MarketService.reset()
+	var st := GameState.new_game()
+	GameSession.state = st
+	var scr = await _make_screen()
+	scr.bind_state(st)
+	await get_tree().process_frame
+	var mkt: Node = scr.page_node("MarketPage")
+	var ctrl: Node = mkt.get_node("Controller")
+	print("— §3.5d 市场：刷新生成 8 个待售盲盒，每张卡一个购买按钮")
+	var box_grid: GridContainer = mkt.get_node("BoxScroll/BoxGrid")
+	eq(box_grid.columns, 2, "盲盒区同样一行 2 列")
+	var box_cards: Array = ctrl.snapshot()["box_cards"]
+	eq(box_cards.size(), MarketService.BOX_SLOTS, "本次上架 8 个盲盒")
+	# 每张卡都有"购买盲盒"按钮
+	var buy_buttons := 0
+	for btn in _all_buttons(box_grid):
+		if String(btn.text) == "购买盲盒":
+			buy_buttons += 1
+	eq(buy_buttons, box_cards.size(), "**每个盲盒都有自己的购买按钮**（%d 个）" % buy_buttons)
+	# 买第一个：金币 −买价、盒子上架少一个、进玩家清单
+	var first_card: Dictionary = box_cards[0]
+	var gold_before_box_buy := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
+	var boxes_in_state := st.box_count()
+	var first_btn := _first_button_in(box_grid)
+	ok(first_btn != null, "能取到第一张卡的购买按钮")
+	first_btn.pressed.emit()
+	await get_tree().process_frame
+	var s_buy: Dictionary = ctrl.snapshot()
+	ok(String(s_buy["result"]).find("买入盲盒成功") >= 0, "买盒成功（%s）" % s_buy["result"])
+	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD),
+		gold_before_box_buy - int(first_card["price"]), "金币 −买价")
+	eq((s_buy["box_cards"] as Array).size(), MarketService.BOX_SLOTS - 1, "上架少一个")
+	eq(st.box_count(), boxes_in_state + 1, "盒子进了玩家仓库")
+
+	scr.queue_free()
+	await get_tree().process_frame
+
+## ★ v0.58：取网格里第一张卡片上的"购买"按钮（卡片是代码建的，结构固定：Panel>VBox>3 子）。
+func _first_buy_button(grid: GridContainer) -> Button:
+	for card in grid.get_children():
+		if card is PanelContainer:
+			for ch in card.get_children():
+				if ch is VBoxContainer:
+					for sub in ch.get_children():
+						if sub is Button:
+							return sub
+	return null
+
+## ★ v0.60：取网格里第一个 Button（盲盒卡片结构：Panel>VBox>[Label,Label,Label,Button]）。
+func _first_button_in(grid: GridContainer) -> Button:
+	var all := _all_buttons(grid)
+	return all[0] if all.size() > 0 else null
+
+
+## 递归收集某个节点下的所有 Button（卡片内部结构变了也不用改测试）。
+func _all_buttons(node: Node) -> Array[Button]:
+	var out: Array[Button] = []
+	for ch in node.get_children():
+		if ch is Button:
+			out.append(ch)
+		out.append_array(_all_buttons(ch))
+	return out
+
+## ★ v0.61：套系删除 ⇒ 测试用"按品质造盒"（取内容表前 8 件，顺序确定）。
+func _grant_test_boxes(st: GameState, count: int) -> Array[Box]:
+	var items: Array[ItemDef] = []
+	# 必须包含模块内容的目标物品（`home_q1` / `energy_q1`），否则"可镶嵌模块"过滤后为空
+	for want in [&"home_q1", &"energy_q1"]:
+		var d0 := ItemCatalog.get_def(want)
+		if d0 != null:
+			items.append(d0)
+	for id in ItemCatalog.all_item_ids():
+		if items.size() >= 8:
+			break
+		var d := ItemCatalog.get_def(id)
+		if d != null and not items.has(d):
+			items.append(d)
+	return BoxTestKit.grant(st, count, 2, items)
+
+## ★ v0.65：池子数据里"隐藏项不显示信息"——下拉用 ？？？ 占位、浮层不陈列它们。
+func _test_pool_hidden_info() -> void:
+	print("— ★ v0.68 池子数据：隐藏项行在、信息打码（池子编辑控件已移除）")
+	_reset_world()
+	var st := GameState.new_game()
+	GameSession.state = st
+	var scr = await _make_screen()
+	scr.bind_state(st)
+	await get_tree().process_frame
+	var wm: Node = scr.page_node("WishPage").get_node("Controller")
+	# 生成一个盒子：材料显示、其余隐藏
+	var gen_r := GachaService.generate_box(st, &"home_q3", 6, 777)
+	ok(gen_r["ok"], "生成一个 6 件盒")
+	var gb: Box = gen_r["box"]
+	var boxes: Array = st.pending_boxes
+	var idx := -1
+	for i in boxes.size():
+		if (boxes[i] as Box).box_id == gb.box_id:
+			idx = i
+	if wm.has_method("set_box_index"):
+		wm.set_box_index(idx)
+	scr.refresh()
+	await get_tree().process_frame
+	# 隐藏项的名字集合
+	var names: Array[String] = []
+	for d in gb.item_pool.base_items:
+		if d != null and gb.item_pool.state_of(d.item_id) == ItemPool.ItemState.HIDDEN:
+			names.append(d.display_name)
+	# ★ 浮层表格：行在、信息打码
+	var table: Dictionary = wm.snapshot()
+	var rows: Array = table.get("pool_table_rows", [])
+	eq(rows.size(), 6, "浮层列出全部 6 件（隐藏项也占一行）")
+	var masked_rows := 0
+	var leaks := 0
+	for r in rows:
+		if bool(r.get("masked", false)):
+			masked_rows += 1
+			eq(String(r["name"]), "？？？", "打码行不显示名称")
+			eq(int(r["weight_bp"]), 0, "打码行不显示权重")
+			eq(float(r["prob"]), 0.0, "打码行不显示概率")
+			eq(int(r["value"]), 0, "打码行不显示价值")
+		else:
+			for nm in names:
+				if String(r["name"]).contains(nm):
+					leaks += 1
+	eq(masked_rows, names.size(), "**%d 个隐藏项各占一行、全部打码**" % masked_rows)
+	eq(leaks, 0, "**未打码的行里不出现隐藏项的名字**（泄露 %d 次）" % leaks)
+	var note := String(table.get("pool_table_note", ""))
+	ok(note.find("隐藏") >= 0, "注脚说明隐藏项信息不展示（%s）" % note)
+	# ★ 页面结构：池子编辑控件不存在（只有「池子数据」按钮）
+	var wish: Node = scr.page_node("WishPage")
+	ok(wish.get_node_or_null("Columns/Left/PoolSection") == null, "页面**没有**池子编辑段")
+	ok(wish.get_node_or_null("Columns/Left/ModuleSection/ModuleButtons/PoolDataButton") != null,
+		"「池子数据」按钮在模块镶嵌右边")
+	scr.queue_free()
+	await get_tree().process_frame
+
+
+func _test_tab_switch_refreshes() -> void:
+	print("— §3.4 切 tab 刷新：别处加物品后切回仓库页能看到")
+	_reset_world()
+	var st := GameState.new_game()
+	var scr = await _make_screen()
+	scr.bind_state(st)
+	await get_tree().process_frame
+	var wh: Node = scr.page_node("WarehousePage")
+	var items_lbl: Label = wh.get_node("Items")
+
+	ok(String(items_lbl.text).find("还没有物品") >= 0, "前置：开局仓库无物品（View 已渲染）")
+
+	# 直接 grant 一件物品（不经过 scr.refresh()）——模拟在别的页开盒 / 买进物品
+	ItemService.grant(&"home_q1", {"kind": ItemConstants.KIND_UNLOCK})
+	# ★ View 的 Label 文本是上次 render 写的，未切 tab 不更新
+	ok(String(items_lbl.text).find("还没有物品") >= 0, "未切 tab ⇒ View 仍是旧值（尚未刷新）")
+
+	# ★ v0.54：默认落在许愿机（0）⇒ 切到仓库页（1）就会触发 `tab_changed` ⇒ 重新渲染出新物品
+	var tabs: TabContainer = scr.get_node("Tabs")
+	eq(tabs.current_tab, 0, "前置：默认在许愿机（第一个 tab）")
+	tabs.current_tab = 1          # 切到仓库页
+	await get_tree().process_frame
+	ok(String(items_lbl.text).find("家居物品") >= 0, "切到仓库页 ⇒ View 显示新物品")
+	ok(String(items_lbl.text).find("白×1") >= 0, "档位计数也更新")
+	scr.queue_free()
+	await get_tree().process_frame
+
+
+func _test_company_page() -> void:
+	print("— §3.5 公司页：显示等级 / 路线 / 升级配方 / 产出 / 库存 / 金币")
+	_reset_world()
+	CompanyService.reset()
+	var st := GameState.new_game()
+	var scr = await _make_screen()
+	scr.bind_state(st)
+	await get_tree().process_frame
+	var cmp: Node = scr.page_node("CompanyPage")
+	var ctrl: Node = cmp.get_node("Controller")
+	var s: Dictionary = ctrl.snapshot()
+
+	ok(String(s["level"]).find("Lv.1 / Lv.5") >= 0, "显示公司等级（%s）" % s["level"])
+	ok(String(s["route"]).find("标准线") >= 0, "显示培养路线（%s）" % s["route"])
+	ok(String(s["upgrade_text"]).find("升级") >= 0, "显示升级按钮文案（%s）" % s["upgrade_text"])
+	ok(String(s["gold"]).find("金币") >= 0, "显示金币余额（%s）" % s["gold"])
+
+	print("— §3.5 公司页：升级真提交物品")
+	# 开局仓库无物品 ⇒ 升级置灰（配方物品不足）
+	eq(s["upgrade_disabled"], true, "配方物品不足 ⇒ 升级置灰")
+	# 提交配方物品（home_q1 ×1）
+	ItemService.grant(&"home_q1", {"kind": ItemConstants.KIND_UNLOCK})
+	scr.refresh()
+	await get_tree().process_frame
+	var s2: Dictionary = ctrl.snapshot()
+	eq(s2["upgrade_disabled"], false, "配方物品够 ⇒ 升级可点")
+	var up_btn: Button = cmp.get_node("UpgradeButton")
+	up_btn.pressed.emit()
+	await get_tree().process_frame
+	var s3: Dictionary = ctrl.snapshot()
+	ok(String(s3["result"]).find("升级成功") >= 0, "升级成功（%s）" % s3["result"])
+	ok(String(s3["level"]).find("Lv.2") >= 0, "面板等级刷新（%s）" % s3["level"])
+
+	print("— §3.5 公司页：买盲盒真扣金币发盒")
+	# 产出库存 + 给金币
+	CompanyService.ensure_produced(1000)
+	ItemService.grant_currency(ItemConstants.CURRENCY_GOLD, 100000,
+		ItemConstants.CURRENCY_SOURCE_INIT)
+	scr.refresh()
+	await get_tree().process_frame
+	var s4: Dictionary = ctrl.snapshot()
+	eq(s4["buy_disabled"], false, "有库存 + 金币够 ⇒ 买盲盒可点")
+	var box_before := st.box_count()
+	var buy_btn: Button = cmp.get_node("BuyButton")
+	buy_btn.pressed.emit()
+	await get_tree().process_frame
+	var s5: Dictionary = ctrl.snapshot()
+	ok(String(s5["result"]).find("买入成功") >= 0, "买盲盒成功（%s）" % s5["result"])
+	eq(st.box_count(), box_before + 1, "盲盒 +1（发进清单）")
+	scr.queue_free()
+	await get_tree().process_frame
+
+
+func _test_operator_page() -> void:
+	print("— §3.6 干员页：显示等级 / 路线 / 排除目标 / 出战状态")
+	_reset_world()
+	OperatorService.reset()
+	var st := GameState.new_game()
+	var scr = await _make_screen()
+	scr.bind_state(st)
+	await get_tree().process_frame
+	var opr: Node = scr.page_node("OperatorPage")
+	var ctrl: Node = opr.get_node("Controller")
+	var s: Dictionary = ctrl.snapshot()
+
+	ok(String(s["level"]).find("Lv.1 / Lv.5") >= 0, "显示干员等级（%s）" % s["level"])
+	ok(String(s["route"]).find("精准线") >= 0, "显示养成路线（%s）" % s["route"])
+	ok(String(s["bans"]).find("排除") >= 0, "显示排除目标（%s）" % s["bans"])
+	eq(s["toggle_active"], true, "默认出战（active == true）")
+	ok(String(s["toggle_text"]).find("出战中") >= 0, "出战按钮文案（%s）" % s["toggle_text"])
+
+	print("— §3.6 干员页：出战切换（无代价，即时生效）")
+	var toggle_btn: Button = opr.get_node("ToggleButton")
+	toggle_btn.pressed.emit()
+	await get_tree().process_frame
+	var s2: Dictionary = ctrl.snapshot()
+	eq(s2["toggle_active"], false, "点击后未出战")
+	ok(String(s2["bans"]).find("无排除") >= 0, "未出战 ⇒ 排除目标清空（%s）" % s2["bans"])
+	toggle_btn.pressed.emit()
+	await get_tree().process_frame
+	var s3: Dictionary = ctrl.snapshot()
+	eq(s3["toggle_active"], true, "再点恢复出战")
+
+	print("— §3.6 干员页：升级真提交物品")
+	eq(s3["upgrade_disabled"], true, "配方物品不足 ⇒ 升级置灰")
+	ItemService.grant(&"home_q1", {"kind": ItemConstants.KIND_UNLOCK})
+	scr.refresh()
+	await get_tree().process_frame
+	var s4: Dictionary = ctrl.snapshot()
+	eq(s4["upgrade_disabled"], false, "配方物品够 ⇒ 升级可点")
+	var up_btn: Button = opr.get_node("UpgradeButton")
+	up_btn.pressed.emit()
+	await get_tree().process_frame
+	var s5: Dictionary = ctrl.snapshot()
+	ok(String(s5["result"]).find("升级成功") >= 0, "升级成功（%s）" % s5["result"])
+	ok(String(s5["level"]).find("Lv.2") >= 0, "面板等级刷新（%s）" % s5["level"])
+	scr.queue_free()
+	await get_tree().process_frame
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ⑥ 市场页（★ v0.68：卡片买入、无卖出控件、无生成入口）
+# ══════════════════════════════════════════════════════════════════════════════
+
+func _test_market_page() -> void:
+	print("— §3.3 市场页：金币/倒计时/上架卡片（无卖出、无生成入口）")
+	_reset_world()
+	MarketService.reset()
+	var st := GameState.new_game()
+	GameSession.state = st
+	var scr = await _make_screen()
+	scr.bind_state(st)
+	await get_tree().process_frame
+	var mkt: Node = scr.page_node("MarketPage")
+	var ctrl: Node = mkt.get_node("Controller")
+	var s: Dictionary = ctrl.snapshot()
+
+	ok(String(s["gold"]).find("金币") >= 0, "显示金币余额（%s）" % s["gold"])
+	ok(String(s["refresh"]).find("距刷新") >= 0, "显示刷新倒计时（%s）" % s["refresh"])
+	eq((s["listing_cards"] as Array).size(), MarketService.SLOT_COUNT, "上架卡片 = SLOT_COUNT")
+	var grid: GridContainer = mkt.get_node("Scroll/Grid")
+	eq(grid.columns, 2, "上架清单一行 2 列")
+	eq(grid.get_child_count(), MarketService.SLOT_COUNT, "网格里铺了 SLOT_COUNT 张卡片")
+	eq(mkt.has_node("SellRow") or mkt.has_node("SellBoxRow"), false, "**没有卖出控件**")
+	eq(mkt.has_node("GenRow"), false, "**没有「生成盲盒」入口**")
+
+	print("— §3.3 市场页：买入真扣金币、真发实例")
+	ItemService.grant_currency(ItemConstants.CURRENCY_GOLD, 100000,
+		ItemConstants.CURRENCY_SOURCE_INIT)
+	scr.refresh()
+	await get_tree().process_frame
+	var gold_before := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
+	var inst_before := ItemService.instances.size()
+	var buy_btn: Button = _first_button_in(grid)
+	ok(buy_btn != null, "第一张卡片有购买按钮")
+	buy_btn.pressed.emit()
+	await get_tree().process_frame
+	var s2: Dictionary = ctrl.snapshot()
+	ok(String(s2["result"]).find("买入成功") >= 0, "买入成功（%s）" % s2["result"])
+	ok(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD) < gold_before, "金币真扣")
+	ok(ItemService.instances.size() > inst_before, "真发了一个实例")
+	scr.queue_free()
+	await get_tree().process_frame
+
+## ★ v0.69 回归：**在市场页买入后，顶栏金币读数立刻更新**（不必切 tab）。
+## 根因：顶栏只在 `GameScreen.refresh()` 时重读，页面内事务不会触发它。
+func _test_top_bar_updates_after_buy() -> void:
+	print("— ★ v0.69 顶栏：市场买入后金币读数即时更新")
+	_reset_world()
+	MarketService.reset()
+	var st := GameState.new_game()
+	GameSession.state = st
+	ItemService.grant_currency(ItemConstants.CURRENCY_GOLD, 5000,
+		ItemConstants.CURRENCY_SOURCE_INIT)
+	var scr = await _make_screen()
+	scr.bind_state(st)
+	await get_tree().process_frame
+	var gold_lbl: Label = scr.get_node("TopBar/Gold")
+	var before := gold_lbl.text
+	var mkt: Node = scr.page_node("MarketPage")
+	var grid: GridContainer = mkt.get_node("Scroll/Grid")
+	var btn := _first_button_in(grid)
+	ok(btn != null, "市场有可买卡片")
+	# 记下这一件的买价（快照里带 price）
+	var ctrl: Node = mkt.get_node("Controller")
+	var cards: Array = ctrl.snapshot()["listing_cards"]
+	var price := int((cards[0] as Dictionary)["price"])
+	btn.pressed.emit()
+	await get_tree().process_frame
+	var after := gold_lbl.text
+	ok(before != after, "**买入后顶栏立刻变化**（%s → %s）" % [before, after])
+	eq(int(after.replace("金币 ", "")), int(before.replace("金币 ", "")) - price,
+		"顶栏金币正好减去这一件的买价 %d" % price)
 	scr.queue_free()
 	await get_tree().process_frame

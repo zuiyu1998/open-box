@@ -2,8 +2,8 @@
 ##
 ## **职责：管理用户的持有物（物品 + 盲盒）——放在哪、放得下吗、怎么取。**
 ## 数据只有两个来源（用户裁决）：
-##   1. **初始化内容**：`initialize(state)` —— 新游戏开局发的内容（当前 = 一个初始盲盒；
-##      将来"开局物品"也加在这里）；
+##   1. **初始化内容**：`initialize(state)` —— 新游戏开局发的内容（★ v0.67：**当前为空**，
+##      开局不再送盲盒；将来"开局物品"也加在这里）；
 ##   2. **存档**：`hydrate(state, data)` —— 从 10 的存档把"仓库/邮件里有什么"注入回来
 ##      （**文件读写仍归 10**，本系统只收"持有的内容"，不碰 save.json 封装）。
 ##
@@ -19,8 +19,6 @@
 extends Node
 
 ## ★ 数据源一：新游戏初始化内容。开局发的初始盲盒（内容归 10 / 内容配置）。
-const INITIAL_BOX_SERIES := &"series_01"
-
 
 ## ★ v0.35（W1-a）：**盲盒的仓库占位账**归本系统（从 `ItemService.box_warehouse_used` 迁来）。
 ##
@@ -126,13 +124,13 @@ func reset_box_usage() -> void:
 
 ## 初始化一局的持有物（覆盖式，用于"新游戏"）。
 ## ★ 当前内容 = 一个初始盲盒；开局物品将来也加在这里。
+## ★ v0.67（用户裁决）：**开局不再默认送盲盒**——新游戏的仓库是空的。
+## 盒子只从"市场买 / 公司产 / 任务发"这三条产出路径来。
 func initialize(state: GameState) -> void:
 	if state == null:
 		return
 	reset_box_usage()
 	reset_locations()
-	if GachaCatalog.get_series(INITIAL_BOX_SERIES) != null:
-		GachaService.grant_box(state, INITIAL_BOX_SERIES, 1, &"init")
 
 
 ## 数据源二：从存档注入持有物。

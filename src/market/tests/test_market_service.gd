@@ -14,6 +14,7 @@ var _fail := 0
 
 func _ready() -> void:
 	print("=== 市场系统测试（13-market.md §6）===\n")
+	_test_box_listings()
 
 	_test_refresh_draws_tradeable_items()
 	_test_refresh_is_deterministic_with_seed()
@@ -270,3 +271,52 @@ func _test_save_roundtrip_shape() -> void:
 	# 空段（旧档缺段）⇒ 空上架，下次 ensure_fresh 会立即刷
 	MarketService.from_save_dict({})
 	eq(MarketService.listings.size(), 0, "缺段 ⇒ 空上架")
+
+
+## ★ v0.60：**每次刷新生成 8 个盲盒**（独立于玩家仓库的"待售库存"），可买、刷新丢弃未售出。
+func _test_box_listings() -> void:
+	print("— ★ v0.60 盲盒上架：刷新生成 8 个、买下进仓库、刷新丢弃未售出")
+	_setup()
+	# 盲盒生成需要 GameState（与真实流程一致：菜单写入 GameSession.state）
+	GameSession.state = GameState.new_game()
+	# 生成要求"品质低于材料的物品"或同品质补齐 ⇒ 夹具里的 8 件都是品质 1，够用
+	MarketService.refresh(777, 1000)
+	MarketService.refresh(777, 1000)
+	var snaps := MarketService.box_listings_snapshot()
+	eq(snaps.size(), MarketService.BOX_SLOTS,
+		"刷新后上架 %d 个盲盒（BOX_SLOTS）" % MarketService.BOX_SLOTS)
+	ok(GameSession.state.box_count() == 0, "**上架盒不进玩家清单**（买下才进）")
+
+	# 每个盒子都带品质 / 件数 / 开盒原石价 / 买价
+	var s0: Dictionary = snaps[0]
+	ok(int(s0["quality"]) >= 1 and int(s0["quality"]) <= 4, "品质在 1–4（%d）" % int(s0["quality"]))
+	var sz := int(s0["size"])
+	ok(sz >= 3 and sz <= MarketService.BOX_POOL_COUNT,
+		"池子件数在 3…%d 之间（内容不足时自适应，实际 %d）" % [MarketService.BOX_POOL_COUNT, sz])
+	ok(int(s0["price"]) > 0, "买价 > 0（%d 金币）" % int(s0["price"]))
+	ok(int(s0["open_gem_cost"]) >= 1, "开盒原石价 ≥ 1")
+
+	# 买一个：金币 −买价、盒子进仓库、上架少一个
+	var target: Dictionary = snaps[0]
+	var gold_before := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
+	var r := MarketService.buy_box(String(target["box_id"]))
+	ok(r["ok"], "买盒成功（%s）" % String(r.get("reason", "")))
+	eq(int(r["paid"]), int(target["price"]), "扣的正好是它的买价")
+	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD), gold_before - int(target["price"]),
+		"金币 −买价")
+	eq(GameSession.state.box_count(), 1, "盒子进了玩家清单")
+	eq(MarketService.box_listings_snapshot().size(), MarketService.BOX_SLOTS - 1,
+		"上架库存少一个")
+
+	# 金币不足 ⇒ 拒绝且不动账
+	ItemService.currencies.clear()
+	var poor := MarketService.buy_box(String(MarketService.box_listings_snapshot()[0]["box_id"]))
+	ok(not poor["ok"], "金币为 0 ⇒ 买不起")
+	eq(String(poor["reason"]), "currency_insufficient", "原因码 = currency_insufficient")
+	eq(GameSession.state.box_count(), 1, "拒买时清单不变")
+
+	# 再刷新 ⇒ 旧的上架盒**被丢弃**（不进玩家清单），重新来 8 个
+	var before := GameSession.state.box_count()
+	MarketService.refresh(888, 2000)
+	eq(MarketService.box_listings_snapshot().size(), MarketService.BOX_SLOTS, "又生成了 8 个")
+	eq(GameSession.state.box_count(), before, "未售出的旧盒**没有**流进玩家清单")

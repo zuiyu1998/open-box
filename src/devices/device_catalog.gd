@@ -23,7 +23,7 @@ var _by_id: Dictionary = {}
 
 ## 载入失败时用的**代码内兜底曲线**（与 `.tres` 的推荐值一致；只用于让游戏可跑，不替代内容）。
 const FALLBACK_LEVELS := [
-	# [level, unlock_series_quality_max, open_cost_bp, upgrade_cost_gems]
+	# [level, unlock_quality_max, open_cost_bp, upgrade_cost_gems]
 	[1, 2, 10000, 0],
 	[2, 3, 6000, 40],
 	[3, 4, 2000, 120],
@@ -97,12 +97,12 @@ func _build_fallback(id: StringName) -> DeviceDef:
 	var def := DeviceDef.new()
 	def.id = id
 	def.display_name = "基础装置"
-	def.description = "开局发放的那一台。升级它可以让开盒更便宜、并打开更高品质的套系。"
+	def.description = "开局发放的那一台。升级它可以让开盒更便宜、并打开更高品质的盲盒。"
 	var levels: Array[DeviceLevelSpec] = []
 	for row in FALLBACK_LEVELS:
 		var spec := DeviceLevelSpec.new()
 		spec.level = int(row[0])
-		spec.unlock_series_quality_max = int(row[1])
+		spec.unlock_quality_max = int(row[1])
 		spec.open_cost_bp = int(row[2])
 		spec.upgrade_cost_gems = int(row[3])
 		levels.append(spec)
@@ -112,7 +112,7 @@ func _build_fallback(id: StringName) -> DeviceDef:
 
 ## 配置校验（加载时）。返回 { ok, errors }——**只拦非法配置、不改任何数值**。
 ##
-## 除了逐定义的 `DeviceDef.validate()`，还要求**开局那台必须存在且能开切片的套系**：
+## 除了逐定义的 `DeviceDef.validate()`，还要求**开局那台必须存在且能开切片的盲盒**：
 ## 缺了它是"永远是 0 台"（死锁），等级 1 开不了任何套系则是"开局第一步走不动"。
 func validate() -> Dictionary:
 	var errors: Array[String] = []
@@ -128,8 +128,8 @@ func validate() -> Dictionary:
 		)
 	else:
 		var start := get_device(start_id)
-		if start.unlock_series_quality_max(1) < 1:
+		if start.unlock_quality_max(1) < 1:
 			errors.append(
-				"开局装置不可用：`%s` 的等级 1 开不了任何套系（开局第一步就走不动）" % start_id
+				"开局装置不可用：`%s` 的等级 1 开不了任何盲盒（开局第一步就走不动）" % start_id
 			)
 	return {"ok": errors.is_empty(), "errors": errors}

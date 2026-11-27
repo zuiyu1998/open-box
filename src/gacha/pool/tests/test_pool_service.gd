@@ -13,7 +13,7 @@ const N := 8
 var _pass := 0
 var _fail := 0
 var _defs: Array[ItemDef] = []
-var _series: SeriesDef
+var _pool_items: Array[ItemDef] = []
 
 
 func _ready() -> void:
@@ -101,14 +101,10 @@ func _setup() -> void:
 		ItemCatalog.register(d)
 		_defs.append(d)
 
-	_series = SeriesDef.new()
-	_series.series_id = &"series_01"
-	_series.series_quality = 2                    # 品质 2 ⇒ 8 物品 / 3 位（核心 §4.1.1）
-	_series.regular_count = N
-	_series.socket_count = 3
-	_series.regular_items = _defs.duplicate()
-	GachaCatalog.register_series(_series)
-
+	# ★ v0.61：套系删除 ⇒ 盒子由 `BoxTestKit` 按品质造
+	_pool_items = []
+	for d in _defs:
+		_pool_items.append(d)
 	GachaCatalog.register_module(_module(&"mod_ban_05", ModuleDef.OpType.BAN, [&"s01_05"]))
 	GachaCatalog.register_module(_module(&"mod_ban_08", ModuleDef.OpType.BAN, [&"s01_08"]))
 	GachaCatalog.register_module(_module(&"mod_boost_05", ModuleDef.OpType.BOOST, [&"s01_05"], 3.0))
@@ -116,15 +112,9 @@ func _setup() -> void:
 	GachaCatalog.register_module(_module(&"mod_recover", ModuleDef.OpType.RECOVER, [&"s01_05"]))
 	GachaCatalog.register_module(_module(&"mod_ban_many", ModuleDef.OpType.BAN,
 		[&"s01_01", &"s01_02", &"s01_03", &"s01_04", &"s01_05", &"s01_06"]))
-	# 有金币成本的模块（★ v0.19：模块的成本 = 金币，写在 `ModuleDef.gold_cost` 上）
-	GachaCatalog.register_module(_module(&"mod_ban_costly", ModuleDef.OpType.BAN, [&"s01_05"], 1.0,
-		25))
-	# 互斥标记（V6）
-	GachaCatalog.register_module(_module(&"mod_tag_a", ModuleDef.OpType.BAN, [&"s01_04"], 1.0, 0,
-		[&"exclusive_x"]))
-	GachaCatalog.register_module(_module(&"mod_tag_b", ModuleDef.OpType.BAN, [&"s01_06"], 1.0, 0,
-		[&"exclusive_x"]))
-
+	GachaCatalog.register_module(_module(&"mod_ban_costly", ModuleDef.OpType.BAN, [&"s01_05"], 1.0, 25))
+	GachaCatalog.register_module(_module(&"mod_tag_a", ModuleDef.OpType.BAN, [&"s01_04"], 1.0, 0, [&"exclusive_x"]))
+	GachaCatalog.register_module(_module(&"mod_tag_b", ModuleDef.OpType.BAN, [&"s01_06"], 1.0, 0, [&"exclusive_x"]))
 
 func _module(
 	id: StringName,
@@ -161,7 +151,7 @@ func _new_state(n: int = 1) -> Dictionary:
 	ItemService.grant_currency(
 		ItemConstants.CURRENCY_GOLD, 1000, ItemConstants.CURRENCY_SOURCE_INIT
 	)
-	var boxes := GachaService.grant_box(st, &"series_01", n, &"test")
+	var boxes := BoxTestKit.grant(st, n, 2, _pool_items)
 	return {"state": st, "boxes": boxes}
 
 
@@ -439,19 +429,19 @@ func _test_broken_modules_are_reported() -> void:
 	PoolService.drop_cached_state(bx.box_id)
 	var ps := PoolService.get_pool_state(st, bx.box_id)
 	ok(ps == null, "引用未注册 module_id ⇒ 重建返回 null（不静默给基础池）")
-	var errs := PoolService.validate_box(bx, _series)
+	var errs := PoolService.validate_box(bx)
 	ok(_codes(errs).has("unknown_module"), "validate_box 报出 unknown_module")
 	bx.modules[0] = null
-	var shape := PoolService.validate_box(bx, _series)
+	var shape := PoolService.validate_box(bx)
 	ok(shape.is_empty(), "修好后校验通过")
 	# 定长形状（V7）：长度不等于 socket_count 必须被报出来
 	var saved := bx.modules.duplicate()
 	var empty_modules: Array[Module] = []
 	bx.modules = empty_modules
-	var errs2 := PoolService.validate_box(bx, _series)
+	var errs2 := PoolService.validate_box(bx)
 	ok(_codes(errs2).has("modules_shape"), "抓长度 ≠ socket_count（V7 / C4 第①条）")
 	bx.modules = saved
-	ok(PoolService.validate_box(bx, _series).is_empty(), "恢复后校验通过")
+	ok(PoolService.validate_box(bx).is_empty(), "恢复后校验通过")
 	ok(PoolService.get_pool_state(st, bx.box_id) != null, "缓存重建后可用")
 
 
@@ -629,7 +619,7 @@ func _test_item_state_roundtrip() -> void:
 	var d := bx.to_dict()
 	var back := Box.from_dict(d, 0)
 	ok(back != null, "能读回来")
-	eq(back.item_pool.extra_item_ids, [&"extra_q2"] as Array[StringName], "追加物品读回来了")
+	ok(back != null and back.item_pool.has_item(&"extra_q2"), "追加物品读回来了（v0.61：由 pool_item_ids 统一落盘）")
 	eq(back.item_pool.state_of(&"extra_q2"), ItemPool.ItemState.DISABLED, "禁用状态读回来了")
 	eq(back.item_pool.state_of(first), ItemPool.ItemState.HIDDEN, "隐藏状态读回来了")
 	eq(back.item_pool.base_items.size(), bx.item_pool.base_items.size(), "池子件数一致")

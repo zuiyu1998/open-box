@@ -1,6 +1,6 @@
 ## 物品定义（02-item.md §4.1）。
 ##
-## 一种物品的**静态属性**。归属本系统（02）；01 的 SeriesDef 只**引用**它，不定义它。
+## 一种物品的**静态属性**。归属本系统（02）；01 的盒子只**引用**它，不定义它。
 ##
 ## v0.7 术语合并后，「物资」与「款」已统一为「物品」——**池中的物品就是你得到的物品**，
 ## 因此本类**没有任何产出映射字段**（yield_material_id / yield_amount 已删除）。
@@ -14,7 +14,7 @@ extends Resource
 @export var item_id: StringName = &""       # 唯一 id，推荐 = "<category>_<quality>"
 @export var display_name: String = ""       # 展示名，如"星尘·精良"
 @export var category: StringName = &""      # 类别，指向 ItemCategoryDef.category_id
-## 物品品质 `quality`（≠ 套系品质 `series_quality`）。★ v0.22：**6 档**——
+## 物品品质 `quality`（6 档，★ v0.22 起）。★ v0.61：**套系品质已删除**，物品品质只用于"盲盒品质映射"。
 ## 白 1 / 绿 2 / 蓝 3 / 紫 4 / 金 5 / 红 6（`ItemConstants.QUALITY_*`，02-item.md §5.1）。
 ## 越界由校验器 **V8** 拦下（`ItemCatalog.validate()`），不是靠 `@export_range`（它只约束检查器）。
 @export_range(1, 6) var quality: int = 1

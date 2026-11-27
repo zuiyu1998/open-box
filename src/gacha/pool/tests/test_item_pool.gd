@@ -87,7 +87,6 @@ func _mk(item_id: String, rarity: int) -> ItemDef:
 func _pool(rarities: Array) -> ItemPool:
 	var p := ItemPool.new()
 	p.box_id = "b1"
-	p.series_id = &"series_01"
 	p.regular_count = rarities.size()
 	p.socket_count = 3
 	var i := 0

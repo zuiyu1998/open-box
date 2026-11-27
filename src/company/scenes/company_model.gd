@@ -46,13 +46,13 @@ func snapshot() -> Dictionary:
 
 	# 金币 + 买盲盒
 	var gold := "金币 %d" % ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
-	var series := _first_series()
-	var price := CompanyService.buy_price(series)
+	var q := _first_quality()
+	var price := CompanyService.buy_price(q)
 	var buy_text := "买一盒"
 	var buy_disabled := true
 	if price > 0:
 		buy_text = "买一盒（%d 金币）" % price
-		buy_disabled = CompanyService.stock_of(series) <= 0 \
+		buy_disabled = CompanyService.stock_of(q) <= 0 \
 			or ItemService.currency_balance(ItemConstants.CURRENCY_GOLD) < price
 
 	return {
@@ -80,13 +80,13 @@ func upgrade() -> void:
 
 ## 买一盒当前路线产出的盲盒。
 func buy() -> void:
-	var series := _first_series()
-	if series == &"":
+	var q := _first_quality()
+	if q <= 0:
 		result = "买入失败：当前路线没有可产的盲盒"
 		return
-	var r := CompanyService.buy(series, state)
+	var r := CompanyService.buy(q, state)
 	if r["ok"]:
-		result = "买入成功：%s（- %d 金币）" % [String(r["series_id"]), int(r["paid"])]
+		result = "买入成功：盲盒品质 %d（- %d 金币）" % [int(r["quality"]), int(r["paid"])]
 	else:
 		result = "买入失败：%s" % String(r["reason"])
 
@@ -106,13 +106,14 @@ func _can_upgrade(req: Dictionary) -> bool:
 	return true
 
 
-## 当前路线产出的第一个系列（骨架：只有 1 个系列）。
-func _first_series() -> StringName:
+## 当前路线产出的第一个**品质**（骨架：只有 1 个品质）。
+## ★ v0.61：路线给的是**品质**（套系已删除）。
+func _first_quality() -> int:
 	var route := CompanyService.current_route()
 	if route.is_empty():
-		return &""
-	var series_list: Array = route.get("series", [])
-	return series_list[0] if series_list.size() > 0 else &""
+		return 0
+	var qs: Array = route.get("qualities", [])
+	return int(qs[0]) if qs.size() > 0 else 0
 
 
 func _countdown_text() -> String:
@@ -125,10 +126,10 @@ func _countdown_text() -> String:
 
 
 func _stock_text() -> String:
-	var series := _first_series()
-	if series == &"":
+	var q := _first_quality()
+	if q <= 0:
 		return "库存：空"
-	var n := CompanyService.stock_of(series)
+	var n := CompanyService.stock_of(q)
 	if n <= 0:
 		return "库存：空"
-	return "库存：%s ×%d" % [String(series), n]
+	return "库存：品质 %d ×%d" % [q, n]

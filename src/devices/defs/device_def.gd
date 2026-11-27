@@ -23,7 +23,7 @@ extends Resource
 ## **等级上限 = `levels.size()`**——没有单独的 `max_level` 字段（同一事实不存两份）。
 @export var levels: Array[DeviceLevelSpec] = []
 
-const MAX_SERIES_QUALITY := 4
+const MAX_BOX_QUALITY := 4
 
 
 func max_level() -> int:
@@ -38,9 +38,9 @@ func spec_for_level(level: int) -> DeviceLevelSpec:
 
 
 ## 该等级**能开的最高套系品质**；等级非法 ⇒ 0（= 什么套系都开不了，绝不放行）。
-func unlock_series_quality_max(level: int) -> int:
+func unlock_quality_max(level: int) -> int:
 	var spec := spec_for_level(level)
-	return spec.unlock_series_quality_max if spec != null else 0
+	return spec.unlock_quality_max if spec != null else 0
 
 
 ## 该等级的**开盒原石折扣**（万分比）；等级非法 ⇒ 0（= 免费——但等级非法时 `can_open` 已经先拒绝，
@@ -86,10 +86,10 @@ func validate() -> Array[String]:
 		if i > 0:
 			var prev := levels[i - 1]
 			if prev != null:
-				if spec.unlock_series_quality_max < prev.unlock_series_quality_max:
+				if spec.unlock_quality_max < prev.unlock_quality_max:
 					problems.append(
 						"non_monotonic_unlock：%s 的准入从 %d 降到 %d（升级不许变小）"
-						% [id, prev.unlock_series_quality_max, spec.unlock_series_quality_max]
+						% [id, prev.unlock_quality_max, spec.unlock_quality_max]
 					)
 				if spec.open_cost_bp > prev.open_cost_bp:
 					problems.append(

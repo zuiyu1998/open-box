@@ -83,16 +83,8 @@ func _setup_pool() -> GameState:
 		ItemCatalog.register(d)
 		defs.append(d)
 
-	var series := SeriesDef.new()
-	series.series_id = &"series_op"
-	series.series_quality = 2
-	series.regular_count = 6
-	series.socket_count = 3
-	series.regular_items = defs
-	GachaCatalog.register_series(series)
-
 	var st := GameState.new_game()
-	GachaService.grant_box(st, &"series_op", 1, &"test")
+	BoxTestKit.grant(st, 1, 2, defs)
 	return st
 
 

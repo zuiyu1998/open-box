@@ -106,23 +106,22 @@ static func _close_write_gate() -> void:
 # ══════════════════════════════════════════════════════════════════════════════
 
 ## 为新盒子产出 `Box.item_pool`（基础池副本）。**01 在发放盒子时调用**（§5.5 / §7）。
-## 只取一份、**不构造池子内容**——内容全来自 `SeriesDef`（模板归 01）。
+## 内容由造盒方给的**显式物品列表**决定（v0.61 起没有套系模板）。
 ##
 ## `state` 目前不参与构造：签名保持文档口径（§4.5），供将来冻结套系级快照时使用。
-static func init_pool(state: GameState, box_id: String, series_id: StringName) -> ItemPool:
-	var series := GachaCatalog.get_series(series_id)
-	if series == null:
-		push_error("PoolService.init_pool: 未知 series_id `%s`" % series_id)
+## ★ v0.61：**按显式物品列表建池**（不再从套系模板复制）。
+##
+## `socket_count` 由造盒方给——它是这个盒子自己的常量（`ItemConstants.box_socket_count()` 只是默认值）。
+static func build_pool(box_id: String, items: Array[ItemDef], socket_count: int) -> ItemPool:
+	if items.is_empty():
 		return null
 	var pool := ItemPool.new()
 	pool.box_id = box_id
-	pool.series_id = series_id
-	pool.regular_count = series.regular_count
-	pool.socket_count = series.socket_count
+	pool.socket_count = maxi(socket_count, 1)
+	pool.base_items = items.duplicate()
+	pool.regular_count = items.size()
 	pool.revision = 0
-	pool.base_items = series.regular_items.duplicate()
 	return pool
-
 
 ## 定长空位数组（长度 == socket_count，**空位为空项**）——"未配置的盒子"的 `modules`。
 static func empty_slots(socket_count: int) -> Array[Module]:
@@ -162,7 +161,7 @@ static func get_pool_state(state: GameState, box_id: String) -> PoolState:
 
 ## **逐盒重建**派生状态（§5.2 第 0–9 步；文档里的 `_rebuild`）。
 ##
-## **绝不复用"按 `series_id` 缓存的某一份池子"**——同套系的两个盒子可以有不同池子，
+## **绝不复用"按模板缓存的某一份池子"**——两个盒子可以有不同的池子，
 ## 复用缓存会把它们误合并成一份（§2 的"三条不得越界"③）。
 ##
 ## 输入不合法（例如某盒 `modules` 里有个已下线的 `module_id`）→ 返回 `null` 并 `push_error`
@@ -475,14 +474,10 @@ static func preview_socket(state: GameState, box_id: String, slot: int, module_i
 ## ★ **V1 已随 v0.13 作废**（`targets` 不得包含隐藏物品——池里已经没有隐藏物品了）。
 ##   按 §5.2.3 的纪律：**编号保留、不重排、不得把它改写成别的断言再占用 V1**；
 ##   因此"目标必须是池内物品"这条**不叫 V1**，它属于 V7 的"非空项良构"。
-static func validate_box(box: Box, series: SeriesDef) -> Array[String]:
+static func validate_box(box: Box) -> Array[String]:
 	if box == null or box.item_pool == null:
 		return [_msg(R_POOL_INVALID, "盒子或 item_pool 为 null")]
-	var out := _plan_errors(box.item_pool, box.modules)
-	if series != null:
-		for p in series.validate():
-			out.append(_msg(R_BAD_SERIES, p))
-	return out
+	return _plan_errors(box.item_pool, box.modules)
 
 
 ## 完整重建（写入路径与只读入口共用）。
@@ -495,7 +490,6 @@ static func _compute_with(pool: ItemPool, modules: Array[Module], revision: int)
 	var base_arr := pool.compute_weights_bp()
 	var st := PoolState.new()
 	st.box_id = pool.box_id
-	st.series_id = pool.series_id
 	st.revision = revision
 	st.socket_count = pool.socket_count
 	st.regular_count = pool.regular_count

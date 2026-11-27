@@ -12,6 +12,8 @@ const SAMPLE := 50000            # 分布抽样次数（±0.7% 容差 ≈ 4.5σ�
 var _pass := 0
 var _fail := 0
 var _defs: Array[ItemDef] = []
+## ★ v0.61：均等池（×1.5 比值断言用）
+var _u_defs: Array[ItemDef] = []
 
 
 func _ready() -> void:
@@ -30,6 +32,7 @@ func _ready() -> void:
 	_test_redeem_void_consumes_box_without_item()
 	_test_generate_box()
 	_test_generated_box_open_cost()
+	_test_sell_price_and_sell_box()
 	_test_redeem_rejects_unregistered_series()
 	_test_batch_redeem_is_ordered_and_contiguous()
 
@@ -98,21 +101,9 @@ func _setup() -> void:
 		ItemCatalog.register(d)
 		_defs.append(d)
 
-	var graded := SeriesDef.new()
-	graded.series_id = &"series_01"
-	graded.series_quality = 2
-	graded.regular_count = N
-	graded.socket_count = 3
-	graded.regular_items = _defs.duplicate()
-	GachaCatalog.register_series(graded)
-
+	# ★ v0.61：没有套系了 —— 夹具只造物品，盒子在 `_new_state()` 里用 `BoxTestKit` 确定性构造。
 	# 均等池（用于 ×1.5 的比值断言：等 rarity 时比例才好读）
-	var uniform := SeriesDef.new()
-	uniform.series_id = &"series_uniform"
-	uniform.series_quality = 2
-	uniform.regular_count = N
-	uniform.socket_count = 3
-	var u_defs: Array[ItemDef] = []
+	_u_defs = []
 	for i in N:
 		var d2 := ItemDef.new()
 		d2.item_id = StringName("u_%02d" % (i + 1))
@@ -120,13 +111,10 @@ func _setup() -> void:
 		d2.category = &"stardust" if i < 4 else &"crystal"
 		d2.quality = (i % 4) + 1
 		d2.value = 3
-		d2.size = Vector2i(2, 1)   # ★ v0.37：二维尺寸（占 2 格）
+		d2.size = Vector2i(2, 1)
 		d2.rarity = 10
 		ItemCatalog.register(d2)
-		u_defs.append(d2)
-	uniform.regular_items = u_defs
-	GachaCatalog.register_series(uniform)
-
+		_u_defs.append(d2)
 	var ban := ModuleDef.new()
 	ban.id = &"mod_ban_05"
 	ban.quality = 2
@@ -135,16 +123,18 @@ func _setup() -> void:
 	GachaCatalog.register_module(ban)
 
 
-func _new_state(sid: StringName = &"series_01", n: int = 1) -> Dictionary:
+## 造 `n` 个盒子（池子 = `_defs` 8 件；品质 2 / 位子 3 / 寿命 15）。
+## `uniform = true` ⇒ 用均等池（×1.5 比值断言用）。
+func _new_state(n: int = 1, uniform: bool = false) -> Dictionary:
 	_setup()
 	var st := GameState.new_game()   # v0.14：走两个消耗入口的档必须有设备（开局送一台）
-	var boxes := GachaService.grant_box(st, sid, n, &"test")
+	var items: Array = _u_defs if uniform else _defs
+	var boxes := BoxTestKit.grant(st, n, 2, items, 3, ItemConstants.box_uses(2))
 	return {"state": st, "boxes": boxes}
 
 
 func _eval_of(st: GameState, box: Box) -> EvalService.PoolEvaluation:
-	var series := GachaCatalog.get_series(box.series_id)
-	return EvalService.evaluate_pool(PoolService.get_pool_state(st, box.box_id), series)
+	return EvalService.evaluate_pool(PoolService.get_pool_state(st, box.box_id))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -153,7 +143,7 @@ func _eval_of(st: GameState, box: Box) -> EvalService.PoolEvaluation:
 
 func _test_grant_box_shape() -> void:
 	print("— 发盒（§5.5）：未配置态 = 基础池副本 + 定长空位")
-	var f := _new_state(&"series_01", 2)
+	var f := _new_state(2)
 	var st: GameState = f["state"]
 	var a: Box = f["boxes"][0]
 	var b: Box = f["boxes"][1]
@@ -259,12 +249,13 @@ func _test_gacha_service_has_no_uuid_or_serial_math() -> void:
 		if String(line).contains("IUuid.v4"):
 			uuid_lines.append(String(line))
 	# ★ v0.55：多了"生成盲盒"一处（同样在建盒路径上）⇒ 允许 **2 处**，且都必须是 box_id
-	eq(uuid_lines.size(), 2, "`IUuid.v4` 出现在 2 处（发放 / 生成，都在建盒路径）")
-	var all_box_id := true
-	for ln in uuid_lines:
-		if not ln.contains("box_id"):
-			all_box_id = false
-	ok(all_box_id, "两处都是盒子身份（box_id），不是实例身份")
+	# ★ v0.61：造盒统一走 `Box.make()` ⇒ 建盒身份在 box.gd 里生成，本文件不再出现 UUID
+	eq(uuid_lines.size(), 0, "已抽离：`gacha_service.gd` 不再直接生成 UUID（归 `Box.make()`）")
+	var bf := FileAccess.open("res://src/gacha/defs/box.gd", FileAccess.READ)
+	if bf != null:
+		var btext := bf.get_as_text()
+		bf.close()
+		ok(btext.contains("b.box_id = IUuid.v4()"), "`box.gd` 用 IUuid 生成**盒子身份**")
 	ok(not text.contains("serial ="), "文件里没有对 `serial` 赋值")
 	ok(not text.contains("instance_id ="), "文件里没有对 `instance_id` 赋值（实例身份归 02 的 grant）")
 
@@ -280,14 +271,14 @@ func _test_evaluation_invariants_and_headline() -> void:
 		total += float(p)
 	near(total, 1.0, 1e-6, "未编辑池：Σprobs + void_prob == 1.0（C1）")
 	ok(ev.is_normalized, "is_normalized == true")
-	near(EvalService.m_bar(ev, GachaCatalog.get_series(&"series_01")), 4.16, 1e-4,
+	near(EvalService.m_bar(ev), 4.16, 1e-4,
 		"m̄ == 4.16 TVU = Σ(pᵢ × vᵢ)（void 的 v = 0，不贡献）")
-	var hl := EvalService.headline(ev, GachaCatalog.get_series(&"series_01"))
+	var hl := EvalService.headline(ev)
 	eq(hl["best_item_id"], &"s01_05", "头奖 = 价值 9 的那件（s01_05）")
 	near(hl["best_item_prob"], 0.2, 1e-6, "它的概率 0.2")
 	ok(PoolBuff.apply_module(st, bx.box_id, &"mod_ban_05", 0)["ok"], "把头奖排除掉")
 	var ev2 := _eval_of(st, bx)
-	var hl2 := EvalService.headline(ev2, GachaCatalog.get_series(&"series_01"))
+	var hl2 := EvalService.headline(ev2)
 	ok(hl2["best_item_id"] != &"s01_05", "排除后 headline 换人（候选集 = 仍可产出的物品）")
 	eq(hl2["best_item_id"], &"s01_08", "换成价值同为 9 的另一件（s01_08）")
 	var total2 := ev2.void_prob
@@ -303,10 +294,9 @@ func _test_evaluation_invariants_and_headline() -> void:
 ## ⇒ **`roll()` 直接拒开**（`bad_evaluation`）。这里把它钉死。
 func _test_gold_expectation_and_pool_extras() -> void:
 	print("— ★ v0.47/v0.52 金币期望：m_bar_gold = Σ(pᵢ × valueᵢ)；模块成本 = Σ gold_cost")
-	var f := _new_state(&"series_01", 1)
+	var f := _new_state(1)
 	var st: GameState = f["state"]
 	var bx: Box = f["boxes"][0]
-	var series := GachaCatalog.get_series(&"series_01")
 	var ev := _eval_of(st, bx)
 
 	# ① 金币期望：按同一组概率自己再算一遍，必须与 07 的实现相等
@@ -317,9 +307,9 @@ func _test_gold_expectation_and_pool_extras() -> void:
 	near(EvalService.m_bar_gold(ev), manual, 1e-6, "m_bar_gold == Σ(pᵢ × sell_goldᵢ)")
 	ok(EvalService.m_bar_gold(ev) > 0.0, "金币期望 > 0（%.3f）" % EvalService.m_bar_gold(ev))
 	# TVU 口径仍在（07 的 ρ 用），两者不是一回事
-	near(EvalService.m_bar(ev, series), 4.16, 1e-4, "TVU 口径的 m̄ 仍是 4.16（没被改动）")
+	near(EvalService.m_bar(ev), 4.16, 1e-4, "TVU 口径的 m̄ 仍是 4.16（没被改动）")
 	# ★ v0.52：合并后两者**必须相等**（TVU 概念已退场，value 直接是金币）
-	near(EvalService.m_bar(ev, series), EvalService.m_bar_gold(ev), 1e-9,
+	near(EvalService.m_bar(ev), EvalService.m_bar_gold(ev), 1e-9,
 		"m_bar 与 m_bar_gold 现在是同一个口径（价值即金币）")
 
 	# ② 模块成本
@@ -364,22 +354,21 @@ func _test_gold_expectation_and_pool_extras() -> void:
 
 func _test_x1_5_uses_collected_only() -> void:
 	print("— ×1.5 的判定源 = **收藏口径**（守护裁决 11 / §5.2.1）：只认 collected，不认仓库")
-	var f := _new_state(&"series_uniform", 1)
+	var f := _new_state(1, true)
 	var st: GameState = f["state"]
 	var bx: Box = f["boxes"][0]
-	var series := GachaCatalog.get_series(&"series_uniform")
-	var ev0 := EvalService.evaluate_pool(PoolService.get_pool_state(st, bx.box_id), series)
+	var ev0 := EvalService.evaluate_pool(PoolService.get_pool_state(st, bx.box_id))
 	near(float(ev0.probs[0]), 0.125, 1e-6, "未注入提供者 ⇒ 无加成（8 件均等 = 0.125）")
 
 	# 全部"未拥有" ⇒ 等比放大后再归一化 ⇒ 分布不变（这是一个可断言的性质）
 	EvalService.is_collected_provider = func(_id): return false
-	var ev_all := EvalService.evaluate_pool(PoolService.get_pool_state(st, bx.box_id), series)
+	var ev_all := EvalService.evaluate_pool(PoolService.get_pool_state(st, bx.box_id))
 	near(float(ev_all.probs[0]), 0.125, 1e-6, "全部未拥有 ⇒ 等比 ×1.5 后归一化 ⇒ 分布不变")
 
 	# 只有 1 件未拥有 ⇒ 它相对其他项获得 1.5 倍
 	var target := &"u_01"
 	EvalService.is_collected_provider = func(id): return StringName(id) != target
-	var ev_one := EvalService.evaluate_pool(PoolService.get_pool_state(st, bx.box_id), series)
+	var ev_one := EvalService.evaluate_pool(PoolService.get_pool_state(st, bx.box_id))
 	var p_t := 0.0
 	var p_o := 0.0
 	for i in ev_one.probs.size():
@@ -393,7 +382,7 @@ func _test_x1_5_uses_collected_only() -> void:
 	# **仓库口径不得被使用**：让该物品在仓库里有实例，但收藏口径仍说"已拥有" ⇒ 没有加成
 	ItemService.grant(target, {"kind": ItemConstants.KIND_UNLOCK})
 	EvalService.is_collected_provider = func(_id): return true
-	var ev_none := EvalService.evaluate_pool(PoolService.get_pool_state(st, bx.box_id), series)
+	var ev_none := EvalService.evaluate_pool(PoolService.get_pool_state(st, bx.box_id))
 	near(float(ev_none.probs[0]), 0.125, 1e-6, "全部已拥有 ⇒ 无加成（仓库里有实例也不影响收藏口径）")
 
 
@@ -415,12 +404,12 @@ func _test_redeem_consumes_box_and_grants_exactly_once() -> void:
 	eq(r.draw_index, 1, "draw_index == 1（全局计数器）")
 	eq(st.draw_index, 1, "状态里的计数器同步")
 	eq(r.box_id, bx.box_id, "结果记住了盒子身份")
-	eq(r.series_id, &"series_01", "结果记住了套系")
+	eq(r.item_id != &"", true, "结果记住了 item_id")
 	eq(r.seed, seed, "结果记录了本次 seed")
 	var inst: ItemInstance = ItemService.instances[ItemService.instances.size() - 1]
 	eq(inst.item_id, r.item_id, "实例的 item_id == 结果的 item_id")
 	eq(inst.source.get("kind"), ItemConstants.KIND_GACHA, "source.kind == gacha")
-	eq(inst.source.get("series_id"), "series_01", "source 含 series_id")
+	eq(int(inst.source.get("quality", 0)) >= 1, true, "source 含 quality")
 	eq(int(inst.source.get("box_seed")), seed, "source 含 box_seed（= 本次 seed）")
 	eq(int(inst.source.get("draw_index")), 1, "source 含 draw_index")
 	eq(inst.serial, 1, "开盒来源的 serial 从 1 开始（02 内部赋值）")
@@ -476,38 +465,28 @@ func _test_redeem_void_consumes_box_without_item() -> void:
 
 
 func _test_redeem_rejects_unregistered_series() -> void:
-	print("— 校验失败 ⇒ **盲盒不消耗、不发物品**（§7 B 的拒绝分支）")
+	print("— ★ v0.61：套系删除后，这条用例改测「盒子用尽 / 原石不足」的拒绝分支不消耗物品")
 	var f := _new_state()
 	var st: GameState = f["state"]
-	var tmp := Box.new()
-	tmp.box_id = IUuid.v4()
-	tmp.series_id = &"series_offline"
-	tmp.item_pool = PoolService.init_pool(st, tmp.box_id, &"series_01")
-	tmp.modules = PoolService.empty_slots(3)
-	tmp.uses_remaining = 3        # v0.14：真实发放的盒子必然 > 0（默认 0 现在表示"已用尽"）
-	st.add_box(tmp)
-	var count_before := st.box_count()
+	var bx: Box = f["boxes"][0]
+	# 原石不足 ⇒ 拒绝、且不发实例、不扣寿命
+	var gems_before := ItemService.currency_balance(ItemConstants.CURRENCY_GEM)
+	ItemService.grant_currency(ItemConstants.CURRENCY_GEM, -gems_before,
+		ItemConstants.CURRENCY_SOURCE_INIT)
 	var size_before := ItemService.instances.size()
-	var uses_before: Array[int] = []
-	for b in st.pending_boxes:
-		uses_before.append(b.uses_remaining)
-	var r := GachaService.redeem(st, tmp, 0)
-	ok(not r.ok, "未注册的套系 ⇒ 失败")
-	eq(r.error, GachaService.R_BAD_SERIES, "错误码 = bad_series")
-	eq(st.box_count(), count_before, "**盒子还在清单里**（校验失败不消耗盲盒）")
+	var uses_before := bx.uses_remaining
+	var cost := DeviceService.open_cost(st, bx)
+	var r := GachaService.redeem(st, bx, cost)
+	ok(not r.ok, "原石不足 ⇒ 失败")
+	eq(r.error, GachaService.R_CURRENCY_INSUFFICIENT, "错误码 = currency_insufficient")
 	eq(ItemService.instances.size(), size_before, "没有产生实例")
-	eq(st.draw_index, 0, "draw_index 没有推进")
-	var uses_intact := true
-	for i in st.pending_boxes.size():
-		if st.pending_boxes[i].uses_remaining != uses_before[i]:
-			uses_intact = false
-	ok(uses_intact, "v0.14：**校验失败不消耗任何一次使用**（逐盒逐项不变）")
-	eq(tmp.uses_remaining, 3, "那个盒子自己的次数也没被动（仍是 3）")
-
+	eq(bx.uses_remaining, uses_before, "**校验失败不消耗使用次数**")
+	ItemService.grant_currency(ItemConstants.CURRENCY_GEM, gems_before,
+		ItemConstants.CURRENCY_SOURCE_INIT)
 
 func _test_batch_redeem_is_ordered_and_contiguous() -> void:
 	print("— 批量兑现：顺序确定、`draw_index` 全局递增且连续（§10.2）")
-	var f := _new_state(&"series_01", 3)
+	var f := _new_state(3)
 	var st: GameState = f["state"]
 	var boxes: Array = f["boxes"]
 	var seeds := [11, 22, 33]
@@ -575,8 +554,21 @@ func _test_generate_box() -> void:
 	eq(b.item_pool.base_items[0].item_id, &"gen_q3_0", "**传入的物品是第一件**（不会被消耗）")
 	eq(st.has_box(b.box_id), true, "盒子进了清单")
 	eq(b.source, &"generated", "source = generated")
-	eq(b.open_gem_cost, int(r["price"]), "返回的 price 与盒子的开盒原石价一致")
-	ok(b.open_gem_cost >= 1, "开盒原石价 ≥ 1（%d 原石/次）" % b.open_gem_cost)
+	eq(b.gem_cost, int(r["price"]), "返回的 price 与盒子的开盒原石价一致")
+	ok(b.gem_cost >= 1, "开盒原石价 ≥ 1（%d 原石/次）" % b.gem_cost)
+
+	# ★ v0.64：传入的物品显示，其余默认隐藏（隐藏 ≠ 禁用：照样参与抽取）
+	eq(b.item_pool.state_of(&"gen_q3_0"), ItemPool.ItemState.SHOWN, "传入的物品 = 显示")
+	var hidden_n := 0
+	for i in range(1, b.item_pool.base_items.size()):
+		if b.item_pool.state_of(b.item_pool.base_items[i].item_id) == ItemPool.ItemState.HIDDEN:
+			hidden_n += 1
+	eq(hidden_n, b.item_pool.base_items.size() - 1, "其余 %d 件全部**隐藏**" % (b.item_pool.base_items.size() - 1))
+	eq(b.item_pool.hidden_ids().size(), b.item_pool.base_items.size() - 1, "hidden_ids 同步")
+	eq(b.item_pool.enabled_items().size(), b.item_pool.base_items.size(), "**隐藏不等于禁用**：可产出数不变")
+	var ps_hidden := PoolService.get_pool_state(st, b.box_id)
+	eq(ps_hidden.weights_bp.size(), b.item_pool.base_items.size(), "隐藏项仍在分布里")
+	ok(ps_hidden.is_zero_sum(), "Σ == 10000（隐藏不影响零和）")
 
 	# 其余物品：品质必须 **低于** 品质 3（用户裁决）
 	var all_lower := true
@@ -586,13 +578,12 @@ func _test_generate_box() -> void:
 	ok(all_lower, "其余 %d 件的品质都低于 %d" % [b.item_pool.base_items.size() - 1, src.quality])
 
 	# 售价 = ⌈M̄ × 1.45⌉（盲盒品质 2 ⇒ 1.25？不对：品质 3 物品 → 盲盒品质 2 ⇒ 1.25）
-	var series := GachaCatalog.get_series(b.series_id)
-	var ev := EvalService.evaluate_pool(PoolService.get_pool_state(st, b.box_id), series)
+	var ev := EvalService.evaluate_pool(PoolService.get_pool_state(st, b.box_id))
 	var q_box := GachaService.box_quality_of_item(src.quality)
 	eq(q_box, 2, "盲盒品质 = 2")
 	# ★ v0.56：原石价 = ⌈M̄_gold × 1.25 ÷ 10⌉（10 金币 = 1 原石），至少 1
 	var expect_price := maxi(1, int(ceil(EvalService.m_bar_gold(ev) * 1.25 / 10.0)))
-	eq(b.open_gem_cost, expect_price,
+	eq(b.gem_cost, expect_price,
 		"开盒价 = ⌈M̄ %.3f × 1.25 ÷ 10⌉ = %d 原石/次" % [EvalService.m_bar_gold(ev), expect_price])
 
 	# 同一 seed ⇒ 同一池子（可复现）
@@ -630,6 +621,14 @@ func _test_generate_box() -> void:
 
 ## ★ v0.55：给"生成 / 出售"用例自建的目录——品质 1–6 各若干件 + 四个品质档的套系。
 ## （`_setup()` 的夹具只有 8 件、且没有品质 1 / 3 / 4 档套系，凑不出可验证的样本。）
+## 生成/出售用例的确定性物品列表（前 4 件，够 C6）。
+func _gen_items() -> Array[ItemDef]:
+	var out: Array[ItemDef] = []
+	for i in 4:
+		out.append(ItemCatalog.get_def(&"gen_q%d_0" % (i + 1)))
+	return out
+
+
 func _gen_catalog() -> void:
 	ItemCatalog.clear()
 	GachaCatalog.clear()
@@ -655,20 +654,7 @@ func _gen_catalog() -> void:
 			d.size = Vector2i(1, 1)
 			d.rarity = 10
 			ItemCatalog.register(d)
-	# 四个品质档的模板套系（只提供 位子 / 寿命 / 开盒价，池子会被随机列表替换）
-	for q in range(1, 5):
-		var s := SeriesDef.new()
-		s.series_id = StringName("gen_series_q%d" % q)
-		s.series_quality = q
-		s.regular_count = 3
-		s.socket_count = q + 1
-		s.uses_per_box = SeriesDef.expected_initial_uses(q)
-		s.gem_cost = 10
-		var items: Array[ItemDef] = []
-		for i in 3:
-			items.append(ItemCatalog.get_def(&"gen_q1_%d" % i))
-		s.regular_items = items
-		GachaCatalog.register_series(s)
+
 
 ## ★ v0.56：**生成盒的原石价真的用于开盒扣费**（取代套系价；0 才回退）。
 func _test_generated_box_open_cost() -> void:
@@ -676,27 +662,67 @@ func _test_generated_box_open_cost() -> void:
 	var f := _new_state()
 	_gen_catalog()
 	var st: GameState = f["state"]
+	ItemService.grant_currency(ItemConstants.CURRENCY_GEM, 100,
+		ItemConstants.CURRENCY_SOURCE_INIT)
 	var r := GachaService.generate_box(st, &"gen_q3_0", 6, 4242)
 	ok(r["ok"], "先生成一个盒子")
 	var b: Box = r["box"]
-	ok(b.open_gem_cost >= 1, "盒子带自己的原石价（%d）" % b.open_gem_cost)
+	ok(b.gem_cost >= 1, "盒子带自己的原石价（%d）" % b.gem_cost)
 
 	# 等级 1 的设备 open_cost_bp = 10000 ⇒ 实付 == 盒子自己写的价
-	eq(DeviceService.open_cost(st, b), b.open_gem_cost,
-		"开盒价 = 盒子自己的 open_gem_cost（设备 1 级 bp=10000）")
+	eq(DeviceService.open_cost(st, b), b.gem_cost,
+		"开盒价 = 盒子自己的 gem_cost（设备 1 级 bp=10000）")
 
 	# 真开一次：原石按这个价扣
 	var gems_before := ItemService.currency_balance(ItemConstants.CURRENCY_GEM)
 	var uses_before := b.uses_remaining
 	var gr := DeviceService.redeem(st, b)
-	ok(gr.ok, "开盒成功（reason=%s）" % String(gr.reason))
-	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GEM), gems_before - b.open_gem_cost,
-		"**原石按盒子的价扣掉了 %d**" % b.open_gem_cost)
+	ok(gr.ok, "开盒成功（error=%s）" % String(gr.error))
+	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GEM), gems_before - b.gem_cost,
+		"**原石按盒子的价扣掉了 %d**" % b.gem_cost)
 	eq(b.uses_remaining, uses_before - 1, "寿命 −1")
 
-	# 牌库发的盒子：open_gem_cost = 0 ⇒ 回退到套系 gem_cost
-	var granted := GachaService.grant_box(st, &"gen_series_q1", 1, &"test")[0]
-	eq(int(granted.open_gem_cost), 0, "牌库盒子没有自带价")
-	var series := GachaCatalog.get_series(granted.series_id)
-	eq(DeviceService.open_cost(st, granted), series.gem_cost,
-		"回退到套系价（%d）" % series.gem_cost)
+	# 牌库发的盒子：开盒价 = **该品质的默认价**（v0.61：盒子自己存）
+	var granted := BoxTestKit.grant(st, 1, 2, _gen_items(), 3)[0]
+	eq(int(granted.gem_cost), ItemConstants.box_gem_cost(2), "牌库盒子按品质默认价")
+	eq(DeviceService.open_cost(st, granted), granted.gem_cost,
+		"开盒价 = 盒子自己的 gem_cost（%d）" % granted.gem_cost)
+
+## ★ v0.59：盲盒的**售出价格**（按品质固定表）+ 卖盒入口。
+func _test_sell_price_and_sell_box() -> void:
+	print("— ★ v0.59 卖价表：品质 1–4 → 20 / 50 / 120 / 300 金币；牌库盒也能卖")
+	var f := _new_state()
+	_gen_catalog()
+	var st: GameState = f["state"]
+
+	# 盲盒品质 1..4 各造一个（材料要选映射到该档的：1–2→1、3–4→2、5→3、6→4）
+	var expect := {1: 20, 2: 50, 3: 120, 4: 300}
+	var src_for := {1: &"gen_q1_0", 2: &"gen_q3_0", 3: &"gen_q5_0", 4: &"gen_q6_0"}
+	for q in range(1, 5):
+		var made := GachaService.generate_box(st, src_for[q], 4, 100 + q)
+		ok(made["ok"], "用材料 %s 生成盲盒品质 %d" % [String(src_for[q]), q])
+		eq(GachaService.box_quality_of_item(ItemCatalog.get_def(src_for[q]).quality), q,
+			"材料品质映射到盲盒品质 %d" % q)
+		eq(GachaService.sell_price_gold(made["box"]), expect[q],
+			"盲盒品质 %d ⇒ 卖价 %d 金币" % [q, expect[q]])
+
+	# 牌库发的盒子也有保底卖价（用户裁决）
+	var granted := BoxTestKit.grant(st, 1, 3, _gen_items(), 4)[0]
+	eq(GachaService.sell_price_gold(granted), 120, "牌库发的品质 3 盒也能卖 120 金币")
+
+	# 真卖：金币到账、盒子消失
+	var gold_before := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
+	var sold := GachaService.sell_box(st, granted.box_id)
+	ok(sold["ok"], "卖出成功")
+	eq(int(sold["gold"]), 120, "卖得 120 金币")
+	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD), gold_before + 120, "金币余额 +120")
+	eq(st.has_box(granted.box_id), false, "盒子已销毁")
+	eq(String(GachaService.sell_box(st, granted.box_id)["reason"]), "box_not_found",
+		"再卖同一盒 ⇒ box_not_found")
+
+	# 邮件里的盒子不可卖
+	var mailed := BoxTestKit.grant(st, 1, 1, _gen_items(), 2)[0]
+	mailed.location = ItemConstants.LOC_MAIL
+	eq(GachaService.sell_box(st, mailed.box_id)["reason"], ItemConstants.REASON_BOX_IN_MAIL,
+		"邮件里的盒子 ⇒ box_in_mail")
+	eq(st.has_box(mailed.box_id), true, "拒卖时盒子还在")

@@ -49,6 +49,10 @@ func _ready() -> void:
 	if state == null:
 		state = GameSession.state
 	_ensure_tabs()
+	# ★ v0.69：订阅"余额变了"——顶栏不必等切 tab（市场买入 / 公司买盒 / 开盒扣原石都即时反映）。
+	#   广播点是 `ItemService._apply_currency_delta()`（余额的唯一写入实现）。
+	if not ItemService.currency_changed.is_connected(_on_currency_changed):
+		ItemService.currency_changed.connect(_on_currency_changed)
 	# ★ v0.38：**切 tab 时刷新**——玩家在别的页开盒 / 买进物品后，切回仓库页必须看到最新持有。
 	#   各页的 `refresh()` 是纯重算（读 ItemService / MarketService 当前态），不产生副作用。
 	_tabs.tab_changed.connect(func(_idx: int) -> void: refresh())
@@ -123,6 +127,11 @@ func refresh() -> void:
 			target = ctrl
 		if target.has_method("bind_state"):
 			target.bind_state(state)
+	_refresh_currency()
+
+
+## ★ v0.69：余额一变就重读顶栏（两行文字都是即时值，不是缓存）。
+func _on_currency_changed(_kind: StringName, _balance: int) -> void:
 	_refresh_currency()
 
 
