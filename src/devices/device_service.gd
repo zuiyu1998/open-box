@@ -31,6 +31,10 @@ const R_CURRENCY_INSUFFICIENT := &"currency_insufficient"
 const R_DEVICE_MAX_LEVEL := &"device_max_level"
 const R_UNKNOWN_DEVICE := &"unknown_device"
 const R_UNKNOWN_MODULE := &"unknown_module"
+## ★ v0.77：**仓库里没有这件模块**（模块已成实物：镶嵌要消耗一件）
+const R_NO_MODULE_ITEM := &"no_module_item"
+## ★ v0.77：目标位子已被占用（在**消耗实例之前**就拒绝，避免"扣了模块再失败"）
+const R_SLOT_OCCUPIED := &"slot_occupied"
 const R_BOX_NOT_FOUND := &"box_not_found"
 const R_NO_DEVICE_DEF := &"no_device_def"
 
@@ -203,7 +207,48 @@ static func socket(
 	var gate := _module_gate(state, module_id)
 	if gate["ok"] != true:
 		return gate
-	return PoolBuff.apply_module(state, box_id, module_id, slot)
+
+	# ★ v0.77（用户裁决）：**模块是仓库里的实物**——镶嵌要**消耗一件**。
+	#   顺序刻意是"先预检 → 再消耗 → 最后写入"，且写入失败时**退还**：
+	#   · 预检（位子空 / 模块不在盒内）放在消耗**之前**，避免"扣了模块却镶不上"；
+	#   · 消耗用 `OP_CONSUME` + `TAG_SOCKET`（02 的 caller tag 白名单里新增）；
+	#   · 退还的极端路径只在"预检通过但写入仍失败"时走（目前不可达，防御性）。
+	var box := state.find_box(box_id) if state != null else null
+	if box == null:
+		return {"ok": false, "reason": R_BOX_NOT_FOUND, "state": null, "errors": [] as Array[String]}
+	if slot < 0 or slot >= box.modules.size():
+		return {"ok": false, "reason": R_SLOT_OCCUPIED, "state": null, "errors": [] as Array[String]}
+	if box.modules[slot] != null:
+		return {"ok": false, "reason": R_SLOT_OCCUPIED, "state": null, "errors": [] as Array[String]}
+	var inst_id := _one_warehouse_module(module_id)
+	if inst_id == "":
+		return {"ok": false, "reason": R_NO_MODULE_ITEM, "state": null, "errors": [] as Array[String]}
+	var pay := ItemService.transact([{
+		"op": ItemConstants.OP_CONSUME,
+		"tag": ItemConstants.TAG_SOCKET,
+		"instance_ids": [inst_id],
+	}])
+	if not pay["ok"]:
+		return {
+			"ok": false, "reason": StringName(pay["reason"]), "state": null,
+			"errors": [] as Array[String],
+		}
+	var r := PoolBuff.apply_module(state, box_id, module_id, slot)
+	if r["ok"] != true:
+		# 退还：把刚消耗的那一件还回仓库（保持"失败不改动"的口径）
+		ItemService.grant(module_id, {"kind": ItemConstants.KIND_UNLOCK})
+		return r
+	return r
+
+
+## 仓库里该模块的**一件**实例 id（没有 ⇒ 空串）。
+static func _one_warehouse_module(module_id: StringName) -> String:
+	for inst in ItemService.instances:
+		if inst.item_id != module_id:
+			continue
+		if WarehouseService.is_warehouse(inst.instance_id):
+			return inst.instance_id
+	return ""
 
 
 ## ── 墓碑：`replace()` 已于 **v0.44 删除**（用户裁决）───────────────────────────────────

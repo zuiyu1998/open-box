@@ -29,6 +29,12 @@ const BOX_SLOTS := 8
 ## 每个上架盲盒的池子件数（含材料那一件）。
 const BOX_POOL_COUNT := 8
 
+## ★ v0.77：**每次刷新上架多少个模块**（模块是仓库实物 ⇒ 必须有获取途径）。
+const MODULE_SLOTS := 3
+
+## 模块买价 = `ModuleDef.gold_cost × 倍数`（玩家可以"先囤模块、以后再镶"）。
+const MODULE_PRICE_MULT := 2
+
 ## 每格库存件数（买走一件 −1，归零即该格售罄）。
 const STOCK_PER_SLOT := 1
 
@@ -44,6 +50,9 @@ var listings: Array[Dictionary] = []
 ## ★ v0.60：**盲盒上架库存**（脱离 `GameState` 的"待售盒子"——买下才进玩家仓库）。
 ## 刷新时**未卖出的旧盒直接丢掉**（它们是市场库存，不是玩家的东西）。
 var box_listings: Array[Box] = []
+
+## ★ v0.77：**模块上架库存**：`[{module_id, price, qty}]`（买下 ⇒ 发一件模块实例）。
+var module_listings: Array[Dictionary] = []
 
 ## 本次上架的 Unix 时间戳（秒）。`ensure_fresh()` 据此判断是否要刷新。
 var refreshed_at_unix: int = 0
@@ -88,6 +97,7 @@ func refresh(seed_override: int = -1, now_unix: int = -1) -> void:
 			"qty": STOCK_PER_SLOT,
 		})
 	_roll_box_listings()
+	_roll_module_listings()
 	refreshed_at_unix = now_unix if now_unix >= 0 else int(Time.get_unix_time_from_system())
 
 
@@ -320,6 +330,7 @@ func from_save_dict(d: Dictionary) -> void:
 func reset() -> void:
 	listings.clear()
 	box_listings.clear()          # ★ v0.60：上架盲盒也一并清掉（未卖出的直接丢）
+	module_listings.clear()        # ★ v0.77：模块上架同理
 	refreshed_at_unix = 0
 	_rng = null
 
@@ -347,3 +358,55 @@ func _decrement_stock(item_id: StringName, count: int) -> void:
 			var take := mini(int(listings[i]["qty"]), left)
 			listings[i]["qty"] = int(listings[i]["qty"]) - take
 			left -= take
+
+## ★ v0.77：生成本次上架的模块（每模块 1 件；随机不重复）。
+func _roll_module_listings() -> void:
+	module_listings.clear()
+	GachaCatalog.materialize_module_items()
+	var pool: Array[StringName] = GachaCatalog.all_module_ids()
+	if pool.is_empty():
+		return
+	_shuffle(pool)
+	for i in mini(MODULE_SLOTS, pool.size()):
+		var mid: StringName = pool[i]
+		var mdef := GachaCatalog.get_module(mid)
+		if mdef == null:
+			continue
+		module_listings.append({
+			"module_id": mid,
+			"price": maxi(1, mdef.gold_cost * MODULE_PRICE_MULT),
+			"qty": 1,
+		})
+
+
+## 模块上架清单（副本；UI 按它铺卡片）。
+func module_listings_snapshot() -> Array[Dictionary]:
+	ensure_fresh()
+	return module_listings.duplicate(true)
+
+
+## **买一件模块**（金币 → 发一件模块实例进仓库）。模块是实物，买不到就镶不了。
+func buy_module(module_id: StringName) -> Dictionary:
+	ensure_fresh()
+	var idx := -1
+	for i in module_listings.size():
+		if StringName(module_listings[i]["module_id"]) == module_id:
+			idx = i
+			break
+	if idx < 0:
+		return {"ok": false, "reason": &"not_listed", "paid": 0}
+	var price := int(module_listings[idx]["price"])
+	if price <= 0 or int(module_listings[idx]["qty"]) <= 0:
+		return {"ok": false, "reason": &"sold_out", "paid": 0}
+	var res := ItemService.transact([
+		{"op": ItemConstants.OP_CURRENCY, "kind": ItemConstants.CURRENCY_GOLD, "delta": -price},
+		{"op": ItemConstants.OP_GRANT, "item_id": module_id,
+			"source": {"kind": ItemConstants.KIND_MARKET}},
+	])
+	if not res["ok"]:
+		return {"ok": false, "reason": StringName(res["reason"]), "paid": 0}
+	module_listings[idx]["qty"] = int(module_listings[idx]["qty"]) - 1
+	if int(module_listings[idx]["qty"]) <= 0:
+		module_listings.remove_at(idx)
+	return {"ok": true, "reason": ItemConstants.REASON_OK, "paid": price,
+		"module_id": String(module_id)}

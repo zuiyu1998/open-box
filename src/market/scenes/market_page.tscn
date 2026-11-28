@@ -57,6 +57,23 @@ columns = 2
 theme_override_constants/h_separation = 12
 theme_override_constants/v_separation = 12
 
+[node name="ModSep" type="HSeparator" parent="."]
+
+[node name="ModTitle" type="Label" parent="."]
+layout_mode = 2
+text = "模块（每张卡片一个购买按钮）"
+
+[node name="ModScroll" type="ScrollContainer" parent="."]
+layout_mode = 2
+size_flags_vertical = 3
+size_flags_stretch_ratio = 0.8
+
+[node name="ModGrid" type="GridContainer" parent="ModScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+columns = 2
+theme_override_constants/h_separation = 12
+theme_override_constants/v_separation = 12
 [node name="Result" type="Label" parent="."]
 layout_mode = 2
 autowrap_mode = 3

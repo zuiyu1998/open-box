@@ -56,6 +56,8 @@ func _ready() -> void:
 	# ★ v0.38：**切 tab 时刷新**——玩家在别的页开盒 / 买进物品后，切回仓库页必须看到最新持有。
 	#   各页的 `refresh()` 是纯重算（读 ItemService / MarketService 当前态），不产生副作用。
 	_tabs.tab_changed.connect(func(_idx: int) -> void: refresh())
+	# ★ v0.75：切 tab 会让 TabContainer 重排页面 ⇒ 再补一次偏移（不然会盖住 tab 内容）
+	_tabs.tab_changed.connect(func(_idx: int) -> void: _queue_fix_page_offset())
 	# ★ v0.53：**布局结束后再打一次 tab 样式**。
 	#   实测（真实流程：菜单 →「新游戏」→ 本场景）：`_ready` 里打的覆盖**在首次布局后被清掉**，
 	#   而那时之后没有任何 `refresh()`（`tab_changed` 要等玩家点 tab），于是**一进游戏 tab 还是小的**，
@@ -213,14 +215,11 @@ func _load_page(path: String, node_name: String) -> Node:
 ## 之后 tab 条变高（62px）它**不回填** —— 结果页面顶部第一条被压在 tab 条底下
 ## （真实截图：仓库页"仓库占用 0%"那行被 tab 压住）。
 ## 这里在**样式就位之后**显式把每个页面放到 `GameTabs.HEIGHT` 之下，并在窗口尺寸变化后重做一次。
+## ★ v0.75：实现搬到 `GameTabs.apply_page_offset()`——它挂在 `NOTIFICATION_SORT_CHILDREN`
+## 之后自动重打，**切 tab 不会被 TabContainer 覆盖**。这里只做转发（保留本层入口）。
 func _fix_page_offset() -> void:
-	var h := GameTabs.HEIGHT
-	for i in _tabs.get_tab_count():
-		var pg := _tabs.get_child(i)
-		if pg is Control:
-			var c := pg as Control
-			c.position.y = h
-			c.size = Vector2(_tabs.size.x, maxf(_tabs.size.y - h, 0.0))
+	if _tabs != null:
+		_tabs.apply_page_offset()
 
 
 func _queue_fix_page_offset() -> void:

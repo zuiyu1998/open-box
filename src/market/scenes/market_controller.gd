@@ -16,6 +16,7 @@ var model: MarketModel = MarketModel.new()
 func _ready() -> void:
 	view.buy_item_requested.connect(_on_buy_item)
 	view.buy_box_requested.connect(_on_buy_box)
+	view.buy_module_requested.connect(_on_buy_module)
 	call_deferred("refresh")   # ★ 首次 render 推迟到 View 的 @onready 就绪之后
 
 
@@ -32,6 +33,12 @@ func refresh() -> void:
 ## 透传给外部 / 测试的只读快照。
 func snapshot() -> Dictionary:
 	return model.snapshot()
+
+
+## ★ v0.77：买模块（卡片直接带 module_id）
+func _on_buy_module(module_id: StringName) -> void:
+	model.buy_module(module_id)
+	refresh()
 
 
 ## ★ v0.60：买盲盒（卡片直接带 box_id）

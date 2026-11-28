@@ -45,6 +45,9 @@ func load_module_content() -> int:
 func _ready() -> void:
 	# ★ v0.61：**套系已删除**——不再载入套系内容，也没有"品质模板"这回事。
 	load_module_content()   # ★ v0.41：模块内容（许愿机「模块镶嵌」区要用）
+	# ★ v0.77：**模块也是仓库物品**——为每个 `ModuleDef` 镜像一个 `ItemDef`，
+	#   这样它可以被"获得 / 持有 / 消耗"（镶嵌时消耗一件）。
+	materialize_module_items()
 
 
 func register_module(def: ModuleDef) -> void:
@@ -81,3 +84,43 @@ func validate() -> Dictionary:
 		for p in m.validate():
 			errors.append("ModuleDef `%s`：%s" % [k, p])
 	return {"ok": errors.is_empty(), "errors": errors}
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ★ v0.77：**模块物品化**（模块既是"效果规格"，也是"仓库里的一件东西"）
+# ══════════════════════════════════════════════════════════════════════════════
+
+## 模块物品的分类 id（`ItemDef.category`）。UI 可据此把"模块"与普通物品分开列。
+const MODULE_CATEGORY := &"module"
+
+## 为每个已注册的 `ModuleDef` 镜像一个 `ItemDef`（**幂等**：已存在则跳过）。
+##
+## 为什么需要：v0.77 起"能镶"的前提是**仓库里真的有一件该模块**，镶嵌时**消耗**它。
+## 于是模块必须能被 `ItemService` 持有——而 `ItemService` 只认 `ItemDef`。
+##
+## · `item_id` = **模块 id 本身**（`mod_ban_home_q1` 之类）——一件模块对应一个 id，
+##   不需要额外的映射表；
+## · `value = 0`、`rarity = 0`：**不参与**市场的"按价值上架"与任何随机池（模块只能被"发/买"）；
+## · `size = 1×1`：与普通物品同一份容量账。
+func materialize_module_items() -> void:
+	if ItemCatalog == null:
+		return
+	if ItemCatalog.get_category(MODULE_CATEGORY) == null:
+		var c := ItemCategoryDef.new()
+		c.category_id = MODULE_CATEGORY
+		c.display_name = "模块"
+		ItemCatalog.register_category(c)
+	for mid in all_module_ids():
+		if ItemCatalog.get_def(mid) != null:
+			continue
+		var m := get_module(mid)
+		if m == null:
+			continue
+		var d := ItemDef.new()
+		d.item_id = mid
+		d.display_name = m.display_name if String(m.display_name) != "" else String(mid)
+		d.category = MODULE_CATEGORY
+		d.quality = m.quality
+		d.value = 0
+		d.size = Vector2i(1, 1)
+		d.rarity = 0
+		ItemCatalog.register(d)

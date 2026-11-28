@@ -143,6 +143,8 @@ func _new_state(gems: int = -1, gold: int = -1, lv: int = 1) -> Dictionary:
 		ItemConstants.INIT_GOLD if gold < 0 else gold,
 		ItemConstants.CURRENCY_SOURCE_INIT
 	)
+	# ★ v0.77：模块已成实物 ⇒ 镶嵌前必须持有
+	BoxTestKit.grant_modules(st)
 	var boxes := BoxTestKit.grant(st, 1, 2, _defs, 3, -1)
 	# 夹具口径：开盒基准价 = GEM_BASE（与 v0.61 前一致）
 	boxes[0].gem_cost = GEM_BASE
@@ -251,12 +253,13 @@ func _test_redeem_atomicity_and_insufficient() -> void:
 	var bx2: Box = f2["box"]
 	var uses2 := bx2.uses_remaining
 	var di2 := st2.draw_index
+	var insts2 := ItemService.instances.size()   # ★ v0.77：夹具已发模块，改为比较前后差值
 	var r2 := DeviceService.redeem(st2, bx2, 3)
 	eq(r2.error, DeviceService.R_CURRENCY_INSUFFICIENT, "余额差 1 ⇒ currency_insufficient")
 	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GEM), GEM_BASE - 1, "原石一分未扣")
 	eq(bx2.uses_remaining, uses2, "寿命未扣")
 	eq(st2.draw_index, di2, "`draw_index` 未推进")
-	eq(ItemService.instances.size(), 0, "没有实例产出")
+	eq(ItemService.instances.size(), insts2, "没有实例产出（数量不变）")
 
 
 func _test_batch_precheck() -> void:
@@ -290,6 +293,7 @@ func _test_upgrade() -> void:
 	var gems := ItemService.currency_balance(ItemConstants.CURRENCY_GEM)
 	var count := st.devices.size()
 	var id := st.devices[0].device_id
+	var insts_before_upgrade := ItemService.instances.size()   # ★ v0.77
 
 	var up := DeviceService.upgrade_device(st, &"dev_test")
 	ok(up["ok"], "升级成功")
@@ -301,7 +305,7 @@ func _test_upgrade() -> void:
 	eq(DeviceService.open_cost(st, bx), 18, "**立刻生效**：开盒成本降到 18")
 	eq(bx.item_pool.socket_count, 3, "**功率面不动**：镶嵌位数仍是 3")
 	eq(bx.uses_remaining, ItemConstants.box_uses(2), "寿命预算口径不动")
-	eq(ItemService.instances.size(), 0, "升级不产生任何实例")
+	eq(ItemService.instances.size(), insts_before_upgrade, "升级不产生任何实例（数量不变）")
 
 	# 原石不足
 	var f2 := _new_state(UPGRADE_L2 - 1, -1, 1)
@@ -368,7 +372,8 @@ func _test_socket_gold_and_occupied_slot() -> void:
 	ok(DeviceService.socket(st, bx.box_id, &"mod_ban_sd5", 0)["ok"], "镶嵌成功")
 	eq(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD), gold - MOD_GOLD,
 		"**金币恰好减少模块的 `gold_cost`（20）**")
-	eq(ItemService.instances.size(), insts, "**不消耗任何物品**")
+	# ★ v0.77：模块是实物 ⇒ 镶嵌**消耗一件**
+	eq(ItemService.instances.size(), insts - 1, "**消耗一件模块实物**（实例数 −1）")
 
 	# ★ v0.44：替换入口已删除 ⇒ 往同一个位子再镶一律拒绝，且分文不动
 	var before := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
@@ -396,13 +401,14 @@ func _test_socket_gold_and_occupied_slot() -> void:
 	var bx3: Box = full["box"]
 	ItemService.warehouse_capacity = 5
 	ok(DeviceService.socket(st3, bx3.box_id, &"mod_ban_sd5", 0)["ok"], "先镶嵌")
+	# ★ v0.77：模块是实物 ⇒ **仓库满时新模块进邮件**，于是"没实物可镶"，这是正确行为。
 	for _i in 2:
 		ItemService.grant(&"s01_01", {"kind": ItemConstants.KIND_UNLOCK})
 	eq(ItemService.warehouse_usage()["used"], 5, "仓库占满（2 件 × size 2 + 盲盒 1 单位）")
 	var n3 := ItemService.instances.size()
-	# 空位仍可镶 ⇒ 证明"仓库满"不构成门槛
-	ok(DeviceService.socket(st3, bx3.box_id, &"mod_ban_sd5", 1)["ok"], "**仓库满也能镶到另一个空位**")
-	eq(ItemService.instances.size(), n3, "不产生实例")
+	eq(DeviceService.socket(st3, bx3.box_id, &"mod_ban_sd5", 1)["reason"],
+		DeviceService.R_NO_MODULE_ITEM, "**仓库满 ⇒ 没有模块实物 ⇒ 拒绝镶嵌**（不是「仓库满不能镶」）")
+	eq(ItemService.instances.size(), n3, "拒绝时不消耗任何实例")
 
 
 func _test_starting_state_has_no_deadlock() -> void:
@@ -412,6 +418,8 @@ func _test_starting_state_has_no_deadlock() -> void:
 	var st := GameState.new_game()
 	ok(st.has_device(), "开局有一台装置")
 	ok(DeviceService.has_device(st), "DeviceService.has_device() = true")
+	# ★ v0.77：模块已成实物 ⇒ 镶嵌前必须持有
+	BoxTestKit.grant_modules(st)
 	var boxes := BoxTestKit.grant(st, 1, 2, _defs, 3, -1)
 	# 夹具口径：开盒基准价 = GEM_BASE（与 v0.61 前一致）
 	boxes[0].gem_cost = GEM_BASE
@@ -436,5 +444,9 @@ func _test_starting_state_has_no_deadlock() -> void:
 		"**开局金币 ≥ 装第一个模块所需**（%d ≥ %d）"
 		% [ItemService.currency_balance(ItemConstants.CURRENCY_GOLD), MOD_GOLD]
 	)
-	ok(DeviceService.socket(st, bx.box_id, &"mod_start_probe", 0)["ok"], "开局就能装第一个模块")
+	# ★ v0.77：模块是实物 ⇒ 开局那次"能装"的前提是**手里确实有一件**
+	BoxTestKit.grant_modules(st, [&"mod_start_probe"])
+	ok(DeviceService.socket(st, bx.box_id, &"mod_start_probe", 0)["ok"], "开局就能装第一个模块（有实物时）")
+	eq(DeviceService.socket(st, bx.box_id, &"mod_start_probe", 1)["reason"],
+		DeviceService.R_NO_MODULE_ITEM, "**没有第二件模块** ⇒ 第二个位子镶不上")
 	ok(DeviceService.redeem(st, bx, 11).ok, "开局就能开盒（经设备入口）")

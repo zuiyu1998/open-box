@@ -45,6 +45,8 @@ const TAG_FUEL := &"fuel"
 ## **保留为保留值**（不删域：删了会让旧档 / 旧测试无从解释），但**全库不得再有产出它的路径**。
 const TAG_ENGINE := &"engine"
 const TAG_CONVERT := &"convert"
+## ★ v0.77：**镶嵌消耗模块实例**的专属 caller tag（02 的 `OP_CONSUME` 只认 `CALLER_TAGS` 里的来源）。
+const TAG_SOCKET := &"socket"
 ## ★ v0.20（用户裁决）：**售卖**——把物品卖给系统换**金币**（`ItemService.sell()` 专用）。
 ## 它是**与"交付任务"并列的独立出口**（核心 §3 的出口表 / `02-item.md` §5.7）。
 ## **只能由 `sell()` 入口写入**（与 `discard` 同一纪律：别的入口不得冒用这个标签）。
@@ -53,7 +55,7 @@ const TAG_DISCARD := &"discard"  # 保留值：只由 discard() 入口写入
 const TAG_UNKNOWN := &"unknown"  # 仅为签名兼容保留；真实调用不传即失败
 
 # 允许调用方显式传入的标签（discard / sell 不在内——它们各只能走自己的入口）
-const CALLER_TAGS: Array[StringName] = [TAG_FUEL, TAG_ENGINE, TAG_CONVERT]
+const CALLER_TAGS: Array[StringName] = [TAG_FUEL, TAG_ENGINE, TAG_CONVERT, TAG_SOCKET]
 
 # ── reason 取值域（02-item.md §5.10 / §5.11）────────────────────────────────────
 const REASON_OK := &""

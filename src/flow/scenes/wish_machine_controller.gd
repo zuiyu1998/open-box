@@ -23,10 +23,15 @@ func _ready() -> void:
 		model.bind(GameSession.state)
 	view.upgrade_requested.connect(_on_upgrade)
 	view.open_requested.connect(_on_open)
-	view.socket_requested.connect(_on_socket)
+	# ★ v0.78：点空位 ⇒ 弹模块浮层；在浮层里点模块 ⇒ 直接镶进那个位子
+	view.slot_clicked.connect(_on_slot_clicked)
+	view.module_picked.connect(_on_module_picked)
 	view.pool_sort_requested.connect(_on_pool_sort)
 	view.pool_data_requested.connect(_on_pool_data)
 	view.operator_toggle_requested.connect(_on_operator_toggle)
+	# ★ v0.79：点盲盒图标 ⇒ 弹浮层；浮层里选一项 ⇒ 切换当前盒
+	view.box_button_clicked.connect(_on_box_button_clicked)
+	view.box_chosen.connect(_on_box_chosen)
 	view.box_changed.connect(refresh)
 	# ★ v0.52c：**池子一变就重算**——浮层开着的时候也必须跟着变（不是"打开即最新"，而是"始终保持最新"）。
 	#   订阅 `PoolService.bus.pool_changed`（唯一写入方在每次写入后发出），
@@ -54,16 +59,12 @@ func bind_state(s: GameState) -> void:
 
 
 func refresh() -> void:
-	view.render(model.snapshot(
-		view.selected_index, view.slot_index, view.module_index
-	))
+	view.render(model.snapshot(view.selected_index))
 
 
 ## 透传给外部 / 测试的只读快照（View 不提供，Model 才有）。
 func snapshot() -> Dictionary:
-	return model.snapshot(
-		view.selected_index, view.slot_index, view.module_index
-	)
+	return model.snapshot(view.selected_index)
 
 
 func _on_upgrade() -> void:
@@ -74,10 +75,43 @@ func _on_upgrade() -> void:
 func _on_open(times: int) -> void:
 	model.open(times, view.selected_index)
 	refresh()
+	# ★ v0.70：**结果改用浮层**（版面里不再有"生成物品"段）
+	if not model.open_items.is_empty() or String(model.open_note) != "":
+		view.show_result_overlay(model.open_items, model.open_note, model.open_foot)
 
 
-func _on_socket() -> void:
-	model.socket_module(view.selected_index, view.slot_index, view.module_index)
+var _pending_slot: int = -1          # ★ v0.78：刚才点的那个空位
+
+
+## 点空位：把"可镶的模块（仓库里真有货）"列进浮层。
+## ★ v0.79：点图标 ⇒ 列仓库里的盲盒
+func _on_box_button_clicked() -> void:
+	var items: Array = model.snapshot(view.selected_index).get("box_items", [])
+	view.show_box_overlay(items, "共 %d 个盲盒（点击切换）" % items.size())
+
+
+func _on_box_chosen(index: int) -> void:
+	view.set_selected_box(index)
+	view.hide_box_overlay()
+	refresh()
+
+
+func _on_slot_clicked(slot: int) -> void:
+	_pending_slot = slot
+	var opts: Array = model.socketable_modules(view.selected_index, model.boxes())
+	if opts.is_empty():
+		view.show_module_overlay([], "位 %d：仓库里没有可用模块" % (slot + 1))
+		return
+	view.show_module_overlay(opts, "位 %d：选择要镶入的模块（会消耗一件实物）" % (slot + 1))
+
+
+## 浮层里选了模块 ⇒ 镶进刚才那个位子。
+func _on_module_picked(module_id: StringName) -> void:
+	if _pending_slot < 0:
+		return
+	model.socket_module_into(view.selected_index, _pending_slot, module_id)
+	_pending_slot = -1
+	view.hide_module_overlay()
 	refresh()
 
 

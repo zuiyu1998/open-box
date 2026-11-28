@@ -37,3 +37,17 @@ static func grant(
 		GachaService.grant_box(state, b)
 		out.append(b)
 	return out
+
+## ★ v0.77：**给仓库发模块实物**（镶嵌要消耗一件）。
+##
+## `ids` 为空 ⇒ 把当前注册表里的**每个模块各发 1 件**（多数夹具的意图）。
+## 会先确保"模块已物品化"（`GachaCatalog.materialize_module_items()`），
+## 因为夹具常常在 `_ready` 之后才 `register_module()`。
+static func grant_modules(state: GameState, ids: Array = []) -> void:
+	if state == null:
+		return
+	GachaCatalog.materialize_module_items()
+	var list: Array = ids if not ids.is_empty() else GachaCatalog.all_module_ids()
+	for raw in list:
+		var mid := StringName(raw)
+		ItemService.grant(mid, {"kind": ItemConstants.KIND_UNLOCK})

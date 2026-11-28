@@ -1,9 +1,14 @@
-[gd_scene load_steps=4 format=3 uid="uid://cflowwish01"]
+[gd_scene load_steps=5 format=3 uid="uid://cflowwish01"]
 
-[ext_resource type="Script" path="res://src/flow/scenes/wish_machine_view.gd" id="1_view"]
-[ext_resource type="Script" path="res://src/flow/scenes/wish_machine_controller.gd" id="2_ctrl"]
+[ext_resource type="Script" uid="uid://xknl5ntfg23a" path="res://src/flow/scenes/wish_machine_view.gd" id="1_view"]
+[ext_resource type="Script" uid="uid://cjhbk34332n2r" path="res://src/flow/scenes/wish_machine_controller.gd" id="2_ctrl"]
+[ext_resource type="Script" path="res://src/flow/ui/box_icon.gd" id="3_boxicon"]
 
 [sub_resource type="StyleBoxFlat" id="ov_panel"]
+content_margin_left = 22.0
+content_margin_top = 18.0
+content_margin_right = 22.0
+content_margin_bottom = 18.0
 bg_color = Color(0.11, 0.12, 0.14, 1)
 border_width_left = 1
 border_width_top = 1
@@ -14,10 +19,6 @@ corner_radius_top_left = 4
 corner_radius_top_right = 4
 corner_radius_bottom_right = 4
 corner_radius_bottom_left = 4
-content_margin_left = 22.0
-content_margin_top = 18.0
-content_margin_right = 22.0
-content_margin_bottom = 18.0
 
 [node name="WishMachine" type="VBoxContainer"]
 anchors_preset = 15
@@ -41,19 +42,15 @@ text = "许愿机"
 layout_mode = 2
 size_flags_horizontal = 3
 autowrap_mode = 3
-text = ""
 
 [node name="LevelLine" type="Label" parent="Header"]
 layout_mode = 2
-text = ""
 
 [node name="EffectLine" type="Label" parent="Header"]
 layout_mode = 2
-text = ""
 
 [node name="GemLine" type="Label" parent="Header"]
 layout_mode = 2
-text = ""
 
 [node name="UpgradeButton" type="Button" parent="Header"]
 layout_mode = 2
@@ -70,68 +67,31 @@ theme_override_constants/separation = 16
 [node name="Left" type="VBoxContainer" parent="Columns"]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_constants/separation = 10
-
-[node name="BoxSection" type="VBoxContainer" parent="Columns/Left"]
-layout_mode = 2
-theme_override_constants/separation = 6
-
-[node name="BoxTitle" type="Label" parent="Columns/Left/BoxSection"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 18
-text = "① 盲盒选择"
-
-[node name="BoxPicker" type="OptionButton" parent="Columns/Left/BoxSection"]
-layout_mode = 2
-
-[node name="ModuleSection" type="VBoxContainer" parent="Columns/Left"]
-layout_mode = 2
-theme_override_constants/separation = 6
-
-[node name="ModuleTitle" type="Label" parent="Columns/Left/ModuleSection"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 18
-text = "② 模块镶嵌"
-
-[node name="SlotDetail" type="Label" parent="Columns/Left/ModuleSection"]
-layout_mode = 2
-autowrap_mode = 3
-text = "先选一个盲盒"
-
-[node name="SlotPicker" type="OptionButton" parent="Columns/Left/ModuleSection"]
-layout_mode = 2
-
-[node name="ModulePicker" type="OptionButton" parent="Columns/Left/ModuleSection"]
-layout_mode = 2
-
-[node name="ModuleButtons" type="HBoxContainer" parent="Columns/Left/ModuleSection"]
-layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="SocketButton" type="Button" parent="Columns/Left/ModuleSection/ModuleButtons"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "镶嵌"
-
-[node name="PoolDataButton" type="Button" parent="Columns/Left/ModuleSection/ModuleButtons"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "池子数据"
-
-[node name="ResultSection" type="VBoxContainer" parent="Columns/Left"]
-layout_mode = 2
-theme_override_constants/separation = 6
-[node name="ResultTitle" type="Label" parent="Columns/Left/ResultSection"]
+[node name="OperatorTitle" type="Label" parent="Columns/Left"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
-text = "③ 生成物品"
+text = "① 干员"
 
-[node name="ResultLine" type="Label" parent="Columns/Left/ResultSection"]
+[node name="OperatorLevel" type="Label" parent="Columns/Left"]
 layout_mode = 2
-autowrap_mode = 3
-text = ""
+text = "干员 Lv.1 / Lv.5"
 
-[node name="Spacer" type="Control" parent="Columns/Left"]
+[node name="OperatorRoute" type="Label" parent="Columns/Left"]
+layout_mode = 2
+text = "路线：—"
+
+[node name="OperatorBans" type="Label" parent="Columns/Left"]
+layout_mode = 2
+text = "排除：无"
+autowrap_mode = 3
+
+[node name="OperatorToggle" type="Button" parent="Columns/Left"]
+layout_mode = 2
+text = "出战中"
+
+[node name="LeftSpacer" type="Control" parent="Columns/Left"]
 layout_mode = 2
 size_flags_vertical = 3
 
@@ -140,77 +100,283 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 8
 
-[node name="OperatorTitle" type="Label" parent="Columns/Middle"]
+[node name="BoxSection" type="VBoxContainer" parent="Columns/Middle"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="BoxTitle" type="Label" parent="Columns/Middle/BoxSection"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
-text = "干员"
+text = "② 盲盒"
 
-[node name="OperatorLevel" type="Label" parent="Columns/Middle"]
+[node name="BoxButton" type="Button" parent="Columns/Middle/BoxSection"]
+custom_minimum_size = Vector2(0, 56)
 layout_mode = 2
-text = "干员 Lv.1 / Lv.5"
+size_flags_horizontal = 3
+clip_text = true
+alignment = 0
+text = "          还没有盲盒"
 
-[node name="OperatorRoute" type="Label" parent="Columns/Middle"]
+[node name="BoxIcon" type="Control" parent="Columns/Middle/BoxSection/BoxButton"]
+layout_mode = 0
+script = ExtResource("3_boxicon")
+offset_left = 8.0
+offset_top = 8.0
+offset_right = 48.0
+offset_bottom = 48.0
+mouse_filter = 2
+
+[node name="ModuleSection" type="VBoxContainer" parent="Columns/Middle"]
 layout_mode = 2
-text = "路线：—"
+theme_override_constants/separation = 6
 
-[node name="OperatorBans" type="Label" parent="Columns/Middle"]
+[node name="ModuleTitle" type="Label" parent="Columns/Middle/ModuleSection"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "③ 模块镶嵌"
+
+[node name="SlotDetail" type="Label" parent="Columns/Middle/ModuleSection"]
+layout_mode = 2
+text = "先选一个盲盒"
+autowrap_mode = 3
+
+[node name="SlotRow" type="HBoxContainer" parent="Columns/Middle/ModuleSection"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ModuleButtons" type="HBoxContainer" parent="Columns/Middle/ModuleSection"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="PoolDataButton" type="Button" parent="Columns/Middle/ModuleSection/ModuleButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "池子数据"
+
+[node name="OpenButtons" type="HBoxContainer" parent="Columns/Middle"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="OpenOne" type="Button" parent="Columns/Middle/OpenButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "开启一次"
+
+[node name="OpenTen" type="Button" parent="Columns/Middle/OpenButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "开启 10 次"
+
+[node name="OpenAll" type="Button" parent="Columns/Middle/OpenButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "开启全部"
+
+[node name="StatusLine" type="Label" parent="Columns/Middle"]
 layout_mode = 2
 autowrap_mode = 3
-text = "排除：无"
 
-[node name="OperatorToggle" type="Button" parent="Columns/Middle"]
-layout_mode = 2
-text = "出战中"
-
-[node name="Spacer" type="Control" parent="Columns/Middle"]
+[node name="MiddleSpacer" type="Control" parent="Columns/Middle"]
 layout_mode = 2
 size_flags_vertical = 3
 
 [node name="Right" type="VBoxContainer" parent="Columns"]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_constants/separation = 10
+theme_override_constants/separation = 4
 
-[node name="InfoSection" type="VBoxContainer" parent="Columns/Right"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="InfoTitle" type="Label" parent="Columns/Right/InfoSection"]
+[node name="InfoTitle" type="Label" parent="Columns/Right"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
-text = "盲盒信息"
+text = "② 盲盒信息"
 
-[node name="BoxUses" type="Label" parent="Columns/Right/InfoSection"]
+[node name="BoxUses" type="Label" parent="Columns/Right"]
 layout_mode = 2
 text = "剩余开盒次数 —"
 
-[node name="BoxExpectation" type="Label" parent="Columns/Right/InfoSection"]
+[node name="BoxExpectation" type="Label" parent="Columns/Right"]
 layout_mode = 2
-text = "数学期望 M̄ —"
-
-[node name="OpenButtons" type="VBoxContainer" parent="Columns/Right"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="OpenOne" type="Button" parent="Columns/Right/OpenButtons"]
-layout_mode = 2
-text = "开启一次"
-
-[node name="OpenTen" type="Button" parent="Columns/Right/OpenButtons"]
-layout_mode = 2
-text = "开启 10 次"
-
-[node name="OpenAll" type="Button" parent="Columns/Right/OpenButtons"]
-layout_mode = 2
-text = "开启全部"
-
-[node name="Spacer" type="Control" parent="Columns/Right"]
-layout_mode = 2
-size_flags_vertical = 3
+text = "期望 —"
+autowrap_mode = 3
 
 [node name="Controller" type="Node" parent="."]
 script = ExtResource("2_ctrl")
 
+[node name="ResultOverlayLayer" type="CanvasLayer" parent="."]
+layer = 11
+
+[node name="ResultOverlay" type="Control" parent="ResultOverlayLayer"]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Backdrop" type="ColorRect" parent="ResultOverlayLayer/ResultOverlay"]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0, 0, 0, 0.55)
+
+[node name="Frame" type="PanelContainer" parent="ResultOverlayLayer/ResultOverlay"]
+layout_mode = 0
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -360.0
+offset_top = -260.0
+offset_right = 360.0
+offset_bottom = 260.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Body" type="VBoxContainer" parent="ResultOverlayLayer/ResultOverlay/Frame"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="ResultOverlayLayer/ResultOverlay/Frame/Body"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "开盒结果"
+
+[node name="Note" type="Label" parent="ResultOverlayLayer/ResultOverlay/Frame/Body"]
+layout_mode = 2
+autowrap_mode = 3
+
+[node name="Scroll" type="ScrollContainer" parent="ResultOverlayLayer/ResultOverlay/Frame/Body"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Rows" type="VBoxContainer" parent="ResultOverlayLayer/ResultOverlay/Frame/Body/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 6
+
+[node name="Foot" type="Label" parent="ResultOverlayLayer/ResultOverlay/Frame/Body"]
+layout_mode = 2
+autowrap_mode = 3
+
+[node name="CloseButton" type="Button" parent="ResultOverlayLayer/ResultOverlay/Frame/Body"]
+layout_mode = 2
+text = "关闭"
+
+[node name="BoxOverlayLayer" type="CanvasLayer" parent="."]
+layer = 13
+
+[node name="BoxOverlay" type="Control" parent="BoxOverlayLayer"]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Backdrop" type="ColorRect" parent="BoxOverlayLayer/BoxOverlay"]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0, 0, 0, 0.55)
+
+[node name="Frame" type="PanelContainer" parent="BoxOverlayLayer/BoxOverlay"]
+layout_mode = 0
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -320.0
+offset_top = -220.0
+offset_right = 320.0
+offset_bottom = 220.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Body" type="VBoxContainer" parent="BoxOverlayLayer/BoxOverlay/Frame"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="BoxOverlayLayer/BoxOverlay/Frame/Body"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "仓库里的盲盒"
+
+[node name="Note" type="Label" parent="BoxOverlayLayer/BoxOverlay/Frame/Body"]
+layout_mode = 2
+autowrap_mode = 3
+text = ""
+
+[node name="Scroll" type="ScrollContainer" parent="BoxOverlayLayer/BoxOverlay/Frame/Body"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Rows" type="VBoxContainer" parent="BoxOverlayLayer/BoxOverlay/Frame/Body/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 6
+
+[node name="CloseButton" type="Button" parent="BoxOverlayLayer/BoxOverlay/Frame/Body"]
+layout_mode = 2
+text = "取消"
+[node name="ModuleOverlayLayer" type="CanvasLayer" parent="."]
+layer = 12
+
+[node name="ModuleOverlay" type="Control" parent="ModuleOverlayLayer"]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Backdrop" type="ColorRect" parent="ModuleOverlayLayer/ModuleOverlay"]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0, 0, 0, 0.55)
+
+[node name="Frame" type="PanelContainer" parent="ModuleOverlayLayer/ModuleOverlay"]
+layout_mode = 0
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -320.0
+offset_top = -220.0
+offset_right = 320.0
+offset_bottom = 220.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Body" type="VBoxContainer" parent="ModuleOverlayLayer/ModuleOverlay/Frame"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="ModuleOverlayLayer/ModuleOverlay/Frame/Body"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "选择模块"
+
+[node name="Note" type="Label" parent="ModuleOverlayLayer/ModuleOverlay/Frame/Body"]
+layout_mode = 2
+autowrap_mode = 3
+text = ""
+
+[node name="Scroll" type="ScrollContainer" parent="ModuleOverlayLayer/ModuleOverlay/Frame/Body"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Rows" type="VBoxContainer" parent="ModuleOverlayLayer/ModuleOverlay/Frame/Body/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 6
+
+[node name="CloseButton" type="Button" parent="ModuleOverlayLayer/ModuleOverlay/Frame/Body"]
+layout_mode = 2
+text = "取消"
 [node name="PoolOverlayLayer" type="CanvasLayer" parent="."]
 layer = 10
 
@@ -233,7 +399,6 @@ grow_vertical = 2
 color = Color(0, 0, 0, 0.62)
 
 [node name="Frame" type="PanelContainer" parent="PoolOverlayLayer/PoolOverlay"]
-theme_override_styles/panel = SubResource("ov_panel")
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -244,6 +409,7 @@ offset_right = -160.0
 offset_bottom = -70.0
 grow_horizontal = 2
 grow_vertical = 2
+theme_override_styles/panel = SubResource("ov_panel")
 
 [node name="Body" type="VBoxContainer" parent="PoolOverlayLayer/PoolOverlay/Frame"]
 layout_mode = 2
@@ -257,7 +423,6 @@ text = "池子数据"
 [node name="Note" type="Label" parent="PoolOverlayLayer/PoolOverlay/Frame/Body"]
 layout_mode = 2
 autowrap_mode = 3
-text = ""
 
 [node name="SortRow" type="HBoxContainer" parent="PoolOverlayLayer/PoolOverlay/Frame/Body"]
 layout_mode = 2
@@ -268,8 +433,8 @@ layout_mode = 2
 text = "排序"
 
 [node name="SortPicker" type="OptionButton" parent="PoolOverlayLayer/PoolOverlay/Frame/Body/SortRow"]
-layout_mode = 2
 custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
 
 [node name="SortSpacer" type="Control" parent="PoolOverlayLayer/PoolOverlay/Frame/Body/SortRow"]
 layout_mode = 2
@@ -281,34 +446,32 @@ layout_mode = 2
 theme_override_constants/separation = 12
 
 [node name="H1" type="Label" parent="PoolOverlayLayer/PoolOverlay/Frame/Body/Head"]
-layout_mode = 2
 custom_minimum_size = Vector2(260, 0)
+layout_mode = 2
 text = "物品"
 
 [node name="H2" type="Label" parent="PoolOverlayLayer/PoolOverlay/Frame/Body/Head"]
-layout_mode = 2
 custom_minimum_size = Vector2(160, 0)
+layout_mode = 2
 text = "状态"
 
 [node name="H3" type="Label" parent="PoolOverlayLayer/PoolOverlay/Frame/Body/Head"]
-layout_mode = 2
 custom_minimum_size = Vector2(90, 0)
-horizontal_alignment = 2
+layout_mode = 2
 text = "权重(bp)"
+horizontal_alignment = 2
 
 [node name="H4" type="Label" parent="PoolOverlayLayer/PoolOverlay/Frame/Body/Head"]
-layout_mode = 2
 custom_minimum_size = Vector2(90, 0)
-horizontal_alignment = 2
+layout_mode = 2
 text = "概率"
-
-
+horizontal_alignment = 2
 
 [node name="H6" type="Label" parent="PoolOverlayLayer/PoolOverlay/Frame/Body/Head"]
-layout_mode = 2
 custom_minimum_size = Vector2(90, 0)
-horizontal_alignment = 2
+layout_mode = 2
 text = "价值(金币)"
+horizontal_alignment = 2
 
 [node name="HSpacer" type="Control" parent="PoolOverlayLayer/PoolOverlay/Frame/Body/Head"]
 layout_mode = 2
@@ -326,7 +489,6 @@ theme_override_constants/separation = 4
 
 [node name="Totals" type="Label" parent="PoolOverlayLayer/PoolOverlay/Frame/Body"]
 layout_mode = 2
-text = ""
 
 [node name="CloseButton" type="Button" parent="PoolOverlayLayer/PoolOverlay/Frame/Body"]
 layout_mode = 2

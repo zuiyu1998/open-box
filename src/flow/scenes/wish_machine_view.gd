@@ -19,7 +19,9 @@ extends VBoxContainer
 signal upgrade_requested
 ## `times`：1 / 10；**0 = 开启全部**（由 Model 解释成"该盒剩余次数"）。
 signal open_requested(times: int)
-signal socket_requested
+signal slot_clicked(slot: int)
+## ★ v0.78：在浮层里选中某个模块 ⇒ 镶进"刚才点的那个空位"
+signal module_picked(module_id: StringName)
 ## ★ v0.44：`unsocket_requested` 已随"拆卸"一起删除——**模块镶上即永久锁定**。
 ## ★ v0.45：池子成员与三态（可编辑字段，不走模块）
 ## ★ v0.51：浮层的排序变了（0 池内顺序 / 1 概率 / 2 价值 / 3 售价）
@@ -28,6 +30,9 @@ signal pool_sort_requested(mode: int)
 signal pool_data_requested
 signal operator_toggle_requested
 ## 选中的盲盒变了（右栏信息 / 中栏位子都要跟着重算）。
+signal box_button_clicked
+## ★ v0.79：在浮层里选中某个盒子
+signal box_chosen(index: int)
 signal box_changed
 
 @onready var _name_lbl: Label = $Header/DeviceName
@@ -37,60 +42,79 @@ signal box_changed
 @onready var _gem_lbl: Label = $Header/GemLine
 @onready var _upgrade_btn: Button = $Header/UpgradeButton
 
-@onready var _picker: OptionButton = $Columns/Left/BoxSection/BoxPicker
-@onready var _slot_detail: Label = $Columns/Left/ModuleSection/SlotDetail
-@onready var _slot_picker: OptionButton = $Columns/Left/ModuleSection/SlotPicker
-@onready var _module_picker: OptionButton = $Columns/Left/ModuleSection/ModulePicker
-@onready var _socket_btn: Button = $Columns/Left/ModuleSection/ModuleButtons/SocketButton
+@onready var _box_btn: Button = $Columns/Middle/BoxSection/BoxButton
+@onready var _box_icon: BoxIcon = $Columns/Middle/BoxSection/BoxButton/BoxIcon
+## ★ v0.79：当前选中的盒子下标（View 自己持有——浮层选完由它记）
+var _selected_box: int = 0
+# ★ v0.79：盲盒选择浮层
+@onready var _box_overlay: Control = $BoxOverlayLayer/BoxOverlay
+@onready var _box_note: Label = $BoxOverlayLayer/BoxOverlay/Frame/Body/Note
+@onready var _box_rows: VBoxContainer = $BoxOverlayLayer/BoxOverlay/Frame/Body/Scroll/Rows
+@onready var _box_close: Button = $BoxOverlayLayer/BoxOverlay/Frame/Body/CloseButton
+@onready var _slot_detail: Label = $Columns/Middle/ModuleSection/SlotDetail
+@onready var _slot_row: HBoxContainer = $Columns/Middle/ModuleSection/SlotRow
 ## ★ v0.50：池子数据浮层（用 `CanvasLayer` 承载，容器的排版不会碰到它）
-@onready var _pool_data_btn: Button = $Columns/Left/ModuleSection/ModuleButtons/PoolDataButton
+@onready var _pool_data_btn: Button = $Columns/Middle/ModuleSection/ModuleButtons/PoolDataButton
 @onready var _overlay: Control = $PoolOverlayLayer/PoolOverlay
+@onready var _res_overlay: Control = $ResultOverlayLayer/ResultOverlay
+@onready var _res_note: Label = $ResultOverlayLayer/ResultOverlay/Frame/Body/Note
+@onready var _res_rows: VBoxContainer = $ResultOverlayLayer/ResultOverlay/Frame/Body/Scroll/Rows
+@onready var _res_foot: Label = $ResultOverlayLayer/ResultOverlay/Frame/Body/Foot
+@onready var _res_close: Button = $ResultOverlayLayer/ResultOverlay/Frame/Body/CloseButton
+# ★ v0.78：模块选择浮层（点空位后弹出）
+@onready var _mod_overlay: Control = $ModuleOverlayLayer/ModuleOverlay
+@onready var _mod_note: Label = $ModuleOverlayLayer/ModuleOverlay/Frame/Body/Note
+@onready var _mod_rows: VBoxContainer = $ModuleOverlayLayer/ModuleOverlay/Frame/Body/Scroll/Rows
+@onready var _mod_close: Button = $ModuleOverlayLayer/ModuleOverlay/Frame/Body/CloseButton
 @onready var _ov_note: Label = $PoolOverlayLayer/PoolOverlay/Frame/Body/Note
 @onready var _ov_rows: VBoxContainer = $PoolOverlayLayer/PoolOverlay/Frame/Body/Scroll/Rows
 @onready var _ov_totals: Label = $PoolOverlayLayer/PoolOverlay/Frame/Body/Totals
 @onready var _ov_close: Button = $PoolOverlayLayer/PoolOverlay/Frame/Body/CloseButton
 ## ★ v0.51：浮层排序
 @onready var _ov_sort: OptionButton = $PoolOverlayLayer/PoolOverlay/Frame/Body/SortRow/SortPicker
-@onready var _result_lbl: Label = $Columns/Left/ResultSection/ResultLine
+@onready var _result_lbl: Label = $Columns/Middle/StatusLine
 
-@onready var _op_level: Label = $Columns/Middle/OperatorLevel
-@onready var _op_route: Label = $Columns/Middle/OperatorRoute
-@onready var _op_bans: Label = $Columns/Middle/OperatorBans
-@onready var _op_toggle: Button = $Columns/Middle/OperatorToggle
+@onready var _op_level: Label = $Columns/Left/OperatorLevel
+@onready var _op_route: Label = $Columns/Left/OperatorRoute
+@onready var _op_bans: Label = $Columns/Left/OperatorBans
+@onready var _op_toggle: Button = $Columns/Left/OperatorToggle
 
-@onready var _uses_lbl: Label = $Columns/Right/InfoSection/BoxUses
-@onready var _expect_lbl: Label = $Columns/Right/InfoSection/BoxExpectation
-@onready var _open_one: Button = $Columns/Right/OpenButtons/OpenOne
-@onready var _open_ten: Button = $Columns/Right/OpenButtons/OpenTen
-@onready var _open_all: Button = $Columns/Right/OpenButtons/OpenAll
+@onready var _uses_lbl: Label = $Columns/Right/BoxUses
+@onready var _expect_lbl: Label = $Columns/Right/BoxExpectation
+@onready var _open_one: Button = $Columns/Middle/OpenButtons/OpenOne
+@onready var _open_ten: Button = $Columns/Middle/OpenButtons/OpenTen
+@onready var _open_all: Button = $Columns/Middle/OpenButtons/OpenAll
 
 
 func _ready() -> void:
+	if _res_close != null:
+		_res_close.pressed.connect(func() -> void: hide_result_overlay())
+	if _mod_close != null:
+		_mod_close.pressed.connect(func() -> void: hide_module_overlay())
 	_upgrade_btn.pressed.connect(func() -> void: upgrade_requested.emit())
 	_open_one.pressed.connect(func() -> void: open_requested.emit(1))
 	_open_ten.pressed.connect(func() -> void: open_requested.emit(10))
 	_open_all.pressed.connect(func() -> void: open_requested.emit(0))
-	_socket_btn.pressed.connect(func() -> void: socket_requested.emit())
 	# ★ v0.50：浮层的开 / 关**完全在 View 内部**——它不改任何数据，不需要绕 Model / Controller
 	_pool_data_btn.pressed.connect(func() -> void: pool_data_requested.emit())
 	_ov_sort.item_selected.connect(func(i: int) -> void: pool_sort_requested.emit(i))
 	_ov_close.pressed.connect(func() -> void: _overlay.visible = false)
 	_op_toggle.pressed.connect(func() -> void: operator_toggle_requested.emit())
-	_picker.item_selected.connect(func(_i: int) -> void: box_changed.emit())
+	_box_btn.pressed.connect(func() -> void: box_button_clicked.emit())
+	if _box_close != null:
+		_box_close.pressed.connect(func() -> void: hide_box_overlay())
 
 
 ## 选中项下标（Controller 读走，转成 Model 的下标参数）。
 var selected_index: int:
 	get:
-		return _picker.selected
+		return _selected_box
 
-var slot_index: int:
-	get:
-		return _slot_picker.selected
 
-var module_index: int:
-	get:
-		return _module_picker.selected
+## ★ v0.79：浮层选中后由 Controller 调用（越界夹到 0）。
+func set_selected_box(index: int) -> void:
+	_selected_box = maxi(index, 0)
+	box_changed.emit()
 
 ## 用 Model 的快照渲染（调用方保证 @onready 已就绪——见 Controller 的 call_deferred）。
 func render(s: Dictionary) -> void:
@@ -104,13 +128,23 @@ func render(s: Dictionary) -> void:
 	_upgrade_btn.disabled = bool(s.get("upgrade_disabled", true))
 
 	# ── 左栏 · 顶：盲盒选择 ───────────────────────────────────────────────────
-	_refill(_picker, s.get("box_options", []))
+	# ★ v0.79：盲盒按钮 = 图标 + 一句话（点它开浮层选盒）
+	var items: Array = s.get("box_items", [])
+	if items.is_empty():
+		_box_btn.text = "          还没有盲盒"
+		if _box_icon != null:
+			_box_icon.empty = true
+	else:
+		var cur: Dictionary = items[clampi(_selected_box, 0, items.size() - 1)]
+		_box_btn.text = "          " + String(cur.get("label", ""))
+		if _box_icon != null:
+			_box_icon.empty = false
+			_box_icon.quality = int(cur.get("quality", 1))
 
 	# ── 左栏 · 中：模块镶嵌 ───────────────────────────────────────────────────
 	_slot_detail.text = String(s.get("slot_detail", "—"))
-	_refill(_slot_picker, s.get("slot_options", []))
-	_refill(_module_picker, s.get("module_options", []))
-	_socket_btn.disabled = bool(s.get("socket_disabled", true))
+	# ★ v0.78：**逐位暴露**——每位一个按钮；空位可点（点了弹模块浮层）
+	_render_slot_buttons(s.get("slot_items", []))
 
 	# ── 左栏 · 池子（★ v0.45）─────────────────────────────────────────────────
 
@@ -216,3 +250,151 @@ func _render_pool_table(rows) -> void:
 		spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		row.add_child(spacer)
 		_ov_rows.add_child(row)
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ★ v0.70：开盒结果浮层（用户裁决：结果不再占版面，改用浮层）
+# ══════════════════════════════════════════════════════════════════════════════
+
+## 打开结果浮层。`items` = `[{name, quality, count, mailed}, …]`，`foot` = 合计行。
+func show_result_overlay(items, note: String, foot: String) -> void:
+	_res_note.text = note
+	_res_foot.text = foot
+	for ch in _res_rows.get_children():
+		_res_rows.remove_child(ch)
+		ch.queue_free()
+	var arr: Array = items if items is Array else []
+	if arr.is_empty():
+		var empty := Label.new()
+		empty.text = "（这一轮没有开出物品）"
+		_res_rows.add_child(empty)
+	else:
+		for it in arr:
+			var row := HBoxContainer.new()
+			row.add_theme_constant_override("separation", 12)
+			var nm := Label.new()
+			nm.text = String(it.get("name", ""))
+			nm.custom_minimum_size = Vector2(300, 0)
+			nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row.add_child(nm)
+			var q := Label.new()
+			q.text = String(it.get("quality", ""))
+			q.custom_minimum_size = Vector2(70, 0)
+			row.add_child(q)
+			var cnt := Label.new()
+			cnt.text = "×%d%s" % [int(it.get("count", 1)), "（邮件）" if bool(it.get("mailed", false)) else ""]
+			cnt.custom_minimum_size = Vector2(110, 0)
+			cnt.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+			row.add_child(cnt)
+			_res_rows.add_child(row)
+	_res_overlay.visible = true
+
+
+func hide_result_overlay() -> void:
+	_res_overlay.visible = false
+
+
+func is_result_overlay_visible() -> bool:
+	return _res_overlay.visible
+
+## ★ v0.78：把每个位子渲染成一个按钮（空位可点 ⇒ 发 `slot_clicked(slot)`）。
+func _render_slot_buttons(items) -> void:
+	for ch in _slot_row.get_children():
+		_slot_row.remove_child(ch)
+		ch.queue_free()
+	var arr: Array = items if items is Array else []
+	if arr.is_empty():
+		var empty := Label.new()
+		empty.text = "先选一个盲盒"
+		_slot_row.add_child(empty)
+		return
+	for it in arr:
+		var btn := Button.new()
+		btn.text = String(it.get("label", ""))
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		# ★ v0.80：**位子按钮不参与"最小宽度"**——否则切到位数更多的盒子时，
+		#   这一行会把中栏撑宽、三栏重新分配 ⇒ 整页布局跳动。
+		btn.clip_text = true
+		btn.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		btn.custom_minimum_size = Vector2(0, 0)
+		var idx := int(it.get("index", 0))
+		var occupied := bool(it.get("occupied", false))
+		btn.disabled = occupied          # ★ v0.44：已镶的位子永久锁定，不可点
+		if not occupied:
+			btn.pressed.connect(func() -> void: slot_clicked.emit(idx))
+		_slot_row.add_child(btn)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ★ v0.78：模块选择浮层（点空位 ⇒ 列出仓库里的模块 ⇒ 点一项直接镶）
+# ══════════════════════════════════════════════════════════════════════════════
+
+func show_module_overlay(options, note: String) -> void:
+	_mod_note.text = note
+	for ch in _mod_rows.get_children():
+		_mod_rows.remove_child(ch)
+		ch.queue_free()
+	var arr: Array = options if options is Array else []
+	if arr.is_empty():
+		var empty := Label.new()
+		empty.text = "仓库里没有可用的模块（去市场买）"
+		_mod_rows.add_child(empty)
+	else:
+		for o in arr:
+			var btn := Button.new()
+			btn.text = "%s · 品质 %d · 镶嵌 %d 金币 · 持有 %d" % [
+				String(o.get("name", "")), int(o.get("quality", 1)),
+				int(o.get("cost", 0)), int(o.get("owned", 0)),
+			]
+			btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			var mid := StringName(o.get("module_id", ""))
+			btn.pressed.connect(func() -> void: module_picked.emit(mid))
+			_mod_rows.add_child(btn)
+	_mod_overlay.visible = true
+
+
+func hide_module_overlay() -> void:
+	_mod_overlay.visible = false
+
+
+func is_module_overlay_visible() -> bool:
+	return _mod_overlay.visible
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ★ v0.79：盲盒选择浮层（点图标按钮 ⇒ 列仓库里的盲盒 ⇒ 点一项切换）
+# ══════════════════════════════════════════════════════════════════════════════
+
+func show_box_overlay(items, note: String) -> void:
+	_box_note.text = note
+	for ch in _box_rows.get_children():
+		_box_rows.remove_child(ch)
+		ch.queue_free()
+	var arr: Array = items if items is Array else []
+	if arr.is_empty():
+		var empty := Label.new()
+		empty.text = "仓库里还没有盲盒（去市场买）"
+		_box_rows.add_child(empty)
+	else:
+		for it in arr:
+			# 每行 = 小图标 + 文案；整行是一个按钮
+			var btn := Button.new()
+			btn.custom_minimum_size = Vector2(0, 48)
+			btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			var idx := int(it.get("index", 0))
+			var cur := bool(it.get("current", false))
+			btn.text = "        %s%s" % [String(it.get("label", "")), "（当前）" if cur else ""]
+			var icon := BoxIcon.new()
+			icon.quality = int(it.get("quality", 1))
+			icon.size = Vector2(32, 32)
+			icon.position = Vector2(8, 8)
+			btn.add_child(icon)
+			btn.pressed.connect(func() -> void: box_chosen.emit(idx))
+			_box_rows.add_child(btn)
+	_box_overlay.visible = true
+
+
+func hide_box_overlay() -> void:
+	_box_overlay.visible = false
+
+
+func is_box_overlay_visible() -> bool:
+	return _box_overlay.visible

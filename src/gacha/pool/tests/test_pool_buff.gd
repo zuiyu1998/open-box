@@ -107,6 +107,8 @@ func _setup() -> Dictionary:
 	GachaCatalog.register_module(mod)
 
 	var st := GameState.new_game()
+	# ★ v0.77：模块是实物 ⇒ 镶嵌前先发一件
+	BoxTestKit.grant_modules(st)
 	ItemService.grant_currency(ItemConstants.CURRENCY_GOLD, 500, ItemConstants.CURRENCY_SOURCE_INIT)
 	var boxes := BoxTestKit.grant(st, 1, 2, bx_items)
 	return {"state": st, "box": boxes[0]}

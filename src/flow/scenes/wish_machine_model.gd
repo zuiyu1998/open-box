@@ -10,7 +10,7 @@
 ##      ★ v0.44：**拆卸已删除**——模块镶上即永久锁定，本类不再有"取下"的入口。
 ##
 ## ★ v0.41：界面扩成三栏（左=盲盒/模块/产出，中=干员，右=信息/开启），
-##   因此快照额外提供 `slots` / `slot_options` / `module_options` / `operator` 等键；
+##   因此快照额外提供 `slot_items` / `slot_detail` / `operator` 等键；
 ##   **既有键（`device_name` / `level` / `box_options` / `open_disabled` / `result` /
 ##   `box_uses` / `box_expectation` …）一律保留**，避免上层与测试断链。
 ##
@@ -22,6 +22,14 @@ var state: GameState = null
 
 ## 开盒 / 镶嵌 / 升级共用的结果行（一次操作覆盖上一次）。
 var open_result: String = ""
+
+## ★ v0.70：**开盒结果的结构化副本**（浮层按它渲染）。每次 `open()` 重置。
+## 元素：`{name, quality, count, mailed}`——同一物品出现多次会合并计数。
+var open_items: Array[Dictionary] = []
+## 浮层顶部的一句话（"3 连开出 2 件、void 1 次"）
+var open_note: String = ""
+## 浮层底部合计（件数 / 金币价值）
+var open_foot: String = ""
 
 ## ★ v0.51：**浮层表格的排序**。0 = 池内顺序，1 = 概率降序，2 = 价值降序，3 = 售价降序。
 ## 存在 Model 而不是 View：它是**表格数据的口径**（同一份数据的不同呈现顺序），
@@ -42,18 +50,15 @@ func bind(s: GameState) -> void:
 
 ## 只读快照：**View 唯一的数据来源**（Model 算好，View 只渲染）。
 ##
-## `box_index` / `slot_index` / `module_index` 都是 **View 的选中项下标**（-1 = 未选）。
+## `box_index` 是 **View 的选中项下标**（-1 = 未选）；★ v0.78：位子/模块不再有"选中项"。
 ##
 ## ★ **未选即取第 0 项**（`_norm_box` / `_norm_slot`）：首次 `render` 时下拉还是空的，
 ##   View 报的是 -1；若照 -1 算，位子与模块列表都会是空表，而**程序设置 `selected`
 ##   不会发 `item_selected`** ⇒ 页面永远停在"空"上（实测踩过）。归一化后首帧就自洽。
-func snapshot(
-	box_index: int = -1, slot_index: int = -1, module_index: int = -1
-) -> Dictionary:
+func snapshot(box_index: int = -1) -> Dictionary:
 	var dev: Device = null if state == null else DeviceService.primary_device(state)
 	var boxes := _boxes()
 	box_index = _norm_box(box_index, boxes)
-	slot_index = _norm_slot(slot_index, _selected_box(box_index, boxes))
 
 	if dev == null:
 		return {
@@ -64,13 +69,15 @@ func snapshot(
 			"box_options": [] as Array[String],
 			"open_disabled": true, "open_all_disabled": true,
 			"result": open_result,
+		"open_items": open_items,
+		"open_note": open_note,
+		"open_foot": open_foot,
 			"box_uses": "剩余开盒次数 —", "box_expectation": "期望 —",
 			"expectation_gold_per_open": 0.0, "expectation_module_cost": 0,
 			"expectation_net": 0.0,
-			"slot_options": [] as Array[String], "slot_detail": "—",
-			"module_options": [] as Array[String],
-			"socket_disabled": true,
-			"pool_table_rows": [] as Array,
+			"box_items": [] as Array[Dictionary],
+		"slot_items": [] as Array[Dictionary], "slot_detail": "—",
+					"pool_table_rows": [] as Array,
 			"pool_table_note": "", "pool_table_totals": "", "pool_table_sort_mode": 0,
 			"operator": _operator_block(),
 		}
@@ -112,8 +119,7 @@ func snapshot(
 		opts.append("品质 %d · 剩余 %d 次" % [b.quality, b.uses_remaining])
 
 	var stats := _box_stats(box_index, boxes)
-	var slots := _slots_block(box_index, boxes, slot_index)
-	var mods := _modules_block(box_index, boxes, slot_index)
+	var slots := _slots_block(box_index, boxes)
 
 	var table := _pool_table_block(box_index, boxes)
 
@@ -124,13 +130,15 @@ func snapshot(
 		"box_options": opts,
 		"open_disabled": boxes.size() == 0, "open_all_disabled": boxes.size() == 0,
 		"result": open_result,
+		"open_items": open_items,
+		"open_note": open_note,
+		"open_foot": open_foot,
 		"box_uses": stats["uses"], "box_expectation": stats["expectation"],
 		"expectation_gold_per_open": stats.get("expectation_gold_per_open", 0.0),
 		"expectation_module_cost": stats.get("expectation_module_cost", 0),
 		"expectation_net": stats.get("expectation_net", 0.0),
-		"slot_options": slots["options"], "slot_detail": slots["detail"],
-		"module_options": mods["options"],
-		"socket_disabled": mods["socket_disabled"],
+		"box_items": _box_items(boxes, box_index),
+		"slot_items": slots["items"], "slot_detail": slots["detail"],
 		"pool_table_rows": table["rows"],
 		"pool_table_note": table["note"],
 		"pool_table_totals": table["totals"],
@@ -144,6 +152,11 @@ func snapshot(
 # ══════════════════════════════════════════════════════════════════════════════
 
 ## 仓库里可用的盒子（邮件里的不可配置 / 不可开，v0.26）。
+## ★ v0.78：外部（控制器）要拿"当前盒子清单"传给 `socketable_modules()`。
+func boxes() -> Array:
+	return _boxes()
+
+
 func _boxes() -> Array:
 	return [] if state == null else state.boxes_in(ItemConstants.LOC_WAREHOUSE)
 
@@ -204,49 +217,27 @@ func _box_stats(box_index: int, boxes: Array) -> Dictionary:
 	}
 
 
-## 该盒的**定长位子**展示（空位 / 已装），以及所有位子的文案供 `SlotPicker` 用。
-func _slots_block(box_index: int, boxes: Array, slot_index: int) -> Dictionary:
+## 该盒的**定长位子**：★ v0.78（用户裁决）**逐位暴露**——每位一个按钮。
+##
+## 返回 `items: [{index, label, occupied, module_id}]`（`label` 直接可当按钮文字）。
+func _slots_block(box_index: int, boxes: Array) -> Dictionary:
 	var b := _selected_box(box_index, boxes)
 	if b == null:
-		return {"options": [] as Array[String], "detail": "先选一个盲盒"}
-	var options: Array[String] = []
+		return {"items": [] as Array[Dictionary], "detail": "先选一个盲盒"}
+	var items: Array[Dictionary] = []
 	for i in b.modules.size():
 		var m: Module = b.modules[i]
-		if m == null:
-			options.append("位 %d：空" % (i + 1))
-		else:
-			options.append("位 %d：%s" % [i + 1, _module_name(m.module_id)])
-	var detail := "共 %d 位 · 已占 %d" % [b.modules.size(), b.occupied_count()]
-	if slot_index >= 0 and slot_index < options.size():
-		detail += " · 选中 %s" % options[slot_index]
-	return {"options": options, "detail": detail}
+		items.append({
+			"index": i,
+			"occupied": m != null,
+			"module_id": String(m.module_id) if m != null else "",
+			# ★ v0.80：空位标签**短**（"位 N：空"）——5 位时也要排得下；
+			#   "点了能镶"的提示放在上面的 `slot_detail` 一行里。
+			"label": ("位 %d：%s" % [i + 1, _module_name(m.module_id)]) if m != null else ("位 %d：空" % (i + 1)),
+		})
+	var detail := "共 %d 位 · 已占 %d · 点空位选模块" % [b.modules.size(), b.occupied_count()]
+	return {"items": items, "detail": detail}
 
-
-## **可镶嵌的模块**：只列"目标全部在该盒池内"的模块——否则必然被 `unknown_target` 拒。
-## 返回 `{options, socket_disabled}`。
-##
-## ★ v0.44：**位子被占用 ⇒ 不能再镶**（模块永久锁定）。这不是"提示先拆"，而是终局状态。
-func _modules_block(box_index: int, boxes: Array, slot_index: int) -> Dictionary:
-	var b := _selected_box(box_index, boxes)
-	if b == null or b.item_pool == null:
-		return {"options": [] as Array[String], "socket_disabled": true}
-
-	var pool_ids := b.item_pool.item_ids()
-	var options: Array[String] = []
-	for mid in GachaCatalog.all_module_ids():
-		var mdef := GachaCatalog.get_module(mid)
-		if mdef == null:
-			continue
-		if not _targets_in_pool(mdef, pool_ids):
-			continue
-		options.append("%s（%d 金币）" % [mdef.display_name if mdef.display_name != "" else String(mid), mdef.gold_cost])
-
-	var slot_ok := slot_index >= 0 and slot_index < b.modules.size()
-	var slot_empty := slot_ok and b.modules[slot_index] == null
-	return {
-		"options": options,
-		"socket_disabled": options.is_empty() or not slot_empty,
-	}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -419,6 +410,8 @@ func open(times: int, box_index: int) -> void:
 	var voids := 0
 	var mailed := 0
 	var opened := 0
+	var agg: Dictionary = {}          # item_id -> {name, quality, count, mailed}
+	var total_value := 0
 	for _i in wanted:
 		var r := DeviceService.redeem(state, box)
 		if not r.ok:
@@ -446,12 +439,59 @@ func open(times: int, box_index: int) -> void:
 				hit.append("%s → 邮件" % iname)
 			else:
 				hit.append(iname)
+			# ★ v0.70：结构化聚合（浮层用）
+			var key := String(r.item_id)
+			if not agg.has(key):
+				agg[key] = {
+					"name": d.display_name if d != null else String(r.item_id),
+					"quality": ItemConstants.quality_name(d.quality if d != null else 1),
+					"count": 0,
+					"mailed": bool(r.mailed),
+				}
+			agg[key]["count"] = int(agg[key]["count"]) + 1
+			total_value += int(d.value) if d != null else 0
 
 	var head := "开出：" if opened == 1 else "%d 连开出 %d 件：" % [opened, hit.size()]
 	var tail := "" if voids == 0 else "、void %d 次" % voids
 	if mailed > 0:
 		tail += "、%d 件存入邮件" % mailed
-	open_result = head + ("、".join(hit) if hit.size() > 0 else "什么都没有") + tail
+	# ★ v0.70：**页面只留一句话**（细节全在浮层）——否则"生成物品"等于又回到了版面上
+	open_result = "开盒完成：共 %d 次%s%s" % [
+		opened,
+		"" if voids == 0 else "（void %d 次）" % voids,
+		"" if mailed == 0 else "，%d 件存入邮件" % mailed,
+	]
+	# ★ v0.70：浮层数据（按"件数 ↓、名称"排序，读起来稳）
+	open_items.clear()
+	for k in agg.keys():
+		open_items.append(agg[k])
+	open_items.sort_custom(func(a, b) -> bool:
+		if int(a["count"]) != int(b["count"]):
+			return int(a["count"]) > int(b["count"])
+		return String(a["name"]) < String(b["name"]))
+	open_note = "共开 %d 次 · 得到 %d 件 · void %d 次" % [opened, hit.size(), voids]
+	open_foot = "合计价值 ≈ %d 金币%s" % [
+		total_value,
+		"" if mailed == 0 else "；其中 %d 件存入邮件" % mailed,
+	]
+
+
+## ★ v0.78：**点空位 → 选模块**——直接按 (位子, 模块 id) 镶嵌（不再有"选中项"中间态）。
+func socket_module_into(box_index: int, slot: int, module_id: StringName) -> void:
+	var boxes := _boxes()
+	box_index = _norm_box(box_index, boxes)
+	var b := _selected_box(box_index, boxes)
+	if b == null:
+		open_result = "镶嵌失败：请先选择盲盒"
+		return
+	var r := DeviceService.socket(state, b.box_id, module_id, slot)
+	if r["ok"]:
+		if bool(r.get("destroyed", false)):
+			open_result = "镶嵌成功，但该盒寿命归零 ⇒ 盒子已被摧毁"
+		else:
+			open_result = "镶嵌成功：%s → 位 %d" % [_module_name(module_id), slot + 1]
+	else:
+		open_result = "镶嵌失败：%s" % String(r["reason"])
 
 
 ## 镶嵌：把第 `module_index` 个候选模块装进第 `slot_index` 位。
@@ -485,7 +525,36 @@ func socket_module(box_index: int, slot_index: int, module_index: int) -> void:
 ## 不要把它加回来——理由与 `PoolService.unsocket()` 的墓碑一致（防"能取下来"的后门）。
 
 
-## 可镶嵌模块的 id 列表（**与 `_modules_block()` 的 options 同序**）。
+## 可镶嵌模块（**仓库里真有货** + 目标在池内）——★ v0.78：模块是实物，没有库存的不可选。
+func socketable_modules(box_index: int, boxes: Array) -> Array[Dictionary]:
+	var b := _selected_box(box_index, boxes)
+	var out: Array[Dictionary] = []
+	if b == null or b.item_pool == null:
+		return out
+	var pool_ids := b.item_pool.item_ids()
+	for mid in GachaCatalog.all_module_ids():
+		var mdef := GachaCatalog.get_module(mid)
+		if mdef == null:
+			continue
+		if not _targets_in_pool(mdef, pool_ids):
+			continue
+		var owned := 0
+		for inst in ItemService.instances:
+			if inst.item_id == mid and WarehouseService.is_warehouse(inst.instance_id):
+				owned += 1
+		if owned <= 0:
+			continue                       # 没有实物 ⇒ 镶不了，不列出来误导玩家
+		out.append({
+			"module_id": String(mid),
+			"name": mdef.display_name if String(mdef.display_name) != "" else String(mid),
+			"quality": mdef.quality,
+			"cost": mdef.gold_cost,
+			"owned": owned,
+		})
+	return out
+
+
+## 可镶嵌模块的 id 列表（旧"下拉"路径保留给 `socket_module()`，v0.78 起 UI 走 `socketable_modules()`）。
 func _socketable_ids(b: Box) -> Array[StringName]:
 	var out: Array[StringName] = []
 	if b == null or b.item_pool == null:
@@ -505,3 +574,20 @@ func _module_name(mid: StringName) -> String:
 	if mdef == null:
 		return String(mid)
 	return mdef.display_name if mdef.display_name != "" else String(mid)
+
+## ★ v0.79：**盲盒选择浮层**的数据：仓库里的每个盒子（品质 / 剩余次数 / 是否当前）。
+func _box_items(boxes: Array, box_index: int) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for i in boxes.size():
+		var b: Box = boxes[i]
+		if b == null:
+			continue
+		out.append({
+			"index": i,
+			"box_id": b.box_id,
+			"quality": b.quality,
+			"uses": b.uses_remaining,
+			"current": i == box_index,
+			"label": "品质 %d · 剩余 %d 次" % [b.quality, b.uses_remaining],
+		})
+	return out

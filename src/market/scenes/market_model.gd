@@ -48,9 +48,35 @@ func snapshot() -> Dictionary:
 		"buy_disabled": listing_cards.is_empty(),
 		# ★ v0.60：市场"待售盲盒"（每次刷新 8 个，每个一张卡）
 		"box_cards": _box_cards(),
+		# ★ v0.77：模块（实物，买了才能镶）
+		"module_cards": _module_cards(),
 		"box_disabled": _box_cards().is_empty(),
 		"result": result,
 	}
+
+
+## ★ v0.77：模块卡片（`{module_id, name, quality, price}`）。
+func _module_cards() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for m in MarketService.module_listings_snapshot():
+		var mid := StringName(m["module_id"])
+		var mdef := GachaCatalog.get_module(mid)
+		out.append({
+			"module_id": String(mid),
+			"name": mdef.display_name if mdef != null else String(mid),
+			"quality": mdef.quality if mdef != null else 1,
+			"price": int(m["price"]),
+		})
+	return out
+
+
+## **买一件模块**（`module_id` 来自卡片按钮）。
+func buy_module(module_id: StringName) -> void:
+	var r := MarketService.buy_module(module_id)
+	if r["ok"]:
+		result = "买入模块成功：%s（- %d 金币）" % [String(module_id), int(r["paid"])]
+	else:
+		result = "买入模块失败：%s" % String(r["reason"])
 
 
 ## ★ v0.60：市场待售盲盒（元数据；买盒按钮带 box_id）。

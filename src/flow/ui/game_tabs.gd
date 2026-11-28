@@ -18,6 +18,16 @@ const FONT_SIZE := 21
 const MARGIN_H := 24.0
 const HEIGHT := 62.0
 
+## ★ v0.74：**页面顶部要留的间距**（页面从 `HEIGHT + GAP` 开始）。
+##
+## 为什么需要：**选中的那个 tab 的背景比其它 tab 高约 10px**（`tab_selected` 的
+## content margin 不同），它会盖住页面的第一行——实测"许愿机"标题的上沿被压掉。
+## 间距放在这里而不是页面里，是因为它属于"tab 条占多高"这件事。
+const PAGE_TOP_GAP := 10.0
+
+## ★ v0.76：tab 的上下内容边距（**五个状态统一**，否则选中态更高、会盖住页面第一行）。
+const V_PAD := 12.0
+
 
 func _ready() -> void:
 	# ① 高度：**必须早设**（首次布局按它给页面定位）
@@ -44,4 +54,31 @@ func _apply_theme_overrides() -> void:
 			continue
 		sb.content_margin_left = maxf(sb.content_margin_left, 0.0) + MARGIN_H
 		sb.content_margin_right = maxf(sb.content_margin_right, 0.0) + MARGIN_H
+		# ★ v0.76：**五个状态的上下边距必须一致**——默认主题里 `tab_selected` 的下边距更大，
+		#   于是"选中的那个 tab 比其它高约 10px"，它的背景会盖住页面第一行（实测就是它）。
+		#   统一成 `V_PAD` 后所有 tab 等高，重叠从根上消失。
+		sb.content_margin_top = V_PAD
+		sb.content_margin_bottom = V_PAD
 		bar.add_theme_stylebox_override(sb_name, sb)
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ★ v0.75：**页面偏移归本类**（每次排序后自动重打，切 tab 不会被覆盖）
+# ══════════════════════════════════════════════════════════════════════════════
+
+## `TabContainer` 在 `NOTIFICATION_SORT_CHILDREN` 里把每个页面摆到 `bar` 正下方——
+## **切 tab / 改尺寸 / 增减页都会重跑它**，于是 `+PAGE_TOP_GAP` 会被覆盖回 0。
+## 这里在**同一通知之后**（deferred）再打一次，覆盖顺序就稳定了。
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_SORT_CHILDREN:
+		apply_page_offset.call_deferred()
+
+
+## 把每个页面下移 `HEIGHT + PAGE_TOP_GAP`，高度相应减去（幂等）。
+func apply_page_offset() -> void:
+	var h := HEIGHT + PAGE_TOP_GAP
+	for i in get_tab_count():
+		var pg := get_child(i)
+		if pg is Control:
+			var c := pg as Control
+			c.position.y = h
+			c.size = Vector2(size.x, maxf(size.y - h, 0.0))

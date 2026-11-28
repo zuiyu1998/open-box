@@ -27,6 +27,12 @@ func _ready() -> void:
 	_reset_world()
 	await _test_tab_style_survives_first_layout()
 	_reset_world()
+	await _test_page_top_gap()
+	_reset_world()
+	await _test_page_offset_survives_tab_switch()
+	_reset_world()
+	await _test_layout_stable_across_box_switch()
+	_reset_world()
 	await _test_top_bar_currency()
 	_reset_world()
 	await _test_warehouse_page()
@@ -375,9 +381,9 @@ func _test_wish_machine_open() -> void:
 	eq(s["box_options"].size(), 1, "下拉里出现 1 个仓库盒子")
 	eq(s["open_disabled"], false, "有盒子 ⇒ 两个开盒按钮可点")
 
-	var one: Button = wish.get_node("Columns/Right/OpenButtons/OpenOne")
-	var ten: Button = wish.get_node("Columns/Right/OpenButtons/OpenTen")
-	var all_btn: Button = wish.get_node("Columns/Right/OpenButtons/OpenAll")
+	var one: Button = wish.get_node("Columns/Middle/OpenButtons/OpenOne")
+	var ten: Button = wish.get_node("Columns/Middle/OpenButtons/OpenTen")
+	var all_btn: Button = wish.get_node("Columns/Middle/OpenButtons/OpenAll")
 	ok(one != null and ten != null and all_btn != null, "三个开启按钮都存在")
 	eq(one.text, "开启一次", "按钮文案 = 开启一次")
 	eq(ten.text, "开启 10 次", "按钮文案 = 开启 10 次")
@@ -385,8 +391,21 @@ func _test_wish_machine_open() -> void:
 	one.pressed.emit()
 	await get_tree().process_frame
 	var s2: Dictionary = ctrl.snapshot()
-	ok(String(s2["result"]).find("开出：") >= 0 or String(s2["result"]).find("什么都没有") >= 0,
-		"结果要么是物品名、要么是 void 文案（%s）" % s2["result"])
+	# ★ v0.70：页面只留一句话；**细节不再回到版面**（清单只在浮层里）
+	ok(String(s2["result"]).find("开盒完成") >= 0, "页面只报一句话（%s）" % s2["result"])
+	ok(String(s2["result"]).find("（") < 0 or String(s2["result"]).find("开出") < 0,
+		"页面上**没有**物品清单（清单只在浮层）")
+	# ★ v0.70：结果浮层自动弹出，列出条目
+	var res_ov: Control = wish.get_node("ResultOverlayLayer/ResultOverlay")
+	eq(res_ov.visible, true, "开盒后**结果浮层自动弹出**")
+	ok((s2["open_items"] as Array).size() >= 0, "浮层数据可读（%d 条）" % (s2["open_items"] as Array).size())
+	ok(String(s2["open_note"]).find("共开") >= 0, "浮层顶部说明（%s）" % s2["open_note"])
+	var res_rows: VBoxContainer = wish.get_node("ResultOverlayLayer/ResultOverlay/Frame/Body/Scroll/Rows")
+	ok(res_rows.get_child_count() >= 1, "浮层里至少一行（%d）" % res_rows.get_child_count())
+	var res_close: Button = wish.get_node("ResultOverlayLayer/ResultOverlay/Frame/Body/CloseButton")
+	res_close.pressed.emit()
+	await get_tree().process_frame
+	eq(res_ov.visible, false, "「关闭」收起结果浮层")
 	eq(bx.uses_remaining, uses_before - 1, "寿命 −1")
 	ok(ItemService.instances.size() >= inst_before, "非 void ⇒ 至少多一个实例")
 
@@ -436,22 +455,40 @@ func _test_wish_machine_layout() -> void:
 	await get_tree().process_frame
 	var wish: Node = scr.page_node("WishPage")
 
-	# ── 三栏骨架 ──────────────────────────────────────────────────────────────
+	# ── 三栏骨架（★ v0.73：左 = 干员，中 = 盲盒操作，右 = 盲盒信息）──────────
 	var left: Node = wish.get_node_or_null("Columns/Left")
-	var middle: Node = wish.get_node_or_null("Columns/Middle")
+	var mid: Node = wish.get_node_or_null("Columns/Middle")
 	var right: Node = wish.get_node_or_null("Columns/Right")
-	ok(left != null and middle != null and right != null, "从左至右三栏都存在（Left / Middle / Right）")
-	# 左栏三段（顶层盲盒选择 / 中层模块镶嵌 / 下层生成物品）
-	ok(left.get_node_or_null("BoxSection/BoxPicker") != null, "左栏顶层 = 盲盒选择")
-	ok(left.get_node_or_null("ModuleSection/ModulePicker") != null, "左栏中层 = 模块镶嵌")
-	ok(left.get_node_or_null("ResultSection/ResultLine") != null, "左栏下层 = 生成物品显示")
-	# 中栏 = 干员
-	ok(middle.get_node_or_null("OperatorToggle") != null, "中栏 = 干员（含出战切换）")
-	# 右栏上层信息 / 下层三按钮
-	ok(right.get_node_or_null("InfoSection/BoxUses") != null, "右栏上层 = 盲盒信息（使用次数）")
-	ok(right.get_node_or_null("InfoSection/BoxExpectation") != null, "右栏上层 = 盲盒信息（数学期望）")
-	eq(right.get_node("OpenButtons").get_child_count(), 3, "右栏下层 = 3 个开启按钮")
+	ok(left != null and mid != null and right != null, "三栏都存在（Left / Middle / Right）")
+	eq(left.get_index(), 0, "左栏 = 干员（第 0 栏）")
+	eq(mid.get_index(), 1, "中栏 = 盲盒操作（第 1 栏）")
+	eq(right.get_index(), 2, "右栏 = 盲盒信息（第 2 栏）")
+	ok(left.get_node_or_null("OperatorToggle") != null, "左栏 = 干员（含出战切换）")
+	ok(left.get_node_or_null("BoxUses") == null, "左栏**不放**盲盒信息")
+	ok(mid.get_node_or_null("BoxSection/BoxButton") != null, "中栏 = 盲盒选择（图标按钮）")
+	ok(mid.get_node_or_null("ModuleSection/SlotRow") != null, "中栏 = 模块镶嵌（逐位按钮）")
+	eq(mid.get_node("OpenButtons").get_child_count(), 3, "中栏 = 3 个开启按钮")
+	ok(right.get_node_or_null("BoxUses") != null, "右栏 = 盲盒信息（使用次数）")
+	ok(right.get_node_or_null("BoxExpectation") != null, "右栏 = 盲盒信息（数学期望）")
+	ok(right.get_node_or_null("BoxButton") == null, "右栏**不放**操作控件")
+	# ★ v0.70：没有"生成物品"段；结果走浮层
+	ok(wish.get_node_or_null("Columns/Left/ResultSection") == null, "**没有「生成物品」段**")
+	ok(wish.get_node_or_null("Columns/Middle/ResultSection") == null, "**没有「生成物品」段**（中栏也没有）")
+	ok(wish.get_node_or_null("ResultOverlayLayer/ResultOverlay") != null, "有开盒结果浮层")
+	eq(wish.get_node("ResultOverlayLayer/ResultOverlay").visible, false, "结果浮层默认关闭")
 
+	# ★ v0.73 守卫：**视图里每个 `@onready` 引用都必须解析成功**。
+	#   场景重排最容易踩的坑就是"节点挪了、脚本里的 $ 路径没跟着改"——那时按钮字段是 null，
+	#   页面照样能渲染，只是点了没反应（本轮就发生过一次：`_open_one` 为 null）。
+	var view: Node = wish
+	var null_fields: Array[String] = []
+	for f in ["_box_btn", "_box_icon", "_slot_detail", "_slot_row", "_pool_data_btn", "_result_lbl",
+			"_uses_lbl", "_expect_lbl", "_open_one", "_open_ten", "_open_all", "_op_toggle",
+			"_mod_overlay", "_mod_rows", "_mod_close", "_res_overlay", "_ov_rows",
+			"_box_overlay", "_box_rows", "_box_close"]:
+		if view.get(f) == null:
+			null_fields.append(f)
+	eq(null_fields, [] as Array[String], "**所有 @onready 字段都解析到节点**（空 = 有漂移）")
 	# ── 右栏信息读真实值 ──────────────────────────────────────────────────────
 	var ctrl: Node = wish.get_node("Controller")
 	var s: Dictionary = ctrl.snapshot()
@@ -469,24 +506,47 @@ func _test_wish_machine_layout() -> void:
 	)
 
 	# ── 左栏中段：模块镶嵌（真镶嵌、真扣金币、真进位子）─────────────────────────
-	print("— §3.2b 模块镶嵌：位子按 socket_count 渲染，镶嵌真扣金币")
-	eq((s["slot_options"] as Array).size(), bx.modules.size(), "位子数 == 该盒 socket_count")
-	# ⚠️ `"%s" % 数组` 会被 GDScript 当成**参数列表**展开（元素多于一就报
-	#    "not all arguments converted"）⇒ 打印数组必须先 `str()`。
-	ok((s["module_options"] as Array).size() > 0, "有可镶嵌的模块（%s）" % str(s["module_options"]))
-	eq(left.get_node_or_null("ModuleSection/ModuleButtons/UnsocketButton"), null,
+	print("— §3.2b 模块镶嵌（★ v0.78 逐位按钮 + 浮层）：点空位 → 选模块 → 真扣金币、真消耗一件")
+	eq((s["slot_items"] as Array).size(), bx.modules.size(), "位子数 == 该盒 socket_count")
+	eq(mid.get_node_or_null("ModuleSection/ModuleButtons/UnsocketButton"), null,
 		"★ v0.44：**「拆卸」按钮已从场景里删除**")
 
+	# ★ v0.77：模块是仓库实物 ⇒ 镶嵌前先发一件（否则 no_module_item）
+	BoxTestKit.grant_modules(st)
+	scr.refresh()
+	await get_tree().process_frame
 	var gold_before := ItemService.currency_balance(ItemConstants.CURRENCY_GOLD)
 	var rev_before := bx.item_pool.revision
-	var socket_btn: Button = left.get_node("ModuleSection/ModuleButtons/SocketButton")
-	socket_btn.pressed.emit()
+	var insts_before := ItemService.instances.size()
+
+	# ① 每个位子一个按钮（逐位暴露）
+	var slot_row: HBoxContainer = mid.get_node("ModuleSection/SlotRow")
+	eq(slot_row.get_child_count(), bx.modules.size(), "**每位一个按钮**（%d 个）" % slot_row.get_child_count())
+	ok(String((slot_row.get_child(0) as Button).text).find("空") >= 0,
+		"空位按钮写明「空」（%s）" % (slot_row.get_child(0) as Button).text)
+
+	# ② 点空位 ⇒ 弹模块浮层
+	ok(not wish.is_module_overlay_visible(), "点之前浮层是关的")
+	(slot_row.get_child(0) as Button).pressed.emit()
+	await get_tree().process_frame
+	ok(wish.is_module_overlay_visible(), "**点空位 ⇒ 模块浮层出现**")
+	var mod_rows: VBoxContainer = wish.get_node("ModuleOverlayLayer/ModuleOverlay/Frame/Body/Scroll/Rows")
+	ok(mod_rows.get_child_count() >= 1, "浮层里列出可镶模块（%d 项）" % mod_rows.get_child_count())
+	ok(String((mod_rows.get_child(0) as Button).text).find("镶嵌") >= 0,
+		"每一项写明镶嵌金币成本（%s）" % (mod_rows.get_child(0) as Button).text)
+
+	# ③ 点模块 ⇒ 直接镶进刚才那个位子
+	(mod_rows.get_child(0) as Button).pressed.emit()
 	await get_tree().process_frame
 	var s2: Dictionary = ctrl.snapshot()
 	ok(String(s2["result"]).find("镶嵌成功") >= 0, "镶嵌成功（%s）" % s2["result"])
 	ok(bx.modules[0] != null, "第 1 位真的装上了模块")
 	eq(bx.item_pool.revision, rev_before + 1, "revision +1（池子编辑的唯一失效依据）")
 	ok(ItemService.currency_balance(ItemConstants.CURRENCY_GOLD) < gold_before, "金币真扣")
+	eq(ItemService.instances.size(), insts_before - 1, "**消耗一件模块实物**（实例数 −1）")
+	ok(not wish.is_module_overlay_visible(), "镶完浮层自动关闭")
+	eq((mid.get_node("ModuleSection/SlotRow").get_child(0) as Button).disabled, true,
+		"已镶的位子按钮**置灰**（永久锁定，无拆卸）")
 
 	# ★ v0.47：镶了模块 ⇒ 模块成本 C 进读数，净期望 = 毛期望 × 剩余次数 − C
 	eq(int(s2["expectation_module_cost"]), 20, "模块成本 = 该模块的 gold_cost（20）")
@@ -498,11 +558,13 @@ func _test_wish_machine_layout() -> void:
 	eq(bx.modules[0].module_id, &"mod_ban_home_q1", "装的是 20 金币的那个模块")
 
 	print("— §3.2b 占用位终局：镶上即锁定，UI 不再提供任何取下入口")
-	# 选中的仍是第 0 位（已占用）⇒ 镶嵌按钮必须置灰
 	scr.refresh()
 	await get_tree().process_frame
-	var s3: Dictionary = ctrl.snapshot()
-	eq(s3["socket_disabled"], true, "选中已占用的位子 ⇒ 镶嵌置灰（没有替换）")
+	# ★ v0.78：占用位 = 按钮置灰（点不动），不再有"镶嵌按钮"这一层
+	var slot0 := mid.get_node("ModuleSection/SlotRow").get_child(0) as Button
+	eq(slot0.disabled, true, "已占用的位子**按钮置灰**（没有替换、没有拆卸）")
+	ok(String(slot0.text).find("mod_ban_home_q1") >= 0 or String(slot0.text).find("排除") >= 0,
+		"按钮上写着镶的是什么（%s）" % slot0.text)
 	eq(bx.modules[0].module_id, &"mod_ban_home_q1", "原位子的模块名 = mod_ban_home_q1（原封不动）")
 
 	# ── 中栏：干员出战切换（免费、即时影响排除）───────────────────────────────
@@ -511,7 +573,7 @@ func _test_wish_machine_layout() -> void:
 	eq(op0["active"], true, "默认出战")
 	ok(String(op0["bans"]).find("排除：") >= 0, "显示排除目标（%s）" % op0["bans"])
 	ok(String(op0["bans"]).find("无") < 0, "出战时排除目标非空")
-	var toggle: Button = middle.get_node("OperatorToggle")
+	var toggle: Button = left.get_node("OperatorToggle")
 	toggle.pressed.emit()
 	await get_tree().process_frame
 	var op1: Dictionary = ctrl.snapshot()["operator"]
@@ -543,7 +605,7 @@ func _test_pool_overlay() -> void:
 	var totals: Label = wish.get_node("PoolOverlayLayer/PoolOverlay/Frame/Body/Totals")
 	var close_btn: Button = wish.get_node("PoolOverlayLayer/PoolOverlay/Frame/Body/CloseButton")
 
-	var data_btn: Button = left.get_node("ModuleSection/ModuleButtons/PoolDataButton")
+	var data_btn: Button = wish.get_node("Columns/Middle/ModuleSection/ModuleButtons/PoolDataButton")
 	ok(data_btn != null, "「池子数据」按钮在**模块镶嵌的右边**")
 	eq(overlay.visible, false, "默认不显示浮层")
 
@@ -709,6 +771,7 @@ func _test_market_boxes() -> void:
 	MarketService.reset()
 	var st := GameState.new_game()
 	GameSession.state = st
+	# ★ v0.74：页面与 tab 条之间必须有间距（选中的 tab 背景比其它高约 10px，贴住会压掉页面第一行）
 	var scr = await _make_screen()
 	scr.bind_state(st)
 	await get_tree().process_frame
@@ -837,7 +900,7 @@ func _test_pool_hidden_info() -> void:
 	# ★ 页面结构：池子编辑控件不存在（只有「池子数据」按钮）
 	var wish: Node = scr.page_node("WishPage")
 	ok(wish.get_node_or_null("Columns/Left/PoolSection") == null, "页面**没有**池子编辑段")
-	ok(wish.get_node_or_null("Columns/Left/ModuleSection/ModuleButtons/PoolDataButton") != null,
+	ok(wish.get_node_or_null("Columns/Middle/ModuleSection/ModuleButtons/PoolDataButton") != null,
 		"「池子数据」按钮在模块镶嵌右边")
 	scr.queue_free()
 	await get_tree().process_frame
@@ -1043,5 +1106,89 @@ func _test_top_bar_updates_after_buy() -> void:
 	ok(before != after, "**买入后顶栏立刻变化**（%s → %s）" % [before, after])
 	eq(int(after.replace("金币 ", "")), int(before.replace("金币 ", "")) - price,
 		"顶栏金币正好减去这一件的买价 %d" % price)
+	scr.queue_free()
+	await get_tree().process_frame
+
+## ★ v0.74 回归：**页面顶部必须留 `PAGE_TOP_GAP`**，否则选中的 tab 背景压住页面第一行。
+func _test_page_top_gap() -> void:
+	print("— ★ v0.74 页面顶部间距：页面起点 = tab 高 + PAGE_TOP_GAP")
+	var st := GameState.new_game()
+	var scr = await _make_screen()
+	scr.bind_state(st)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var tabs: TabContainer = scr.get_node("Tabs")
+	var bar: TabBar = tabs.get_tab_bar()
+	var page: Control = tabs.get_child(0)
+	var bar_bottom := bar.global_position.y + bar.size.y
+	ok(float(GameTabs.PAGE_TOP_GAP) > 0.0, "间距规格 > 0（%0.1f）" % GameTabs.PAGE_TOP_GAP)
+	near(page.global_position.y, bar_bottom + GameTabs.PAGE_TOP_GAP, 0.5,
+		"页面起点 = tab 条底 %.1f + 间距 %.1f（实际 %.1f）" % [
+			bar_bottom, GameTabs.PAGE_TOP_GAP, page.global_position.y])
+	# 页面里第一个控件也不能压到 tab 条上
+	var first: Control = page.get_node("Header")
+	ok(first.global_position.y >= bar_bottom + GameTabs.PAGE_TOP_GAP - 0.5,
+		"首个控件在 tab 条之下（%.1f ≥ %.1f）" % [first.global_position.y, bar_bottom + GameTabs.PAGE_TOP_GAP])
+	scr.queue_free()
+	await get_tree().process_frame
+
+## ★ v0.75 回归：**切 tab 之后页面偏移不能被 TabContainer 覆盖**（否则内容又盖住 tab）。
+func _test_page_offset_survives_tab_switch() -> void:
+	print("— ★ v0.75 切 tab 后偏移仍成立")
+	var st := GameState.new_game()
+	var scr = await _make_screen()
+	scr.bind_state(st)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var tabs: TabContainer = scr.get_node("Tabs")
+	var bar: TabBar = tabs.get_tab_bar()
+	var want := bar.global_position.y + bar.size.y + GameTabs.PAGE_TOP_GAP
+	# 依次切到每个 tab，每次切换后都检查"当前页"的偏移
+	var ok_all := true
+	var worst := 0.0
+	for i in tabs.get_tab_count():
+		tabs.current_tab = i
+		await get_tree().process_frame
+		await get_tree().process_frame
+		var page: Control = tabs.get_child(i)
+		var dy := absf(page.global_position.y - want)
+		if dy > 0.5:
+			ok_all = false
+			worst = maxf(worst, dy)
+	ok(ok_all, "**每个 tab 切过去后页面偏移都 == tab 底 + 间距**（最大偏差 %.2f）" % worst)
+	scr.queue_free()
+	await get_tree().process_frame
+
+## ★ v0.80 回归：**切换盲盒不会改变版面**（位子数 3 → 5 也不许把三栏挤变形）。
+func _test_layout_stable_across_box_switch() -> void:
+	print("— ★ v0.80 切盒不改版面：三栏宽度 / 各行位置不变")
+	_reset_world()
+	var st := GameState.new_game()
+	GameSession.state = st
+	# 两个位子数不同的盒子：品质 2 ⇒ 3 位；品质 4 ⇒ 5 位
+	GachaService.grant_random_box(st, 2, 8, &"a", 1)
+	GachaService.grant_random_box(st, 4, 12, &"b", 2)
+	var scr = await _make_screen()
+	scr.bind_state(st)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var page: Node = scr.page_node("WishPage")
+	var cols: Node = page.get_node("Columns")
+	var left: Control = cols.get_node("Left")
+	var mid: Control = cols.get_node("Middle")
+	var right: Control = cols.get_node("Right")
+	var row: Control = page.get_node("Columns/Middle/ModuleSection/SlotRow")
+	var open_row: Control = page.get_node("Columns/Middle/OpenButtons")
+	var before := [left.size, mid.size, right.size, row.position, row.size, open_row.position]
+	eq(row.get_child_count(), 3, "第一个盒子 = 3 位")
+	# 切到 5 位的盒子
+	page.set_selected_box(1)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	eq(row.get_child_count(), 5, "第二个盒子 = 5 位")
+	var after := [left.size, mid.size, right.size, row.position, row.size, open_row.position]
+	eq(after, before, "**三栏尺寸与各行位置完全不变**（只有位子按钮数量变）")
+	# 5 个按钮都排得下（不溢出中栏）
+	ok(row.size.x <= mid.size.x + 0.5, "位子行没有溢出中栏（%.1f ≤ %.1f）" % [row.size.x, mid.size.x])
 	scr.queue_free()
 	await get_tree().process_frame

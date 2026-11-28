@@ -10,11 +10,14 @@ extends VBoxContainer
 signal buy_item_requested(item_id: StringName)
 ## ★ v0.60：买盲盒（`box_id` 来自卡片按钮）
 signal buy_box_requested(box_id: String)
+## ★ v0.77：买模块（`module_id` 来自卡片按钮）
+signal buy_module_requested(module_id: StringName)
 
 @onready var _gold_lbl: Label = $Gold
 @onready var _refresh_lbl: Label = $Refresh
 @onready var _grid: GridContainer = $Scroll/Grid
 @onready var _box_grid: GridContainer = $BoxScroll/BoxGrid
+@onready var _mod_grid: GridContainer = $ModScroll/ModGrid
 @onready var _result_lbl: Label = $Result
 
 
@@ -106,6 +109,7 @@ func render(s: Dictionary) -> void:
 	# ★ v0.58：上架清单 = **两列网格，每件自带购买按钮**
 	_render_listing_cards(s.get("listing_cards", []))
 	_render_box_cards(s.get("box_cards", []))
+	_render_module_cards(s.get("module_cards", []))
 
 	_result_lbl.text = String(s.get("result", ""))
 
@@ -118,3 +122,37 @@ func _refill(picker: OptionButton, opts: Array) -> void:
 		picker.add_item(String(o))
 	if prev >= 0 and prev < opts.size():
 		picker.selected = prev
+
+## ★ v0.77：**两列网格**铺"模块"，每张卡一个购买按钮（买了才有一件实体）。
+func _render_module_cards(cards) -> void:
+	for ch in _mod_grid.get_children():
+		_mod_grid.remove_child(ch)
+		ch.queue_free()
+	var arr: Array = cards if cards is Array else []
+	if arr.is_empty():
+		var empty := Label.new()
+		empty.text = "本次刷新没有可买模块"
+		_mod_grid.add_child(empty)
+		return
+	for c in arr:
+		var card := PanelContainer.new()
+		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 10)
+		card.add_child(row)
+		var body := VBoxContainer.new()
+		body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		body.add_theme_constant_override("separation", 2)
+		row.add_child(body)
+		var title := Label.new()
+		title.text = String(c.get("name", ""))
+		body.add_child(title)
+		var info := Label.new()
+		info.text = "品质 %d · 买价 %d 金币" % [int(c.get("quality", 1)), int(c.get("price", 0))]
+		body.add_child(info)
+		var buy := Button.new()
+		buy.text = "购买模块"
+		buy.pressed.connect(func() -> void:
+			buy_module_requested.emit(StringName(c.get("module_id", ""))))
+		row.add_child(buy)
+		_mod_grid.add_child(card)
